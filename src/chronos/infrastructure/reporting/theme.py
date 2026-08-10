@@ -1,0 +1,41 @@
+"""Paleta del panel de backtest.
+
+Estos tokens son la única fuente de color: `dashboard.py` los inyecta como
+variables CSS y como objeto JS, de modo que el HTML y los gráficos de Plotly
+comparten paleta sin duplicar hexadecimales.
+
+Paleta validada para daltonismo (ΔE CVD 24.7 en el par categórico usado) sobre
+la superficie clara `#fcfcfb`. El panel se genera en modo claro: es un fichero
+local de análisis, no una página que herede el tema del visor.
+"""
+
+from __future__ import annotations
+
+# --- Tokens de color --------------------------------------------------------
+
+SURFACE = "#fcfcfb"
+PAGE = "#f9f9f7"
+INK_PRIMARY = "#0b0b0b"
+INK_SECONDARY = "#52514e"
+INK_MUTED = "#898781"
+GRIDLINE = "#e1e0d9"
+BASELINE = "#c3c2b7"
+
+# Categóricos, en orden fijo. Nunca se ciclan.
+SERIES = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100")
+
+# Polaridad (ganancia / pérdida): pareja divergente azul ↔ rojo con gris neutro.
+POSITIVE = "#2a78d6"
+NEGATIVE = "#d03b3b"
+NEUTRAL = "#f0efec"
+
+# Escala divergente para el mapa de calor mensual.
+DIVERGING_SCALE = [
+    [0.0, "#8f2323"],
+    [0.25, "#d03b3b"],
+    [0.5, NEUTRAL],
+    [0.75, "#3987e5"],
+    [1.0, "#184f95"],
+]
+
+FONT_FAMILY = 'system-ui, -apple-system, "Segoe UI", sans-serif'
