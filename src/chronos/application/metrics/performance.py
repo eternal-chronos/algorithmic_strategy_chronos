@@ -7,6 +7,7 @@ abierta y diluirían artificialmente la volatilidad (y con ella el Sharpe).
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from typing import Any, cast
 
@@ -204,7 +205,7 @@ def _exposure(curve: pd.DataFrame) -> float:
     return float((curve["exposure"] > 0).mean())
 
 
-def _trade_stats(trades: list[Trade]) -> dict[str, Any]:
+def _trade_stats(trades: Sequence[Trade]) -> dict[str, Any]:
     if not trades:
         return {
             "total_trades": 0, "winners": 0, "losers": 0, "win_rate": 0.0,

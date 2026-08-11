@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -23,7 +24,7 @@ class BacktestResult:
     symbol: str
     timeframe: Timeframe
     initial_balance: float
-    trades: list[Trade]
+    trades: Sequence[Trade]
     equity_curve: pd.DataFrame  # index=timestamp; columnas: balance, equity, exposure
     strategy: dict[str, Any]
     started_at: datetime | None = None

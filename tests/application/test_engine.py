@@ -5,17 +5,18 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import replace
 
+import pandas as pd
 import pytest
 
 from chronos.application.backtest.config import BacktestConfig, RiskConfig
 from chronos.application.backtest.engine import BacktestEngine
-from chronos.domain.enums import ExitReason, Side, Timeframe
+from chronos.domain.context import BarContext
+from chronos.domain.enums import ExitReason, Side
 from chronos.domain.errors import StrategyError
 from chronos.domain.instrument import InstrumentSpec
-from chronos.domain.ports.market_view import MarketView
 from chronos.domain.signal import EntrySignal, ExitSignal, StrategyAction
 from chronos.domain.strategy import Strategy
-from chronos.infrastructure.data.frames import to_market_data
+from chronos.infrastructure.broker.simulated import build_simulated_broker
 from tests.conftest import make_frame
 
 
@@ -29,7 +30,7 @@ class OpenOnBar(Strategy):
         self.at_bar = at_bar
         self.closed: list[object] = []
 
-    def on_bar(self, ctx: MarketView) -> Sequence[StrategyAction]:
+    def on_bar(self, ctx: BarContext) -> Sequence[StrategyAction]:
         if ctx.index != self.at_bar:
             return ()
         return (
@@ -47,13 +48,18 @@ class PeekIntoTheFuture(Strategy):
 
     name = "test_peek"
 
-    def on_bar(self, ctx: MarketView) -> Sequence[StrategyAction]:
+    def on_bar(self, ctx: BarContext) -> Sequence[StrategyAction]:
         ctx.value("close", offset=-1)
         return ()
 
 
-def _data(rows: list[tuple[float, float, float, float]]) -> object:
-    return to_market_data(make_frame(rows), "XAUUSD", Timeframe.M15)
+def _data(rows: list[tuple[float, float, float, float]]) -> pd.DataFrame:
+    return make_frame(rows)
+
+
+def _engine(spec: InstrumentSpec, config: BacktestConfig) -> BacktestEngine:
+    """El motor con su bróker simulado: el punto de composición de los tests."""
+    return BacktestEngine(spec, config, build_simulated_broker(spec, config))
 
 
 def _config(config: BacktestConfig, **risk: object) -> BacktestConfig:
@@ -72,7 +78,7 @@ def test_la_señal_se_ejecuta_en_la_apertura_de_la_barra_siguiente(
         (2003.0, 2004.0, 2002.0, 2003.0),  # barra 2: se ejecuta en su apertura
         (2003.0, 2004.0, 2002.0, 2003.0),
     ]
-    engine = BacktestEngine(no_cost_spec, _config(config, max_concurrent_positions=1))
+    engine = _engine(no_cost_spec, _config(config, max_concurrent_positions=1))
     result = engine.run(_data(rows), OpenOnBar(at_bar=1))
 
     assert len(result.trades) == 1
@@ -90,16 +96,16 @@ def test_el_calentamiento_bloquea_las_primeras_barras(
             return 3
 
     rows = [(2000.0, 2001.0, 1999.0, 2000.0)] * 6
-    engine = BacktestEngine(no_cost_spec, config)
+    engine = _engine(no_cost_spec, config)
     result = engine.run(_data(rows), LateStarter(at_bar=1))
-    assert result.trades == []  # la barra 1 cae dentro del calentamiento
+    assert not result.trades  # la barra 1 cae dentro del calentamiento
 
 
 def test_leer_una_barra_futura_es_un_error(
     no_cost_spec: InstrumentSpec, config: BacktestConfig
 ) -> None:
     rows = [(2000.0, 2001.0, 1999.0, 2000.0)] * 5
-    engine = BacktestEngine(no_cost_spec, config)
+    engine = _engine(no_cost_spec, config)
     with pytest.raises(StrategyError):
         engine.run(_data(rows), PeekIntoTheFuture())
 
@@ -108,7 +114,7 @@ def test_lo_que_queda_abierto_se_liquida_al_final(
     no_cost_spec: InstrumentSpec, config: BacktestConfig
 ) -> None:
     rows = [(2000.0, 2000.5, 1999.5, 2000.0)] * 5
-    engine = BacktestEngine(no_cost_spec, config)
+    engine = _engine(no_cost_spec, config)
     result = engine.run(_data(rows), OpenOnBar(at_bar=1))
     assert len(result.trades) == 1
     assert result.trades[0].reason is ExitReason.END_OF_DATA
@@ -127,7 +133,7 @@ def test_el_balance_final_es_la_suma_de_los_resultados_netos(
         (2000.0, 2025.0, 1999.0, 2020.0),  # toca el objetivo (+20)
         (2020.0, 2021.0, 2019.0, 2020.0),
     ]
-    engine = BacktestEngine(spec, config)
+    engine = _engine(spec, config)
     result = engine.run(_data(rows), OpenOnBar(at_bar=1))
 
     esperado = result.initial_balance + sum(t.net_pnl for t in result.trades)
@@ -139,7 +145,7 @@ def test_el_equity_no_cuenta_dos_veces_la_comision(
     spec: InstrumentSpec, config: BacktestConfig
 ) -> None:
     rows = [(2000.0, 2000.5, 1999.5, 2000.0)] * 6
-    engine = BacktestEngine(spec, config)
+    engine = _engine(spec, config)
     result = engine.run(_data(rows), OpenOnBar(at_bar=1))
 
     # Con la posición abierta (barra 3), el equity es balance + P&L bruto flotante.
@@ -159,11 +165,11 @@ def test_no_se_supera_el_maximo_de_posiciones_simultaneas(
     class AlwaysOpen(Strategy):
         name = "always"
 
-        def on_bar(self, ctx: MarketView) -> Sequence[StrategyAction]:
+        def on_bar(self, ctx: BarContext) -> Sequence[StrategyAction]:
             return (EntrySignal(side=Side.BUY, volume=0.1, stop_distance=50.0),)
 
     rows = [(2000.0, 2000.5, 1999.5, 2000.0)] * 10
-    engine = BacktestEngine(no_cost_spec, _config(config, max_concurrent_positions=2))
+    engine = _engine(no_cost_spec, _config(config, max_concurrent_positions=2))
     result = engine.run(_data(rows), AlwaysOpen())
 
     assert int(result.equity_curve["exposure"].max()) == 2
@@ -184,10 +190,10 @@ def test_el_drawdown_maximo_detiene_la_corrida(
     risk = RiskConfig(
         sizing="fixed_lot", fixed_lot=1.0, max_daily_loss=None, max_drawdown_stop=0.10
     )
-    engine = BacktestEngine(no_cost_spec, replace(config, risk=risk))
+    engine = _engine(no_cost_spec, replace(config, risk=risk))
 
     class NoStop(OpenOnBar):
-        def on_bar(self, ctx: MarketView) -> Sequence[StrategyAction]:
+        def on_bar(self, ctx: BarContext) -> Sequence[StrategyAction]:
             if ctx.index != self.at_bar:
                 return ()
             return (EntrySignal(side=Side.BUY, volume=1.0),)  # sin stop loss
@@ -204,7 +210,7 @@ def test_una_señal_de_cierre_cierra_la_posicion(
     class OpenThenClose(Strategy):
         name = "open_close"
 
-        def on_bar(self, ctx: MarketView) -> Sequence[StrategyAction]:
+        def on_bar(self, ctx: BarContext) -> Sequence[StrategyAction]:
             if ctx.index == 1:
                 return (EntrySignal(side=Side.BUY, volume=1.0, stop_distance=50.0),)
             if ctx.index == 3:
@@ -212,7 +218,7 @@ def test_una_señal_de_cierre_cierra_la_posicion(
             return ()
 
     rows = [(2000.0, 2001.0, 1999.0, 2000.0)] * 6
-    engine = BacktestEngine(no_cost_spec, config)
+    engine = _engine(no_cost_spec, config)
     result = engine.run(_data(rows), OpenThenClose())
 
     assert len(result.trades) == 1

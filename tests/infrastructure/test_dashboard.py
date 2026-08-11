@@ -23,17 +23,18 @@ from chronos.application.backtest.config import (
     ReportingConfig,
     RiskConfig,
 )
-from chronos.application.use_cases.run_backtest import BacktestRun, RunBacktest
+from chronos.application.run_backtest import BacktestRun, run_backtest
 from chronos.domain.enums import Timeframe
 from chronos.domain.instrument import InstrumentSpec
-from chronos.infrastructure.data.repository import SyntheticBarRepository
+from chronos.domain.strategies.registry import create_strategy
+from chronos.infrastructure.broker.simulated import build_simulated_broker
+from chronos.infrastructure.data.market_data import SyntheticMarketData
 from chronos.infrastructure.reporting.dashboard import (
     ASSETS,
     _representative_indices,
     build_payload,
     render_dashboard,
 )
-from chronos.strategies.registry import create_strategy
 
 pytestmark = pytest.mark.usefixtures("spec")
 
@@ -51,9 +52,15 @@ def run(spec: InstrumentSpec, tmp_path: Path) -> BacktestRun:
         strategy_name="ema_cross",
         strategy_params={"fast_period": 10, "slow_period": 30, "atr_period": 14},
     )
-    repository = SyntheticBarRepository(symbol=spec.symbol, periods=60_000, seed=17)
+    market_data = SyntheticMarketData(symbol=spec.symbol, periods=60_000, seed=17)
     strategy = create_strategy("ema_cross", dict(config.strategy_params))
-    return RunBacktest(spec, config).execute(repository, strategy)
+    return run_backtest(
+        spec=spec,
+        config=config,
+        market_data=market_data,
+        broker=build_simulated_broker(spec, config),
+        strategy=strategy,
+    )
 
 
 # --- Payload ----------------------------------------------------------------

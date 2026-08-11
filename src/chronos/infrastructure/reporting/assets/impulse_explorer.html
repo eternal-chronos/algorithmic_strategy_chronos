@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<style>
+:root {
+  color-scheme: light;
+  --surface: #fcfcfb;
+  --page: #f9f9f7;
+  --ink: #0b0b0b;
+  --secondary: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --font: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 24px 20px 56px;
+  background: var(--page); color: var(--ink); font-family: var(--font);
+}
+.wrap { max-width: 1400px; margin: 0 auto; }
+h1 { font-size: 20px; margin: 0 0 4px; }
+.subtitle { color: var(--muted); font-size: 13px; }
+.controls {
+  display: flex; flex-wrap: wrap; gap: 22px; align-items: flex-end;
+  background: var(--surface); border: 1px solid var(--grid); border-radius: 10px;
+  padding: 12px 16px; margin: 18px 0;
+}
+.group { display: flex; flex-direction: column; gap: 6px; }
+.group > span {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--secondary);
+}
+.buttons { display: flex; gap: 0; }
+.buttons button {
+  font: inherit; font-size: 13px; padding: 6px 14px; cursor: pointer;
+  background: var(--page); color: var(--secondary);
+  border: 1px solid var(--grid); border-right-width: 0;
+}
+.buttons button:first-child { border-radius: 6px 0 0 6px; }
+.buttons button:last-child { border-radius: 0 6px 6px 0; border-right-width: 1px; }
+.buttons button[aria-pressed="true"] { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+label.toggle { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--secondary); }
+input[type="date"], input[type="number"] {
+  font: inherit; font-size: 13px; padding: 5px 8px; color: var(--ink);
+  background: var(--page); border: 1px solid var(--grid); border-radius: 6px;
+}
+.buttons button[disabled] { opacity: .45; cursor: default; }
+#chart { background: var(--surface); border: 1px solid var(--grid); border-radius: 10px; }
+.legend {
+  display: flex; flex-wrap: wrap; gap: 18px; margin-top: 14px;
+  font-size: 12px; color: var(--secondary);
+}
+.legend i { display: inline-block; width: 22px; height: 3px; margin-right: 6px; vertical-align: middle; }
+.legend .box { height: 12px; opacity: .18; }
+footer { margin-top: 26px; font-size: 12px; color: var(--muted); }
+footer code { background: var(--surface); border: 1px solid var(--grid); border-radius: 4px; padding: 1px 5px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>__HEADER__</h1>
+    <p class="subtitle">__SUBTITLE__</p>
+  </header>
+
+  <div class="controls">
+    <div class="group">
+      <span>Temporalidad</span>
+      <div class="buttons" id="tf-buttons"></div>
+    </div>
+    <div class="group">
+      <span>Vista</span>
+      <div class="buttons" id="view-buttons">
+        <button type="button" data-view="candles">Velas</button>
+        <button type="button" data-view="line">Líneas (cierres)</button>
+      </div>
+    </div>
+    <div class="group">
+      <span>Periodo</span>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <div class="buttons" id="preset-buttons"></div>
+        <div class="buttons">
+          <button type="button" id="prev" title="Ventana anterior (flecha izquierda)">◀</button>
+          <button type="button" id="next" title="Ventana siguiente (flecha derecha)">▶</button>
+        </div>
+      </div>
+    </div>
+    <div class="group">
+      <span>ID visibles</span>
+      <div class="buttons" id="visible-buttons"></div>
+    </div>
+    <div class="group" id="mode-group">
+      <span title="R-36: qué papel juega la vela que rompe en la pierna que abre">
+        Arranque de pierna (R-36)
+      </span>
+      <div class="buttons" id="mode-buttons"></div>
+    </div>
+    <div class="group">
+      <span>Fechas (UTC)</span>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <input type="date" id="from" aria-label="Desde">
+        <span style="color:var(--muted)">→</span>
+        <input type="date" id="to" aria-label="Hasta">
+      </div>
+    </div>
+    <div class="group">
+      <span>Capas</span>
+      <div style="display:flex; gap:16px; flex-wrap:wrap;">
+        <span id="impulse-layers" style="display:flex; gap:16px; flex-wrap:wrap;"></span>
+        <label class="toggle"><input type="checkbox" id="layer-limbo" checked> Limbo</label>
+        <label class="toggle"><input type="checkbox" id="layer-marks" checked> Constituciones y roturas</label>
+        <label class="toggle"><input type="checkbox" id="layer-contacts"> Contactos</label>
+        <label class="toggle"><input type="checkbox" id="layer-mid"> Nivel 50 %</label>
+        <label class="toggle"><input type="checkbox" id="layer-wrong" checked>
+          Extremo de color contrario (R-36)</label>
+      </div>
+    </div>
+    <div class="group">
+      <span>Auditoría ciega</span>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <input type="number" id="blind-seed" placeholder="semilla" aria-label="Semilla"
+               style="width:110px">
+        <div class="buttons">
+          <button type="button" id="blind-start" title="Sortea una ventana sin capas">Empezar</button>
+          <button type="button" id="blind-reveal" title="Muestra lo que marcó el motor">Revelar</button>
+          <button type="button" id="blind-exit" title="Vuelve al rango de partida">Salir</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="chart"></div>
+
+  <div class="legend">
+    <span><i style="background:#1baf7a"></i>ID alcista (ancla y extremo)</span>
+    <span><i style="background:#d03b3b"></i>ID bajista (ancla y extremo)</span>
+    <span>línea continua = impulso de esta temporalidad · punteada = temporalidad superior</span>
+    <span>tramo atenuado = el nivel ya estaba en el precio pero el ID aún no existía (limbo);
+      arranca en la vela que lo define y termina en la constitución</span>
+    <span><i class="box" style="background:#898781"></i>Barras en LIMBO (sin sesgo)</span>
+    <span>◆ vela contraria que constituye</span>
+    <span>▲ ROTURA_A_FAVOR</span>
+    <span>✕ ROTURA_EN_CONTRA</span>
+    <span>○ TOQUE_MECHA</span>
+    <span>□ ROTURA_FALLIDA</span>
+    <span>línea punteada fina = nivel del 50 % del ID</span>
+    <span>✕ grueso = extremo fijado por una vela del color contrario al impulso (R-36),
+      sobre la vela que lo fijó</span>
+  </div>
+
+  <footer>
+    <p id="notes"></p>
+    <p>
+      Precios a 4 decimales. Eje horizontal en UTC; el detalle de cada punto muestra
+      además la hora de la sesión del propietario. Generado el __GENERATED__.
+    </p>
+  </footer>
+</div>
+
+<script id="explorer-data" type="application/json">__DATA__</script>
+<script>__PLOTLY__</script>
+<script>__EXPLORER_JS__</script>
+</body>
+</html>

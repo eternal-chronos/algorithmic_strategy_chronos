@@ -9,8 +9,10 @@ import yaml
 from pydantic import ValidationError
 
 from chronos.application.backtest.config import BacktestConfig
+from chronos.application.structure.config import ImpulseConfig
 from chronos.domain.instrument import InstrumentSpec
 from chronos.infrastructure.config.schema import BacktestSchema, InstrumentSchema
+from chronos.infrastructure.config.structure_schema import ImpulseSchema
 
 CONFIG_DIR = Path("config")
 INSTRUMENTS_DIR = CONFIG_DIR / "instruments"
@@ -49,6 +51,17 @@ def load_backtest_config(path: str | Path) -> BacktestConfig:
         return BacktestSchema(**_read_yaml(file_path)).to_domain()
     except ValidationError as error:
         raise ConfigError(f"Configuración de backtest inválida ({file_path}):\n{error}") from error
+
+
+def load_impulse_config(path: str | Path) -> ImpulseConfig:
+    """Carga y valida la configuración del módulo 1 (impulso dominante)."""
+    file_path = Path(path)
+    try:
+        return ImpulseSchema(**_read_yaml(file_path)).to_domain()
+    except ValidationError as error:
+        raise ConfigError(
+            f"Configuración de impulso dominante inválida ({file_path}):\n{error}"
+        ) from error
 
 
 def load_run(

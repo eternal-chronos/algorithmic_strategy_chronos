@@ -7,12 +7,10 @@ arrays booleanos, sin trabajo con fechas por barra.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, cast
 
 import numpy as np
 import pandas as pd
 
-from chronos.domain.bar import MarketData
 from chronos.domain.instrument import InstrumentSpec
 
 
@@ -30,9 +28,8 @@ class BarFlags:
         return len(self.is_rollover)
 
 
-def build_bar_flags(data: MarketData, spec: InstrumentSpec) -> BarFlags:
+def build_bar_flags(index: pd.DatetimeIndex, spec: InstrumentSpec) -> BarFlags:
     """Deriva el calendario a partir de los timestamps y la ficha del símbolo."""
-    index = pd.DatetimeIndex(cast(Any, data.timestamps))
     if index.tz is None:
         index = index.tz_localize("UTC")
     server_time = index.tz_convert(spec.session.timezone)

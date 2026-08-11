@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict
-from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 
-from chronos.application.use_cases.run_backtest import BacktestRun
+from chronos.application.ports import Clock
+from chronos.application.run_backtest import BacktestRun
+from chronos.infrastructure.clock import SystemClock
 from chronos.infrastructure.reporting.dashboard import render_dashboard
 
 
@@ -20,8 +21,9 @@ class ReportWriter:
     CSV/JSON permiten reanalizar la corrida desde pandas sin volver a simular.
     """
 
-    def __init__(self, output_dir: str | Path = "reports") -> None:
+    def __init__(self, output_dir: str | Path = "reports", clock: Clock | None = None) -> None:
         self._root = Path(output_dir)
+        self._clock: Clock = clock or SystemClock()
 
     def write(
         self,
@@ -30,7 +32,8 @@ class ReportWriter:
         prices: pd.DataFrame | None = None,
         run_id: str | None = None,
     ) -> Path:
-        stamp = run_id or datetime.now().strftime("%Y%m%d_%H%M%S")
+        generated_at = self._clock.now()
+        stamp = run_id or generated_at.strftime("%Y%m%d_%H%M%S")
         strategy_name = str(run.result.strategy.get("name", "strategy"))
         folder = self._root / f"{stamp}_{strategy_name}"
         folder.mkdir(parents=True, exist_ok=True)
@@ -65,7 +68,7 @@ class ReportWriter:
         )
 
         if reporting.html_report:
-            html = render_dashboard(run, prices, reporting.max_price_bars)
+            html = render_dashboard(run, prices, reporting.max_price_bars, generated_at)
             (folder / "report.html").write_text(html, encoding="utf-8")
 
         return folder

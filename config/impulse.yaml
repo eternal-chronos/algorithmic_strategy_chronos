@@ -1,0 +1,177 @@
+# Módulo 1 — IMPULSO DOMINANTE (fase 1 de la estrategia CDT sobre XAUUSD).
+#
+# Esta fase detecta el impulso dominante y NADA MÁS: sin señales, sin entradas,
+# sin stops, sin targets y sin medición de rentabilidad.
+#
+# Los valores marcados como PENDIENTE los fija el propietario mirando el gráfico.
+# El motor no ha elegido ninguno por criterio propio.
+#
+# CONFIGURACIÓN DEFINITIVA DE LA FASE 1 (decidida por el propietario):
+#   ANCHOR_MODE     = A1_last_counter_body
+#   LEG_START_MODE  = L1_actual
+#   D_SESSION_START = NY_18:00   (DST real de America/New_York)
+#   H4_ORIGIN       = NY_18:00   (misma sesión; rejilla 18/22/02/06/10/14 NY)
+#   STRUCTURE_SIDE  = bid
+# Los demás modos siguen disponibles por configuración, sólo para regresión.
+
+# Interruptor del módulo. Con `false` el sistema no emite absolutamente nada:
+# ni impulsos, ni eventos, ni ficheros. Hay un test que lo comprueba.
+enabled: true
+
+symbol: XAUUSD
+
+# DECIDIDO (§1.3). Lado del precio sobre el que se calcula la estructura en todo
+# el proyecto: bid | ask | mid. El propietario ha cerrado `bid`; ask y mid quedan
+# disponibles por configuración cuando exista el histórico del otro lado.
+structure_side: bid
+
+data:
+  # Dukascopy XAUUSD, bid y ask separados, en GMT/UTC. Los produce
+  # `chronos data dukascopy`.
+  #
+  # Tiene que ser M1: la verificación de zona horaria (A.2) mide el rango medio
+  # POR MINUTO del día y con velas de una hora el pico sólo puede caer en horas
+  # en punto, así que no distingue las 13:30 de las 13:00. Los impulsos salen
+  # idénticos con M1 y con H1 —hay un test que lo fija—, de modo que cambiar de
+  # fichero no mueve ni un ID; lo que cambia es que la auditoría se puede hacer.
+  #
+  # Todavía no hay M1 del lado ask descargado. Mientras no lo haya,
+  # structure_side sólo puede ser `bid`: pedir `ask` o `mid` falla con un error
+  # explícito en vez de inventarse el otro lado.
+  bid_path: data/processed/XAUUSD_M1_bid.parquet
+  ask_path: ""
+  # Alternativa: un único fichero con columnas bid_open, bid_high, ..., ask_close.
+  path: ""
+  # Zona horaria en la que interpretar el fichero si sus marcas de tiempo son
+  # naíf. Dukascopy exporta en GMT.
+  timezone: UTC
+  start: null # ISO 8601 o null para todo el histórico
+  end: null
+
+# DECIDIDO (§1.2). El resultado del módulo depende íntegramente de estos dos
+# valores: cambiarlos cambia las velas y, por tanto, los impulsos. El propietario
+# ha cerrado `NY_18:00`: es la única rejilla que reproduce sus velas. Los cuatro
+# offsets fijos en UTC dan doce horas de apertura distintas a lo largo del año en
+# vez de seis, porque no siguen el horario de verano de Nueva York.
+#
+# En el diario los cortes 22:00, NY_17:00 y NY_18:00 producen velas idénticas —el
+# M1 ya trae la parada diaria del oro—, así que se adopta NY_18:00 por coherencia
+# con H4 y con la etiqueta que ve el propietario.
+#
+# Sólo H4 y el diario llevan desplazamiento: la rejilla de M15 y H1 —cuartos de
+# hora y horas en punto— es la misma en todas las plataformas.
+aggregation:
+  # Desplazamiento del inicio de las velas H4 respecto a 00:00 UTC. Se IGNORA
+  # con el ancla de sesión de abajo: H4 arranca con la sesión y avanza de cuatro
+  # en cuatro dentro de ella (18/22/02/06/10/14 hora de Nueva York). Se conserva
+  # para las corridas de regresión sobre la rejilla UTC.
+  h4_offset_hours: 0
+  # Inicio de la vela diaria. Dos formas:
+  #   "HH:MM"       -> hora fija en UTC ("00:00", "22:00").
+  #   "PLAZA_HH:MM" -> hora local de una plaza, con horario de verano real
+  #                    ("NY_17:00", "NY_18:00" -> America/New_York). El corte se
+  #                    mueve solo dos veces al año: las 18:00 de Nueva York son
+  #                    las 23:00 UTC en invierno y las 22:00 en verano.
+  # `chronos structure auditoria-sesion` compara todas las formas de una corrida.
+  d_session_start: "NY_18:00"
+
+# Qué impulso se dibuja en cada gráfico. La PRIMERA de cada lista es la
+# principal: de ella salen el sombreado del limbo y los marcadores de
+# constitución y rotura. Las siguientes son contexto de temporalidad superior y
+# se dibujan en trazo punteado.
+#
+# Este reparto es cómo lee el mercado el propietario, no una decisión del motor.
+# Una temporalidad que sólo aparece como clave y en ninguna lista —M15— no lleva
+# detector: es temporalidad de ejecución y no aporta estructura propia.
+charts:
+  D: [D]
+  H4: [H4, D]
+  H1: [H1, H4]
+  M15: [H1]
+
+rules:
+  # DECIDIDO (§2.5, R-02). Dónde se ancla el nuevo impulso:
+  #   A1_last_counter_body -> extremo del cuerpo de la última vela contraria
+  #                           previa al arranque de la pierna
+  #   A2_first_leg_bar     -> extremo del cuerpo de la primera vela de la pierna
+  # El propietario ha elegido A1 mirando sus capturas: cuando un impulso se
+  # rompe —a favor o en contra— el nuevo se ancla en la última vela de color
+  # contrario anterior al arranque, nunca en la primera vela de la pierna.
+  # A2 sigue disponible por configuración para regresión, pero ya no es el modo
+  # del proyecto. Los dos se calculan siempre; el informe imprime la diferencia.
+  anchor_mode: A1_last_counter_body
+
+  # PENDIENTE. Cómo arranca la máquina al principio del histórico, donde no hay
+  # pasado a la izquierda del que deducir qué pierna está en curso:
+  #   S1_first_non_doji    -> la primera vela no-doji abre la pierna
+  #   S2_first_counter_bar -> se descarta el tramo inicial (su arranque no está
+  #                           en los datos) y la abre la primera vela contraria
+  # Afecta sólo a los primeros impulsos del histórico.
+  seed_mode: S2_first_counter_bar
+
+  # PENDIENTE. La especificación se contradice: §2.2 dice que el doji "no rompe
+  # nada", §2.6 evalúa la rotura por cierre sin mirar el cuerpo.
+  #   D1_doji_no_rompe          -> lectura de §2.2
+  #   D2_doji_rompe_por_cierre  -> lectura de §2.6
+  # El informe cuenta cuántas barras distinguen una lectura de la otra.
+  doji_break_mode: D1_doji_no_rompe
+
+  # DECIDIDO (R-36). Qué papel juega la vela que ROMPE en la pierna que abre.
+  # El propietario cierra `L1_actual` mirando los datos: `L2` multiplicaba por
+  # diecisiete los extremos de color contrario y `L3` producía impulsos de rango
+  # negativo. Los tres siguen disponibles por configuración para regresión.
+  # Es la única vela de la pierna que la máquina adopta sin mirar su color:
+  # cualquier otra vela contraria constituiría el ID en el acto y no llegaría a
+  # fijar nada. Por esa puerta entraban extremos sobre velas del color contrario
+  # a su impulso, que la regla del propietario prohíbe.
+  #   L1_actual                     -> la pierna arranca en la vela que rompe, sea
+  #                                    cual sea su color, y su cuerpo puede fijar
+  #                                    el extremo (comportamiento previo a R-36)
+  #   L2_siguiente_barra            -> la vela que rompe cuenta SÓLO como rotura;
+  #                                    la pierna arranca en la siguiente y ni el
+  #                                    ancla ni el extremo salen de la que rompió
+  #   L3_extremo_solo_color_valido  -> la pierna arranca en la vela que rompe (de
+  #                                    ahí sale el ancla) pero esa vela no fija el
+  #                                    extremo si su color es contrario
+  # El doji no es "color contrario" en ningún modo: §2.2 lo declara neutro en todo
+  # el módulo. En L2 la vela siguiente se adopta igual que la de la rotura en L1,
+  # así que si viene en contra el extremo vuelve a salir del color equivocado; el
+  # informe cuenta cuántas veces pasa. En L3, si la pierna llega a su primera vela
+  # contraria sin ningún extremo de color válido, no nace ID: el limbo sigue.
+  leg_start_mode: L1_actual
+
+  # Barras iniciales que no producen ID publicables.
+  warmup_bars: 50
+  # ATR usado para normalizar el rango de los impulsos. Sólo mira barras
+  # estrictamente anteriores; leerlo antes de tiempo lanza LookaheadError.
+  atr_period: 14
+
+# Verificación empírica de zona horaria (§1.1). OBLIGATORIA antes de calcular
+# nada: un offset horario equivocado no da error, da impulsos distintos a los
+# que el propietario ve en su pantalla.
+timezone_audit:
+  enabled: true
+  expected_peak_utc: "13:30"
+  tolerance_minutes: 30
+  weekend_gap_hours: 12.0
+  min_conformity: 0.9
+
+reporting:
+  output_dir: reports
+  # Zona horaria de la sesión del propietario; el explorador imprime las dos.
+  session_timezone: Europe/Athens
+  text_report: true
+  explorer_html: true
+  # Capturas PNG de F.4: los 20 ID más pequeños de Diario y H4, los 10 que mejor
+  # cumplen la firma de lateralización, los 10 latigazos más severos, el tramo
+  # con las tres temporalidades alineadas y diciembre de 2025. Kaleido abre un
+  # navegador headless por imagen y son ~72: unos tres minutos.
+  #
+  # DESACTIVADAS: el explorador HTML enseña lo mismo sobre las velas y encima
+  # navegable, así que las imágenes estáticas ya no aportan nada. Ponlo a `true`
+  # si alguna vez hace falta un PNG suelto para pegar en un documento.
+  captures: false
+  # Barras que se embeben en el explorador por cada temporalidad (0 = todas).
+  # Se conservan las más recientes. Ocho años de M15 son ~200.000 velas y el
+  # fichero se dispararía; el explorador avisa de lo que ha recortado.
+  max_explorer_bars: 60000

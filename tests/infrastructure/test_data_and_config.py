@@ -8,16 +8,15 @@ import pandas as pd
 import pytest
 
 from chronos.application.backtest.session import build_bar_flags
+from chronos.domain.bars import (
+    normalize_bars,
+    resample_bars,
+    validate_bars,
+)
 from chronos.domain.enums import Timeframe
 from chronos.domain.errors import InvalidPrice
 from chronos.domain.instrument import InstrumentSpec, SessionSpec, SwapModel
 from chronos.infrastructure.config.loader import ConfigError, load_backtest_config, load_instrument
-from chronos.infrastructure.data.frames import (
-    normalize_frame,
-    resample_frame,
-    to_market_data,
-    validate_frame,
-)
 from chronos.infrastructure.data.synthetic import generate_ohlcv
 from tests.conftest import make_frame
 
@@ -35,11 +34,11 @@ def test_normalizar_acepta_nombres_de_columna_del_broker() -> None:
             "Volume": [100, 120],
         }
     )
-    frame = normalize_frame(raw)
+    frame = normalize_bars(raw)
 
     assert list(frame.columns) == ["open", "high", "low", "close", "volume"]
     assert str(frame.index.tz) == "UTC"
-    validate_frame(frame)
+    validate_bars(frame)
 
 
 def test_las_marcas_naif_se_interpretan_en_la_zona_indicada() -> None:
@@ -49,7 +48,7 @@ def test_las_marcas_naif_se_interpretan_en_la_zona_indicada() -> None:
             "open": [2000.0], "high": [2001.0], "low": [1999.0], "close": [2000.5],
         }
     )
-    frame = normalize_frame(raw, timezone="Europe/Athens")
+    frame = normalize_bars(raw, timezone="Europe/Athens")
     assert frame.index[0] == pd.Timestamp("2024-03-04 08:00", tz="UTC")
 
 
@@ -61,20 +60,20 @@ def test_se_descartan_marcas_duplicadas() -> None:
             "low": [1999.0, 2009.0], "close": [2000.5, 2010.5],
         }
     )
-    frame = normalize_frame(raw)
+    frame = normalize_bars(raw)
     assert len(frame) == 1
     assert frame["open"].iloc[0] == pytest.approx(2010.0)  # se conserva la última
 
 
 def test_faltan_columnas_obligatorias() -> None:
     with pytest.raises(InvalidPrice):
-        normalize_frame(pd.DataFrame({"timestamp": ["2024-03-04"], "open": [2000.0]}))
+        normalize_bars(pd.DataFrame({"timestamp": ["2024-03-04"], "open": [2000.0]}))
 
 
 def test_barras_incoherentes_se_detectan() -> None:
     frame = make_frame([(2000.0, 1999.0, 2001.0, 2000.0)])  # high < low
     with pytest.raises(InvalidPrice):
-        validate_frame(frame)
+        validate_bars(frame)
 
 
 # --- Resampleo --------------------------------------------------------------
@@ -89,7 +88,7 @@ def test_el_resampleo_conserva_el_recorrido() -> None:
             (1996.0, 1997.0, 1990.0, 1992.0),
         ]
     )
-    hourly = resample_frame(frame, Timeframe.H1)
+    hourly = resample_bars(frame, Timeframe.H1)
 
     assert len(hourly) == 1
     assert hourly["open"].iloc[0] == pytest.approx(2000.0)
@@ -100,7 +99,7 @@ def test_el_resampleo_conserva_el_recorrido() -> None:
 
 def test_la_barra_se_etiqueta_con_el_inicio_del_intervalo() -> None:
     frame = make_frame([(2000.0, 2001.0, 1999.0, 2000.0)] * 4, start="2024-03-04 10:00")
-    hourly = resample_frame(frame, Timeframe.H1)
+    hourly = resample_bars(frame, Timeframe.H1)
     assert hourly.index[0] == pd.Timestamp("2024-03-04 10:00", tz="UTC")
 
 
@@ -114,7 +113,7 @@ def test_el_swap_se_devenga_una_vez_al_cruzar_el_rollover() -> None:
         session=SessionSpec(timezone="UTC", break_start=None, break_end=None),
     )
     frame = make_frame([(2000.0, 2001.0, 1999.0, 2000.0)] * 100, start="2024-03-04 22:00")
-    flags = build_bar_flags(to_market_data(frame, "XAUUSD", Timeframe.M15), spec)
+    flags = build_bar_flags(pd.DatetimeIndex(frame.index), spec)
 
     # 100 barras de 15 min = 25 horas: exactamente un cruce de medianoche.
     assert int(flags.is_rollover.sum()) == 1
@@ -129,7 +128,7 @@ def test_el_corte_diario_marca_la_sesion_como_cerrada() -> None:
         session=SessionSpec(timezone="UTC", break_start=time(0, 0), break_end=time(1, 0)),
     )
     frame = make_frame([(2000.0, 2001.0, 1999.0, 2000.0)] * 8, start="2024-03-04 23:00")
-    flags = build_bar_flags(to_market_data(frame, "XAUUSD", Timeframe.M15), spec)
+    flags = build_bar_flags(pd.DatetimeIndex(frame.index), spec)
 
     # 4 barras antes de medianoche abiertas, 4 dentro del corte cerradas.
     assert flags.session_open[:4].all()
@@ -141,7 +140,7 @@ def test_el_corte_diario_marca_la_sesion_como_cerrada() -> None:
 
 def test_los_datos_sinteticos_cumplen_las_invariantes_ohlc() -> None:
     frame = generate_ohlcv(periods=5_000, seed=7, spread_points=20)
-    validate_frame(frame)
+    validate_bars(frame)
     assert "spread" in frame.columns
     assert (frame["spread"] > 0).all()
 

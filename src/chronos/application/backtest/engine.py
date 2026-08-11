@@ -17,22 +17,21 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Sequence
 from datetime import datetime
-from typing import Any, cast
 
 import numpy as np
 import pandas as pd
 
-from chronos.application.backtest.broker import Quote, SimulatedBroker
 from chronos.application.backtest.config import BacktestConfig
-from chronos.application.backtest.context import BarContext
 from chronos.application.backtest.result import BacktestResult
 from chronos.application.backtest.session import BarFlags, build_bar_flags
+from chronos.application.ports import Broker
 from chronos.application.risk.sizing import PositionSizer, build_sizer
-from chronos.domain.account import Account
-from chronos.domain.bar import MarketData
+from chronos.domain.bars import columns_as_arrays
+from chronos.domain.context import BarContext
 from chronos.domain.enums import ExitReason
 from chronos.domain.errors import DomainError, InvalidOrder
 from chronos.domain.instrument import InstrumentSpec
+from chronos.domain.quote import Quote
 from chronos.domain.signal import EntrySignal, ExitSignal, ModifyStops, StrategyAction
 from chronos.domain.strategy import Strategy
 
@@ -40,50 +39,46 @@ from chronos.domain.strategy import Strategy
 class BacktestEngine:
     """Ejecuta una estrategia sobre una serie histórica."""
 
-    def __init__(self, spec: InstrumentSpec, config: BacktestConfig) -> None:
+    def __init__(self, spec: InstrumentSpec, config: BacktestConfig, broker: Broker) -> None:
         self._spec = spec
         self._config = config
+        self._broker = broker
         self._sizer: PositionSizer = build_sizer(config.risk)
 
-    def run(self, data: MarketData, strategy: Strategy) -> BacktestResult:
-        if len(data) == 0:
+    def run(self, bars: pd.DataFrame, strategy: Strategy) -> BacktestResult:
+        if bars.empty:
             raise DomainError("No hay barras para simular")
 
-        account = Account(
-            initial_balance=self._config.account.initial_balance,
-            currency=self._config.account.currency,
-            leverage=self._config.account.leverage,
-            stop_out_level=self._config.account.stop_out_level,
-            margin_call_level=self._config.account.margin_call_level,
-        )
-        broker = SimulatedBroker(self._spec, account, self._config.execution)
-        context = BarContext(data, broker, self._spec)
-        flags = build_bar_flags(data, self._spec)
+        broker = self._broker
+        account = broker.account
+        timestamps = pd.DatetimeIndex(bars.index)
+        context = BarContext(bars, self._spec)
+        flags = build_bar_flags(timestamps, self._spec)
 
-        strategy.prepare(data)
+        strategy.prepare(bars)
 
         state = _RunState(
             warmup=max(strategy.warmup_bars, 1),
             day_id=int(flags.day_id[0]),
             day_start_balance=account.balance,
         )
-        series = _Series(data)
-        equity_track = _EquityTrack(len(data))
+        series = _Series(bars)
+        equity_track = _EquityTrack(len(bars))
 
-        for i in range(len(data)):
-            self._process_bar(i, data, series, flags, broker, context, strategy, state)
+        for i in range(len(bars)):
+            self._process_bar(i, timestamps, series, flags, broker, context, strategy, state)
             equity_track.record(i, account.balance, account.equity, len(broker.positions))
             if state.halted_reason is not None:
                 equity_track.truncate(i + 1)
                 break
 
         # Liquidación de lo que quede abierto, al cierre de la última barra.
-        last = min(equity_track.length, len(data)) - 1
+        last = min(equity_track.length, len(bars)) - 1
         if broker.positions:
             quote = broker.quote(series.close[last], series.spread_at(last))
             broker.close_all(
                 quote=quote,
-                timestamp=data.timestamps[last],
+                timestamp=timestamps[last].to_pydatetime(),
                 index=last,
                 reason=ExitReason.END_OF_DATA,
             )
@@ -96,11 +91,11 @@ class BacktestEngine:
             symbol=self._spec.symbol,
             timeframe=self._config.data.strategy_timeframe,
             initial_balance=self._config.account.initial_balance,
-            trades=broker.trades,
-            equity_curve=equity_track.to_frame(pd.DatetimeIndex(cast(Any, data.timestamps))),
+            trades=tuple(broker.trades),
+            equity_curve=equity_track.to_frame(timestamps),
             strategy=strategy.describe(),
-            started_at=data.timestamps[0],
-            ended_at=data.timestamps[last],
+            started_at=timestamps[0].to_pydatetime(),
+            ended_at=timestamps[last].to_pydatetime(),
             bars_processed=equity_track.length,
             halted_reason=state.halted_reason,
             rejections=dict(state.rejections),
@@ -111,15 +106,15 @@ class BacktestEngine:
     def _process_bar(
         self,
         i: int,
-        data: MarketData,
+        timestamps: pd.DatetimeIndex,
         series: _Series,
         flags: BarFlags,
-        broker: SimulatedBroker,
+        broker: Broker,
         context: BarContext,
         strategy: Strategy,
         state: _RunState,
     ) -> None:
-        timestamp = data.timestamps[i]
+        timestamp = timestamps[i].to_pydatetime()
         spread = series.spread_at(i)
         open_quote = broker.quote(series.open[i], spread)
 
@@ -160,7 +155,12 @@ class BacktestEngine:
         # 6. Decisión de la estrategia sobre la barra ya cerrada.
         if i < state.warmup or not flags.session_open[i]:
             return
-        context.move_to(i)
+        context.update(
+            index=i,
+            equity=broker.account.equity,
+            balance=broker.account.balance,
+            positions=broker.positions,
+        )
         actions = strategy.on_bar(context)
         if not actions:
             return
@@ -172,14 +172,14 @@ class BacktestEngine:
 
     # --- Riesgo -------------------------------------------------------------
 
-    def _roll_day(self, day_id: int, broker: SimulatedBroker, state: _RunState) -> None:
+    def _roll_day(self, day_id: int, broker: Broker, state: _RunState) -> None:
         state.day_id = day_id
         state.day_start_balance = broker.account.balance
         state.day_blocked = False
 
     def _enforce_risk_limits(
         self,
-        broker: SimulatedBroker,
+        broker: Broker,
         quote: Quote,
         timestamp: datetime,
         index: int,
@@ -223,7 +223,7 @@ class BacktestEngine:
     def _execute(
         self,
         actions: Sequence[StrategyAction],
-        broker: SimulatedBroker,
+        broker: Broker,
         quote: Quote,
         timestamp: datetime,
         index: int,
@@ -244,7 +244,7 @@ class BacktestEngine:
     def _open(
         self,
         signal: EntrySignal,
-        broker: SimulatedBroker,
+        broker: Broker,
         quote: Quote,
         timestamp: datetime,
         index: int,
@@ -293,7 +293,7 @@ class BacktestEngine:
     def _resolve_volume(
         self,
         signal: EntrySignal,
-        broker: SimulatedBroker,
+        broker: Broker,
         reference: float,
         stop_loss: float | None,
     ) -> float:
@@ -316,7 +316,7 @@ class BacktestEngine:
     def _close(
         self,
         signal: ExitSignal,
-        broker: SimulatedBroker,
+        broker: Broker,
         quote: Quote,
         timestamp: datetime,
         index: int,
@@ -337,7 +337,7 @@ class BacktestEngine:
             )
             strategy.on_trade_closed(trade)
 
-    def _modify(self, signal: ModifyStops, broker: SimulatedBroker, state: _RunState) -> None:
+    def _modify(self, signal: ModifyStops, broker: Broker, state: _RunState) -> None:
         targets = [
             p
             for p in broker.positions
@@ -345,10 +345,11 @@ class BacktestEngine:
         ]
         for position in targets:
             try:
-                if signal.stop_loss is not None:
-                    position.move_stop(self._spec.round_price(signal.stop_loss), allow_adverse=True)
-                if signal.take_profit is not None:
-                    position.move_take_profit(self._spec.round_price(signal.take_profit))
+                broker.modify_stops(
+                    position,
+                    stop_loss=signal.stop_loss,
+                    take_profit=signal.take_profit,
+                )
             except InvalidOrder:
                 state.rejections["invalid_modify"] += 1
 
@@ -381,14 +382,13 @@ class _Series:
 
     __slots__ = ("close", "high", "low", "open", "spread")
 
-    def __init__(self, data: MarketData) -> None:
-        self.open = np.asarray(data.open, dtype=float)
-        self.high = np.asarray(data.high, dtype=float)
-        self.low = np.asarray(data.low, dtype=float)
-        self.close = np.asarray(data.close, dtype=float)
-        self.spread = (
-            np.asarray(data.spread, dtype=float) if data.spread is not None else None
-        )
+    def __init__(self, bars: pd.DataFrame) -> None:
+        arrays = columns_as_arrays(bars)
+        self.open = arrays["open"]
+        self.high = arrays["high"]
+        self.low = arrays["low"]
+        self.close = arrays["close"]
+        self.spread = arrays.get("spread")
 
     def spread_at(self, index: int) -> float | None:
         return None if self.spread is None else float(self.spread[index])
