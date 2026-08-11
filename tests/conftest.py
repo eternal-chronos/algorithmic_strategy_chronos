@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -94,4 +95,66 @@ def make_frame(rows: list[tuple[float, float, float, float]], start: str = "2024
     frame = pd.DataFrame(rows, columns=["open", "high", "low", "close"], index=index)
     frame["volume"] = 100.0
     frame.index.name = "timestamp"
+    return frame
+
+
+#: Semana del oro en UTC: abre el domingo a las 22:00 y cierra el viernes a las 21:00.
+WEEK_OPEN = (6, 22)
+WEEK_CLOSE = (4, 21)
+#: Minuto del día en el que se concentran los datos macro de EE. UU.
+VOLATILITY_PEAK_MINUTE = 13 * 60 + 30
+
+
+def make_m1_history(
+    weeks: int = 8,
+    start: str = "2024-01-07 22:00",
+    seed: int = 7,
+    step: float = 0.02,
+    shift_hours: float = 0.0,
+) -> pd.DataFrame:
+    """Histórico M1 sintético con la microestructura que audita §1.1.
+
+    No pretende parecerse al oro: sólo reproduce los dos hechos que la
+    verificación de zona horaria comprueba —el hueco de fin de semana y el pico
+    de volatilidad de las 13:30 UTC— para poder probar que la auditoría los
+    detecta y que se rompe cuando el histórico viene desplazado.
+    """
+    rng = np.random.default_rng(seed)
+    origin = pd.Timestamp(start, tz="UTC")
+    minutes = pd.date_range(origin, periods=weeks * 7 * 24 * 60, freq="1min", tz="UTC")
+
+    weekday = minutes.weekday.to_numpy()
+    minute_of_day = (minutes.hour * 60 + minutes.minute).to_numpy()
+    open_at = (weekday == WEEK_OPEN[0]) & (minute_of_day >= WEEK_OPEN[1] * 60)
+    close_at = (weekday == WEEK_CLOSE[0]) & (minute_of_day >= WEEK_CLOSE[1] * 60)
+    tradeable = ((weekday <= WEEK_CLOSE[0]) & ~close_at) | open_at
+    minutes = minutes[tradeable]
+    minute_of_day = (minutes.hour * 60 + minutes.minute).to_numpy()
+
+    close = 2000.0 + np.cumsum(rng.normal(0.0, step, size=len(minutes)))
+    open_ = np.empty_like(close)
+    open_[0] = 2000.0
+    open_[1:] = close[:-1]
+
+    # Media campana centrada en el pico: el rango por minuto se multiplica hasta
+    # por seis en torno a las 13:30 UTC.
+    distance = np.minimum(
+        np.abs(minute_of_day - VOLATILITY_PEAK_MINUTE),
+        1440 - np.abs(minute_of_day - VOLATILITY_PEAK_MINUTE),
+    )
+    half_range = 0.05 * (1.0 + 5.0 * np.exp(-((distance / 20.0) ** 2)))
+
+    frame = pd.DataFrame(
+        {
+            "open": open_,
+            "high": np.maximum(open_, close) + half_range,
+            "low": np.minimum(open_, close) - half_range,
+            "close": close,
+            "volume": 100.0,
+        },
+        index=minutes,
+    )
+    frame.index.name = "timestamp"
+    if shift_hours:
+        frame.index = frame.index + pd.Timedelta(hours=shift_hours)
     return frame

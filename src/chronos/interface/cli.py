@@ -4,6 +4,8 @@ aquí, y solo aquí, se juntan configuración, datos, estrategia y motor.
 
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
@@ -14,17 +16,24 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from chronos.application.backtest.config import BacktestConfig
+from chronos.application.backtest.config import BacktestConfig, DataConfig
 from chronos.application.metrics.performance import PerformanceReport
-from chronos.application.use_cases.run_backtest import RunBacktest
+from chronos.application.run_backtest import run_backtest
+from chronos.domain.bars import normalize_bars, resample_bars, validate_bars
 from chronos.domain.enums import Timeframe
 from chronos.domain.errors import DomainError
+from chronos.domain.strategies.registry import available_strategies, create_strategy
+from chronos.infrastructure.broker.simulated import build_simulated_broker
 from chronos.infrastructure.config.loader import ConfigError, load_run
-from chronos.infrastructure.data.frames import normalize_frame, resample_frame, validate_frame
-from chronos.infrastructure.data.repository import build_repository
+from chronos.infrastructure.data.dukascopy import (
+    DownloadProgress,
+    DukascopyClient,
+    DukascopyError,
+)
+from chronos.infrastructure.data.market_data import FrameMarketData, build_market_data
 from chronos.infrastructure.data.synthetic import generate_ohlcv
 from chronos.infrastructure.reporting.report import ReportWriter
-from chronos.strategies.registry import available_strategies, create_strategy
+from chronos.interface.structure_cli import structure_app
 
 app = typer.Typer(
     help="Laboratorio de backtesting de XAUUSD (Pepperstone / cTrader).",
@@ -35,6 +44,7 @@ data_app = typer.Typer(help="Gestión del histórico de precios.", no_args_is_he
 strategy_app = typer.Typer(help="Estrategias registradas.", no_args_is_help=True)
 app.add_typer(data_app, name="data")
 app.add_typer(strategy_app, name="strategy")
+app.add_typer(structure_app, name="structure")
 
 console = Console()
 
@@ -71,14 +81,20 @@ def backtest(
                 f"estrategia [bold]{name}[/bold] · fuente {run_config.data.source}{periodo}"
             )
 
-        repository = build_repository(run_config.data, spec.symbol)
-        use_case = RunBacktest(spec, run_config)
-        run = use_case.execute(repository, strategy)
+        # Punto de composición: los adaptadores se construyen aquí, a mano.
+        market_data = build_market_data(run_config.data, spec.symbol)
+        run = run_backtest(
+            spec=spec,
+            config=run_config,
+            market_data=market_data,
+            broker=build_simulated_broker(spec, run_config),
+            strategy=strategy,
+        )
 
         _print_summary(run.performance, run.result.rejections, run.result.halted_reason)
 
         if report:
-            prices = _prices_for_report(repository, run_config)
+            prices = _prices_for_report(market_data, run_config.data)
             folder = ReportWriter(run_config.reporting.output_dir).write(run, prices=prices)
             console.print(f"\nInforme: [bold]{folder / 'report.html'}[/bold]")
     except (ConfigError, DomainError) as error:
@@ -111,13 +127,13 @@ def _parse_date(value: str, flag: str) -> datetime:
         raise ConfigError(f"{flag} no es una fecha ISO válida: {value!r}") from error
 
 
-def _prices_for_report(repository: object, run_config: object) -> pd.DataFrame | None:
-    frame = getattr(repository, "frame", None)
+def _prices_for_report(market_data: FrameMarketData, data: DataConfig) -> pd.DataFrame | None:
+    frame = market_data.frame
     if frame is None:
         return None
-    timeframe = run_config.data.strategy_timeframe  # type: ignore[attr-defined]
-    base = run_config.data.timeframe  # type: ignore[attr-defined]
-    return frame if timeframe is base else resample_frame(frame, timeframe)
+    if data.strategy_timeframe is data.timeframe:
+        return frame
+    return resample_bars(frame, data.strategy_timeframe)
 
 
 def _print_summary(
@@ -168,7 +184,7 @@ def data_synth(
 ) -> None:
     """Genera un histórico sintético para probar el motor (no para evaluar señales)."""
     frame = generate_ohlcv(start=start, periods=periods, seed=seed, spread_points=20)
-    validate_frame(frame)
+    validate_bars(frame)
     out.parent.mkdir(parents=True, exist_ok=True)
     frame.to_parquet(out)
     console.print(
@@ -176,6 +192,92 @@ def data_synth(
         f"[dim]{frame.index[0]} → {frame.index[-1]}[/dim]\n"
         "[yellow]Datos sintéticos: sirven para validar el motor, no la estrategia.[/yellow]"
     )
+
+
+@data_app.command("dukascopy")
+def data_dukascopy(
+    symbol: Annotated[str, typer.Option("--symbol", "-s")] = "XAUUSD",
+    start: Annotated[str, typer.Option("--from", help="Primer día (YYYY-MM-DD)")] = "2018-01-01",
+    end: Annotated[str, typer.Option("--to", help="Último día (YYYY-MM-DD)")] = "2025-12-31",
+    out_dir: Annotated[Path, typer.Option("--out", "-o")] = Path("data/processed"),
+    cache: Annotated[Path, typer.Option("--cache", help="Dónde guardar los .bi5 crudos")] = Path("data/raw/dukascopy"),
+    sides: Annotated[str, typer.Option("--sides", help="Lados a descargar, separados por coma")] = "bid,ask",
+    granularity: Annotated[str, typer.Option("--granularity", "-g", help="m1 (un fichero por día) o h1 (uno por mes)")] = "m1",
+) -> None:
+    """Descarga el histórico de Dukascopy con bid y ask separados.
+
+    Guarda los `.bi5` crudos en la caché, así que una descarga interrumpida se
+    reanuda sin volver a pedir al servidor lo que ya tiene.
+
+    `--granularity h1` baja un fichero por mes en vez de uno por día: treinta
+    veces menos peticiones para el mismo periodo. Las velas H4 y diarias que
+    salen de H1 son idénticas a las que salen de M1, porque los límites de una
+    vela H4 caen siempre en horas en punto. Lo único que exige M1 es el perfil
+    de volatilidad por minuto de la verificación de zona horaria (§1.1).
+    """
+    if granularity.lower() not in ("m1", "h1"):
+        console.print(f"[bold red]Error:[/bold red] granularidad desconocida: {granularity}")
+        raise typer.Exit(code=1)
+    try:
+        first = datetime.fromisoformat(start).date()
+        last = datetime.fromisoformat(end).date()
+    except ValueError as error:
+        console.print(f"[bold red]Error:[/bold red] fecha inválida: {error}")
+        raise typer.Exit(code=1) from error
+
+    wanted = [side.strip().lower() for side in sides.split(",") if side.strip()]
+    hourly = granularity.lower() == "h1"
+    label = "H1" if hourly else "M1"
+    client = DukascopyClient(cache)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    console.print(
+        f"[bold]{symbol.upper()}[/bold] {label} · {first} → {last} · lados: {', '.join(wanted)}\n"
+        f"[dim]Dukascopy limita el ritmo: la primera descarga tarda. "
+        f"Caché en {cache}[/dim]"
+    )
+
+    try:
+        for side in wanted:
+            fetch = client.download_hourly if hourly else client.download
+            frame = fetch(symbol, first, last, side, on_progress=_dukascopy_progress(side))
+            destination = out_dir / f"{symbol.upper()}_{label}_{side}.parquet"
+            frame.to_parquet(destination)
+            console.print(
+                f"\n[green]OK[/green] {side}: {len(frame):,} barras → {destination}\n"
+                f"[dim]{frame.index[0]} → {frame.index[-1]} (UTC)[/dim]"
+            )
+    except DukascopyError as error:
+        console.print(f"\n[bold red]Error:[/bold red] {error}")
+        raise typer.Exit(code=1) from error
+    finally:
+        client.close()
+
+    console.print(
+        "\n[yellow]Antes de calcular nada, verifica la zona horaria:[/yellow] "
+        "chronos structure verify-tz"
+    )
+
+
+def _dukascopy_progress(side: str) -> Callable[[DownloadProgress], None]:
+    """Una línea de progreso cada 30 días, para no inundar el registro."""
+    state = {"rows": 0, "cached": 0, "started": time.monotonic()}
+
+    def report(progress: DownloadProgress) -> None:
+        state["rows"] += progress.rows
+        state["cached"] += int(progress.from_cache)
+        if progress.done % 30 and progress.done != progress.total:
+            return
+        elapsed = max(1e-6, time.monotonic() - state["started"])
+        rate = progress.done / elapsed
+        remaining = (progress.total - progress.done) / rate if rate else 0.0
+        console.print(
+            f"[dim]{side} {progress.done:,}/{progress.total:,} días "
+            f"({progress.day}) · {state['rows']:,} barras · "
+            f"{state['cached']:,} en caché · {rate:.1f} días/s · "
+            f"quedan ~{remaining / 60:.0f} min[/dim]"
+        )
+
+    return report
 
 
 @data_app.command("import")
@@ -189,8 +291,8 @@ def data_import(
         console.print(f"[bold red]Error:[/bold red] no existe {source}")
         raise typer.Exit(code=1)
 
-    frame = normalize_frame(pd.read_csv(source), timezone=timezone)
-    validate_frame(frame)
+    frame = normalize_bars(pd.read_csv(source), timezone=timezone)
+    validate_bars(frame)
     out.parent.mkdir(parents=True, exist_ok=True)
     frame.to_parquet(out)
     console.print(
@@ -209,10 +311,10 @@ def data_info(
         console.print(f"[bold red]Error:[/bold red] no existe {path}")
         raise typer.Exit(code=1)
 
-    frame = normalize_frame(pd.read_parquet(path))
+    frame = normalize_bars(pd.read_parquet(path))
     if timeframe:
-        frame = resample_frame(frame, Timeframe.parse(timeframe))
-    validate_frame(frame)
+        frame = resample_bars(frame, Timeframe.parse(timeframe))
+    validate_bars(frame)
 
     deltas = frame.index.to_series().diff().dropna()
     step = deltas.mode().iloc[0] if not deltas.empty else pd.Timedelta(0)

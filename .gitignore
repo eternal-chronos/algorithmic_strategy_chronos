@@ -21,3 +21,8 @@ data/synthetic/**
 # Salidas de backtest
 reports/**
 !reports/.gitkeep
+
+# Carpeta de trabajo de la auditoría de sesión: se regenera entera con
+# `chronos structure auditoria-sesion --salida now`. Sus conclusiones viven en
+# docs/, que sí se versiona.
+now/

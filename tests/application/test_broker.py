@@ -6,11 +6,11 @@ from datetime import UTC, datetime
 
 import pytest
 
-from chronos.application.backtest.broker import SimulatedBroker
 from chronos.application.backtest.config import ExecutionConfig
 from chronos.domain.account import Account
 from chronos.domain.enums import ExitReason, Side
 from chronos.domain.instrument import InstrumentSpec
+from chronos.infrastructure.broker.simulated import SimulatedBroker
 
 MOMENT = datetime(2024, 3, 4, 10, 0, tzinfo=UTC)
 

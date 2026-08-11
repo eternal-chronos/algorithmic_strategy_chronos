@@ -21,7 +21,8 @@ import numpy as np
 import pandas as pd
 import plotly.offline as pyo
 
-from chronos.application.use_cases.run_backtest import BacktestRun
+from chronos.application.run_backtest import BacktestRun
+from chronos.infrastructure.clock import SystemClock
 from chronos.infrastructure.reporting import theme
 
 ASSETS = Path(__file__).parent / "assets"
@@ -34,9 +35,13 @@ _MARKER = re.compile(r"__[A-Z][A-Z_]*__")
 
 
 def build_payload(
-    run: BacktestRun, prices: pd.DataFrame | None, max_price_bars: int
+    run: BacktestRun,
+    prices: pd.DataFrame | None,
+    max_price_bars: int,
+    generated_at: datetime | None = None,
 ) -> dict[str, Any]:
     """Serializa la corrida a la estructura que consume el panel."""
+    generated_at = generated_at or SystemClock().now()
     curve, curve_downsampled = _curve_payload(run.result.equity_curve)
     price_payload, prices_downsampled = _prices_payload(prices, max_price_bars, run.spec.digits)
 
@@ -50,7 +55,7 @@ def build_payload(
             "bars": run.result.bars_processed,
             "halted": run.result.halted_reason,
             "rejections": run.result.rejections,
-            "generated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "generated": generated_at.strftime("%Y-%m-%d %H:%M:%S"),
             "curveDownsampled": curve_downsampled,
             "pricesDownsampled": prices_downsampled,
             "costs": {
@@ -71,10 +76,13 @@ def build_payload(
 
 
 def render_dashboard(
-    run: BacktestRun, prices: pd.DataFrame | None = None, max_price_bars: int = 20_000
+    run: BacktestRun,
+    prices: pd.DataFrame | None = None,
+    max_price_bars: int = 20_000,
+    generated_at: datetime | None = None,
 ) -> str:
     """Devuelve el HTML completo del panel."""
-    payload = build_payload(run, prices, max_price_bars)
+    payload = build_payload(run, prices, max_price_bars, generated_at)
     meta = payload["meta"]
 
     header = f"{meta['symbol']} · {meta['timeframe']} · {meta['strategy']}"

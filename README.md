@@ -36,8 +36,33 @@ chronos data info data/processed/XAUUSD_M1.parquet
 chronos strategy list
 ```
 
-Cada corrida deja una carpeta en `reports/` con `report.html` (el panel),
-`trades.csv`, `equity.csv`, `metrics.json` y `run.json`.
+### Estructura de mercado (fase 1)
+
+```bash
+# Traer el histórico de Dukascopy. Tiene que ser M1: la verificación horaria mide
+# el rango medio POR MINUTO y con velas de una hora no distingue 13:30 de 13:00.
+chronos data dukascopy -g m1 --from 2018-01-01 --to 2025-12-31
+
+# Verificar la zona horaria del histórico. Obligatorio antes de calcular nada.
+chronos structure verify-tz --config config/impulse.yaml
+
+# Detectar los impulsos dominantes (Diario, H4, H1; M15 se dibuja con el de H1)
+# El explorador embebe los tres LEG_START_MODE de R-36 para poder alternarlos
+# sobre las mismas velas; `--sin-modos-r36` se ahorra las dos corridas extra.
+chronos structure detect --config config/impulse.yaml
+
+# Evidencia de las comprobaciones: esperado y obtenido, lado a lado.
+chronos structure evidencia --config config/impulse.yaml
+```
+
+Es un módulo aparte del backtest: detecta la estructura y no emite señales. Ver
+[`docs/MODULO_1_IMPULSO_DOMINANTE.md`](docs/MODULO_1_IMPULSO_DOMINANTE.md).
+
+Cada corrida de estructura deja una carpeta en `reports/` con `reporte.txt`,
+`explorador.html`, los CSV de impulsos, roturas, contactos y estado, y
+`run.json`. La auditoría se hace sobre el explorador, no sobre imágenes: el
+motor no emite PNG (`reporting.captures: false`). Las del backtest llevan `report.html`
+(el panel), `trades.csv`, `equity.csv`, `metrics.json` y `run.json`.
 
 ## El panel
 
@@ -64,31 +89,42 @@ contra `compute_performance`: si divergen, el test falla.
 
 ## Estructura
 
-Clean Architecture: las dependencias apuntan siempre hacia adentro.
+`infrastructure → application → domain`. Nunca al revés. Las reglas completas
+están en `CLAUDE.md`.
 
 ```
 src/chronos/
-├── domain/            Reglas de negocio puras (sin numpy, pandas ni frameworks)
+├── domain/            Funciones puras sobre arrays y DataFrames
+│   ├── bars.py        Contrato canónico de barras (normalizar, validar, resamplear)
+│   ├── context.py     BarContext: lo que la estrategia ve en cada barra
 │   ├── instrument.py  Ficha del símbolo: toda la aritmética de precio y dinero
 │   ├── position.py    Posición viva, invariantes protegidas
 │   ├── trade.py       Operación cerrada (registro inmutable)
 │   ├── account.py     Balance, equity, margen, stop out
+│   ├── quote.py       Bid/ask ejecutables
 │   ├── signal.py      Intenciones: EntrySignal / ExitSignal / ModifyStops
-│   ├── strategy.py    Puerto Strategy
-│   └── ports/         MarketView, MarketDataRepository
-├── application/       Casos de uso y simulación
-│   ├── backtest/      Motor, bróker simulado, contexto, calendario, configuración
+│   ├── strategy.py    Contrato Strategy
+│   ├── strategies/    Estrategias concretas + indicadores (aquí van las fases)
+│   └── structure/     Impulso dominante: máquina de estados y anti-lookahead
+├── application/       Puertos y orquestación
+│   ├── ports.py       Clock, MarketData.bars(...), Broker
+│   ├── run_backtest.py  Corrida completa: barras → motor → métricas
+│   ├── backtest/      Motor, calendario, configuración, resultado
 │   ├── risk/          Políticas de dimensionamiento
 │   ├── metrics/       Métricas de rendimiento
-│   └── use_cases/     RunBacktest
-├── infrastructure/    Detalles: YAML, parquet/CSV, panel HTML
-│   └── reporting/assets/  CSS y JavaScript del panel
-├── interface/         CLI (punto de composición)
-└── strategies/        Estrategias concretas + indicadores (aquí van las fases)
+│   └── structure/     Detección de impulsos, verificación horaria, estadística
+├── infrastructure/    Adaptadores: brokers, feeds, storage, informes
+│   ├── clock.py       SystemClock (real) y FixedClock (simulado)
+│   ├── broker/        SimulatedBroker
+│   ├── data/          Parquet, CSV, sintético, Dukascopy
+│   ├── structure/     Carga de bid/ask y agregación M1 → H4/Diario
+│   └── reporting/     Panel HTML, informes y explorador
+└── interface/         CLI (punto de composición: aquí se inyectan los puertos)
 ```
 
-Regla práctica: si un fichero de `domain/` importa pandas, algo se ha colado en
-la capa equivocada.
+pandas es del dominio: `DataFrame` y `ndarray` son tipos de valor, no
+infraestructura. Lo que `domain/` no puede tocar es red, disco, base de datos ni
+`datetime.now()`.
 
 ## Qué modela el backtest
 
@@ -118,6 +154,7 @@ Limitaciones conocidas, para no engañarse con los resultados:
 
 - `config/backtest.yaml` — cuenta, datos, ejecución, riesgo, estrategia, informe.
 - `config/instruments/xauusd.yaml` — ficha del símbolo.
+- `config/impulse.yaml` — módulo de impulso dominante (fase 1).
 
 **Verifica la ficha del símbolo contra tu cuenta real** (cTrader → clic derecho en
 el símbolo → *Symbol Information*): comisión, swap, apalancamiento y tamaño de
@@ -136,7 +173,7 @@ para evaluar señales: un movimiento browniano no tiene la microestructura del o
 ## Añadir una estrategia (una fase nueva)
 
 ```python
-# src/chronos/strategies/mi_fase.py
+# src/chronos/domain/strategies/mi_fase.py
 @register("mi_fase")
 class MiFase(IndicatorStrategy):
     @property

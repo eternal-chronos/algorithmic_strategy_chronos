@@ -1,8 +1,8 @@
 """Contrato que toda estrategia debe cumplir.
 
-Es un puerto del dominio: el motor de backtest depende de esta abstracción, no
-de ninguna estrategia concreta. Las estrategias viven en `chronos.strategies`
-(capa externa) y pueden usar numpy/pandas libremente.
+El motor depende de esta clase base, no de ninguna estrategia concreta. Las
+estrategias viven en `chronos.domain.strategies`: son funciones puras sobre
+arrays, sin red, sin ficheros y sin reloj.
 """
 
 from __future__ import annotations
@@ -11,8 +11,9 @@ from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from typing import Any, ClassVar
 
-from chronos.domain.bar import MarketData
-from chronos.domain.ports.market_view import MarketView
+import pandas as pd
+
+from chronos.domain.context import BarContext
 from chronos.domain.signal import StrategyAction
 from chronos.domain.trade import Trade
 
@@ -21,7 +22,7 @@ class Strategy(ABC):
     """Estrategia dirigida por barras.
 
     Ciclo de vida por corrida:
-        prepare(data)  -> una vez, para precalcular indicadores vectorizados
+        prepare(bars)  -> una vez, para precalcular indicadores vectorizados
         on_bar(ctx)    -> una vez por barra, devuelve intenciones
         on_trade_closed(trade) -> tras cada cierre
         on_finish()    -> al terminar
@@ -34,7 +35,7 @@ class Strategy(ABC):
 
     # --- Ciclo de vida ------------------------------------------------------
 
-    def prepare(self, data: MarketData) -> None:
+    def prepare(self, bars: pd.DataFrame) -> None:
         """Precalcula indicadores sobre toda la serie.
 
         Se ejecuta antes de la simulación. Calcular aquí de forma vectorizada es
@@ -44,7 +45,7 @@ class Strategy(ABC):
         """
 
     @abstractmethod
-    def on_bar(self, ctx: MarketView) -> Sequence[StrategyAction]:
+    def on_bar(self, ctx: BarContext) -> Sequence[StrategyAction]:
         """Decide qué hacer en la barra actual. Devolver `()` significa esperar."""
 
     def on_trade_closed(self, trade: Trade) -> None:
