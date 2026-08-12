@@ -390,12 +390,14 @@ archivar junto a las capturas.
 |---|---|
 | **Temporalidad** Diario / H4 / H1 / M15 | Cambia el gráfico y, con él, qué impulsos se dibujan (ver tabla de arriba) |
 | **Vista** Velas / Líneas | La regla se traza por cuerpos: en "Líneas" ves la serie de cierres, que es como el propietario mira la estructura sin el ruido de las mechas |
+| **Ajustar** | Suelta el zoom que hayas hecho a mano y devuelve el encuadre automático. Doble clic sobre el gráfico hace lo mismo. Ver más abajo |
 | **Periodo** Todo · 5 años · 2 años · 1 año · 6 meses · 3 meses · 1 mes · 1 semana | Recorta la ventana desde el final del histórico hacia atrás |
 | **◀ ▶** (o las flechas ← → del teclado) | Recorre el histórico tramo a tramo. Los tramos van pegados y sin solapar: el "hasta" de uno es el día anterior al "desde" del siguiente, así ninguna vela se audita dos veces. Las flechas se inhiben mientras escribes en un campo |
 | **Desde / Hasta** | Fechas exactas en UTC. Mandan sobre el preset |
 | **ID visibles** Actual · Actual + anterior · Todos | Cuántos ID se dibujan. Por defecto, el vigente en la fecha en pantalla y el inmediatamente previo; se recalcula en cada salto de ventana y se aplica también a las capas de temporalidad superior. **Es filtro de dibujo**: los demás siguen en los CSV y en los informes |
 | **Arranque de pierna (R-36)** L1 · L2 · L3 | Alterna los tres `LEG_START_MODE` sobre las **mismas velas**. Cada modo trae su corrida entera —impulsos, limbo y contactos— ya calculada; cambiar de botón no recalcula nada. Sólo aparece si la corrida los embebió (`--modos-r36`, activo por defecto) |
 | **Capas** ID <principal> · ID <contexto> · Limbo · Constituciones y roturas · Contactos · Nivel 50 % · Extremo de color contrario | Las casillas de impulso cambian con el gráfico. Contactos y nivel del 50 % vienen apagadas: son para mirar un ID concreto, no para navegar |
+| **Replay** fecha · Empezar · ◀◀ ▶▶ · ▶ · Salir · Vela en formación · Velocidad · Velas a la vista | Reproduce la historia paso a paso desde una fecha: en cada paso sólo se dibuja **lo que el motor sabía a esa hora**. Ver más abajo |
 | **Auditoría ciega** semilla · Empezar · Revelar · Salir | Apaga de golpe todas las capas y sortea una ventana dentro del rango que tengas puesto. Marcas tus impulsos a mano, pulsas **Revelar** y comparas |
 
 ### Cómo se dibuja cada ID
@@ -415,6 +417,63 @@ La ✕ gruesa marca los extremos que fijó una vela del **color contrario** al
 impulso, sobre la vela que los fijó (R-36). Es lo que la regla del propietario
 prohíbe: en `L1_actual` hay 189 en el histórico (4 en D, 39 en H4, 146 en H1),
 en `L3` ninguno.
+
+### El replay
+
+El gráfico completo enseña el resultado; el replay enseña **cómo se llegó a él**.
+Eliges una fecha, pulsas **Empezar** y a partir de ahí cada pulsación de **▶▶**
+avanza un paso: la vela se va armando y las capas aparecen cuando les toca.
+
+1. Escribe la fecha y pulsa **Empezar**. El cursor se coloca en la última vela
+   *anterior* a ese día, así que el primer paso descubre la primera vela de la
+   fecha en vez de enseñártela ya hecha.
+2. **▶▶** avanza y **◀◀** retrocede; las flechas ← → del teclado hacen lo mismo.
+3. **▶** reproduce solo, a la velocidad elegida; la barra espaciadora lo arranca
+   y lo para.
+4. **Salir** devuelve el periodo que tenías antes de empezar.
+
+Con **Vela en formación** encendida —lo está por defecto— la vela en curso se
+arma con las velas de la temporalidad inmediatamente inferior: en H4, con las
+cuatro de H1. Sale **hueca** en el borde derecho y no es una vela del motor: el
+detector no ve una vela hasta que cierra, y por eso el paso que la completa es el
+mismo que hace aparecer lo que el módulo hace con ella. En M15 no hay nada más
+fino embebido, así que allí cada paso es una vela entera.
+
+Lo que hace que el replay sirva para auditar es que **nada se adelanta**. Las
+velas se etiquetan al inicio del intervalo, así que la cuenta va por el cierre:
+la vela de `t` cierra en `t + duración`, y hasta ese minuto no se dibuja nada de
+lo que ocurrió dentro. En la práctica:
+
+- un ID no aparece —ni su tramo punteado de limbo, que sólo se conoce mirando
+  hacia atrás desde la constitución— hasta que cierra la vela que lo constituye;
+- la línea del ID vigente se corta en el presente, no en su rotura futura;
+- sobre H4, el impulso **diario** de contexto que nace el lunes no aparece hasta
+  que el lunes ha terminado;
+- las constituciones, roturas, contactos y la ✕ de R-36 esperan a su hora.
+
+Cambiar de temporalidad en mitad del replay no mueve el reloj: se busca la última
+vela de la nueva temporalidad que ya hubiera cerrado a esa misma hora, así que
+saltar de H4 a Diario enseña el diario **incompleto** que tenías en ese momento,
+no el de hoy. Mientras el replay está en marcha los controles de periodo quedan
+apagados: la ventana la manda el cursor, y un selector de fechas vivo mentiría.
+
+El replay y la auditoría ciega son dos pruebas distintas sobre la misma ventana y
+no se solapan: empezar una sale de la otra.
+
+**El zoom se queda donde lo dejas.** Auditar de cerca exige acercarse a una vela
+y quedarse ahí mientras avanzas; antes cada paso rehacía los ejes y el gráfico se
+te iba de la pantalla. Ahora el encuadre que fijas con la rueda o arrastrando
+—horizontal y vertical— se conserva paso a paso, y la ventana sólo se desplaza
+—sin cambiar de escala— cuando la vela nueva se saldría por la derecha. Si alejas
+el zoom más allá de las **velas a la vista**, el recorte se amplía para llenar lo
+que se ve, en vez de dejar media pantalla vacía. Un paso atrás no mueve nada
+mientras el presente siga dentro del encuadre.
+
+Se suelta con **Ajustar** (o con doble clic sobre el gráfico), y también al pedir
+otro tramo de historia —preset, fechas, ◀ ▶, empezar o salir del replay, cambiar
+las velas a la vista o sortear una ventana ciega—: ahí el encuadre anterior ya no
+significa nada. Alternar capas, temporalidad, modo de R-36 o vista no lo tocan.
+Mientras esté tomado a mano, las notas del pie lo dicen.
 
 ### La auditoría ciega
 

@@ -18,6 +18,15 @@
  * TODO LO DE ESTE FICHERO ES DIBUJO. Ni el filtro de ID visibles, ni la
  * navegación, ni el tramo punteado tocan un solo cálculo: el payload llega ya
  * calculado por el detector y aquí sólo se elige qué parte de él se pinta.
+ *
+ * El replay (G.1) es la excepción a la que hay que mirar con lupa. Reproduce la
+ * historia paso a paso desde una fecha y en cada paso dibuja SÓLO lo que el
+ * motor podía saber a esa hora. Como las velas van etiquetadas al inicio del
+ * intervalo, saber eso exige el cierre y no la etiqueta: la vela de `t` cierra
+ * en `t + span(tf)`, así que un impulso diario constituido el lunes no aparece
+ * sobre el gráfico de H4 hasta que el lunes termina. Todo lo que en modo normal
+ * se filtra por el borde de la ventana, aquí se filtra además por ese reloj
+ * (`knownUntil`). Sigue sin calcularse nada: se retrasa lo que se enseña.
  */
 (function () {
   "use strict";
@@ -62,8 +71,30 @@
     blind: false,      // auditoría ciega en curso (F.1)
     revealed: false,
     seed: null,
-    scope: null        // rango dentro del que se sortean las ventanas ciegas
+    scope: null,       // rango dentro del que se sortean las ventanas ciegas
+    /* Replay (G.1). `cursor` es el índice de la última vela CERRADA del gráfico
+     * actual; `sub`, cuántas velas de la temporalidad inferior lleva formadas la
+     * siguiente. Con `sub > 0` hay una vela a medio hacer en el borde derecho
+     * que el motor todavía no ha visto. */
+    replay: false,
+    cursor: 0,
+    sub: 0,
+    forming: true,     // armar la vela en curso con la temporalidad inferior
+    playing: false,
+    speed: 700,        // milisegundos entre pasos
+    window: 180,       // velas a la vista durante el replay
+    resume: null,      // periodo al que se vuelve al salir del replay
+    /* Encuadre manual (G.2). `Plotly.react` vuelve a decidir los ejes en cada
+     * dibujo, así que el zoom que el usuario deja con la rueda o arrastrando se
+     * perdía en cada paso del replay. Aquí se guarda lo último que fijó a mano
+     * —x en minutos, y en precio— y se le vuelve a imponer al gráfico: mientras
+     * haya encuadre manual la escala la manda el usuario y el replay se limita a
+     * desplazar la ventana para que el presente siga a la vista. Se suelta con
+     * «Ajustar» o con doble clic sobre el gráfico. */
+    zoom: { x: null, y: null }
   };
+
+  var timer = null;    // temporizador de la reproducción automática
 
   /* Auditoría ciega (F.1). El sorteo va con semilla y la semilla se enseña: una
    * ventana "al azar" que no se puede volver a abrir no sirve para discutirla
@@ -105,28 +136,75 @@
 
   function bars() { return DATA.bars[state.chart]; }
 
+  /* Duración de la vela de cada temporalidad, en minutos. Viene medida sobre las
+   * velas desde Python: con ancla de sesión el diario no dura siempre lo mismo y
+   * deducirla del nombre mentiría. */
+  function span(timeframe) { return DATA.spans[timeframe] || DATA.spans[state.chart]; }
+
+  /* El reloj del replay: el minuto en que cerró la última vela del gráfico. Todo
+   * lo posterior a esta marca es futuro y no se dibuja. */
+  function now_() { return bars().t[state.cursor] + span(state.chart); }
+
   function bounds() {
     var t = bars().t;
     var first = dayOf(t[0]);
     var last = dayOf(t[t.length - 1]);
+    if (state.replay) {
+      var start = Math.max(0, state.cursor - state.window + 1);
+      // Con encuadre manual el usuario puede haber alejado el zoom más allá de
+      // las velas a la vista: si no se ampliara el corte, la mitad izquierda de
+      // su pantalla saldría vacía.
+      if (state.zoom.x) {
+        start = Math.min(start, Math.max(0, lowerBound(t, state.zoom.x[0]) - 1));
+      }
+      var edge = now_();
+      return {
+        from: dayOf(t[start]), to: dayOf(edge), first: first, last: last,
+        lo: t[start], hi: edge, cut: { start: start, end: state.cursor + 1 }
+      };
+    }
     if (state.from || state.to) {
-      return { from: state.from || first, to: state.to || last, first: first, last: last };
+      return range_(state.from || first, state.to || last, first, last);
     }
     var preset = PRESETS.filter(function (p) { return p.id === state.preset; })[0] || PRESETS[0];
-    if (preset.days === null) { return { from: first, to: last, first: first, last: last }; }
+    if (preset.days === null) { return range_(first, last, first, last); }
     var from = shiftDays(last, -preset.days);
-    return { from: from < first ? first : from, to: last, first: first, last: last };
+    return range_(from < first ? first : from, last, first, last);
   }
 
-  function window_(range) { return { lo: dayStart(range.from), hi: dayEnd(range.to) }; }
+  function range_(from, to, first, last) {
+    return {
+      from: from, to: to, first: first, last: last,
+      lo: dayStart(from), hi: dayEnd(to)
+    };
+  }
+
+  function window_(range) { return { lo: range.lo, hi: range.hi }; }
 
   function slice(range) {
+    if (range.cut) { return range.cut; }
     var t = bars().t;
-    var edges = window_(range);
-    var start = lowerBound(t, edges.lo);
-    var end = lowerBound(t, edges.hi + 1);
+    var start = lowerBound(t, range.lo);
+    var end = lowerBound(t, range.hi + 1);
     return { start: start, end: end };
   }
+
+  /* Hasta qué minuto se conoce lo que produjo `timeframe`. Fuera del replay es
+   * el borde derecho de la ventana y no cambia nada. Dentro, hay que descontar
+   * la vela: lo que ocurre en la vela etiquetada en `x` no se sabe hasta que
+   * cierra, en `x + span`. */
+  function knownUntil(timeframe, edges) {
+    return state.replay ? edges.hi - span(timeframe) : edges.hi;
+  }
+
+  /* ¿La vela etiquetada en `x` todavía no ha cerrado? Sólo en replay: es el
+   * filtro que impide que el dibujo se adelante al motor. */
+  function pending(x, timeframe, edges) {
+    return state.replay && x > knownUntil(timeframe, edges);
+  }
+
+  /* Ninguna línea se estira más allá del presente. */
+  function clip(x, edges) { return state.replay && x > edges.hi ? edges.hi : x; }
 
   function lowerBound(values, target) {
     var low = 0, high = values.length;
@@ -184,9 +262,10 @@
   function visibleIds(timeframe, edges) {
     if (state.visible === "all") { return null; }
     var list = impulsesOf(timeframe).list;
+    var until = knownUntil(timeframe, edges);
     var last = -1;
     for (var i = 0; i < list.length; i++) {
-      if (list[i].x0 > edges.hi) { break; }
+      if (list[i].x0 > until) { break; }
       last = i;
     }
     if (last < 0) { return {}; }
@@ -220,20 +299,95 @@
         price(Math.max(open[i], close[i])) + "]";
     });
 
+    var half = formingCandle();
+
     if (state.view === "line") {
+      if (half) { x = x.concat([iso(half.x)]); close = close.concat([half.c]); }
       return [{
         type: "scatter", mode: "lines", name: "Cierres " + label(state.chart),
         x: x, y: close, line: { color: COLORS.ink, width: 1.2 },
         text: text, hoverinfo: "text", hoverlabel: { align: "left" }
       }];
     }
-    return [{
+    var traces = [{
       type: "candlestick", name: "Velas " + label(state.chart),
       x: x, open: open, high: high, low: low, close: close,
       increasing: { line: { color: COLORS.bullish, width: 1 }, fillcolor: COLORS.bullish },
       decreasing: { line: { color: COLORS.bearish, width: 1 }, fillcolor: COLORS.bearish },
       text: text, hoverinfo: "text", hoverlabel: { align: "left" }
     }];
+    if (half) { traces.push(formingTrace(half)); }
+    return traces;
+  }
+
+  /* La vela en formación (G.1). Se arma con las velas de la temporalidad
+   * inferior que ya han cerrado dentro del intervalo en curso: en H4, con las de
+   * H1. No es un cálculo del módulo —el detector no ve una vela hasta que
+   * cierra— sino la forma de mirar cómo se va haciendo, y por eso va hueca y en
+   * su propia traza: mientras esté ahí, ninguna capa del motor la ha leído.
+   */
+  function finer() {
+    var position = DATA.charts.indexOf(state.chart);
+    var next = position < 0 ? null : DATA.charts[position + 1];
+    return next && DATA.bars[next] ? next : null;
+  }
+
+  /* Las velas inferiores que caen dentro de la vela que se está formando, como
+   * [inicio, fin) sobre el array de la temporalidad inferior. */
+  function formingRange() {
+    var timeframe = finer();
+    var t = bars().t;
+    if (!timeframe || state.cursor + 1 >= t.length) { return null; }
+    var start = t[state.cursor + 1];
+    var fine = DATA.bars[timeframe].t;
+    var from = lowerBound(fine, start);
+    var to = lowerBound(fine, start + span(state.chart));
+    return to > from ? { timeframe: timeframe, from: from, to: to, at: start } : null;
+  }
+
+  /* Pasos intermedios que quedan dentro de la vela en curso. El último no se
+   * ofrece: completar la vela y que el motor reaccione son el mismo instante,
+   * así que ese paso cierra la vela en vez de dibujarla entera sin reacción. */
+  function subSteps() {
+    if (!state.forming) { return 0; }
+    var edges = formingRange();
+    return edges ? edges.to - edges.from - 1 : 0;
+  }
+
+  function formingCandle() {
+    if (!state.replay || !state.sub) { return null; }
+    var edges = formingRange();
+    if (!edges) { return null; }
+    var fine = DATA.bars[edges.timeframe];
+    var count = Math.min(state.sub, edges.to - edges.from);
+    var high = -Infinity, low = Infinity;
+    for (var i = edges.from; i < edges.from + count; i++) {
+      if (fine.h[i] > high) { high = fine.h[i]; }
+      if (fine.l[i] < low) { low = fine.l[i]; }
+    }
+    return {
+      x: edges.at, o: fine.o[edges.from], h: high, l: low,
+      c: fine.c[edges.from + count - 1],
+      done: count, total: edges.to - edges.from, timeframe: edges.timeframe
+    };
+  }
+
+  function formingTrace(half) {
+    var rising = half.c >= half.o;
+    var colour = rising ? COLORS.bullish : COLORS.bearish;
+    return {
+      type: "candlestick", name: "Vela en formación",
+      x: [iso(half.x)], open: [half.o], high: [half.h], low: [half.l], close: [half.c],
+      increasing: { line: { color: colour, width: 1.4 }, fillcolor: "rgba(0,0,0,0)" },
+      decreasing: { line: { color: colour, width: 1.4 }, fillcolor: "rgba(0,0,0,0)" },
+      opacity: 0.85,
+      text: ["VELA EN FORMACIÓN · el motor aún no la ha visto cerrar<br>" +
+        stamp(half.x) + " → " + label(state.chart) +
+        "<br>" + half.done + " de " + half.total + " velas de " + label(half.timeframe) +
+        "<br>O " + price(half.o) + " · H " + price(half.h) +
+        "<br>L " + price(half.l) + " · C " + price(half.c)],
+      hoverinfo: "text", hoverlabel: { align: "left" }
+    };
   }
 
   /* Las dos líneas de cada ID, en dos tramos (B.1):
@@ -261,6 +415,10 @@
 
       impulsesOf(timeframe).list.forEach(function (impulse) {
         if (impulse.x1 < edges.lo || drawnFrom(impulse) > edges.hi) { return; }
+        // En replay el ID no existe hasta que cierra la vela que lo constituye:
+        // ni siquiera su tramo de limbo, que sólo se conoce mirando hacia atrás
+        // desde la constitución.
+        if (pending(impulse.x0, timeframe, edges)) { return; }
         if (!keeps(allowed, impulse.id)) { return; }
         var bucket = buckets[impulse.d];
         var head = "ID " + timeframe + " nº " + impulse.id + " · " + impulse.d +
@@ -268,7 +426,7 @@
         [["ancla", impulse.a, impulse.xa], ["extremo", impulse.e, impulse.xe]].forEach(
           function (level) {
             var name = level[0], value = level[1], defined = level[2];
-            push(bucket.live, impulse.x0, impulse.x1, value,
+            push(bucket.live, impulse.x0, clip(impulse.x1, edges), value,
               head + "<br>" + name + " " + price(value) +
               "<br>fija la vela de " + stamp(defined));
             if (defined < impulse.x0) {
@@ -334,11 +492,11 @@
       if (!isVisible(timeframe)) { return; }
       var allowed = visibleIds(timeframe, edges);
       impulsesOf(timeframe).list.forEach(function (impulse) {
-        if (impulse.x1 < edges.lo || impulse.x0 > edges.hi) { return; }
+        if (impulse.x1 < edges.lo || impulse.x0 > knownUntil(timeframe, edges)) { return; }
         if (!keeps(allowed, impulse.id)) { return; }
         var level = (impulse.a + impulse.e) / 2;
         var caption = "50 % del ID " + timeframe + " nº " + impulse.id + "<br>" + price(level);
-        x.push(iso(impulse.x0), iso(impulse.x1), null);
+        x.push(iso(impulse.x0), iso(clip(impulse.x1, edges)), null);
         y.push(level, level, null);
         text.push(caption, caption, "");
       });
@@ -366,6 +524,9 @@
       impulsesOf(timeframe).list.forEach(function (impulse) {
         if (!impulse.w) { return; }
         if (impulse.xe < edges.lo || impulse.xe > edges.hi) { return; }
+        // La marca cae sobre la vela del extremo, pero no se sabe que el extremo
+        // es ése hasta la constitución: en replay manda la constitución.
+        if (pending(impulse.x0, timeframe, edges)) { return; }
         if (!keeps(allowed, impulse.id)) { return; }
         items.push({ tf: timeframe, impulse: impulse });
       });
@@ -400,7 +561,8 @@
     var allowed = visibleIds(primary(), edges);
     var source = impulsesOf(primary()).contacts || [];
     var visible = source.filter(function (item) {
-      return item.x >= edges.lo && item.x <= edges.hi && keeps(allowed, item.id);
+      return item.x >= edges.lo && item.x <= edges.hi &&
+        !pending(item.x, primary(), edges) && keeps(allowed, item.id);
     });
     return [
       contactTrace(visible, "mecha", "TOQUE_MECHA", "circle-open"),
@@ -438,7 +600,8 @@
     // Los marcadores pertenecen a un ID: si su ID no se dibuja, el marcador
     // suelto sólo sería ruido. El filtro de B.2 los acompaña.
     var constitutions = source.constitutions.filter(function (item) {
-      return item.x >= edges.lo && item.x <= edges.hi && keeps(allowed, item.id);
+      return item.x >= edges.lo && item.x <= edges.hi &&
+        !pending(item.x, primary(), edges) && keeps(allowed, item.id);
     });
     if (constitutions.length) {
       traces.push({
@@ -464,7 +627,8 @@
     }
 
     var breaks = source.breaks.filter(function (item) {
-      return item.x >= edges.lo && item.x <= edges.hi && keeps(allowed, item.id);
+      return item.x >= edges.lo && item.x <= edges.hi &&
+        !pending(item.x, primary(), edges) && keeps(allowed, item.id);
     });
     traces.push(breakTrace(breaks, "favor", "ROTURA_A_FAVOR", "triangle-up", COLORS.ink));
     traces.push(breakTrace(breaks, "contra", "ROTURA_EN_CONTRA", "x", COLORS.muted));
@@ -495,19 +659,120 @@
     if (!state.limbo || blindfolded() || !isVisible(primary())) { return []; }
     var edges = window_(range);
     return impulsesOf(primary()).limbo.filter(function (region) {
-      return region[1] >= edges.lo && region[0] <= edges.hi;
+      return region[1] >= edges.lo && region[0] <= edges.hi &&
+        !pending(region[0], primary(), edges);
     }).map(function (region) {
       return {
         type: "rect", xref: "x", yref: "paper",
-        x0: iso(region[0]), x1: iso(region[1]), y0: 0, y1: 1,
+        x0: iso(region[0]), x1: iso(clip(region[1], edges)), y0: 0, y1: 1,
         fillcolor: COLORS.limbo, opacity: 0.16, line: { width: 0 }, layer: "below"
       };
     });
   }
 
+  // --- Encuadre manual (G.2) -------------------------------------------------
+
+  /* Plotly devuelve las marcas del eje de fechas como texto sin zona (las mismas
+   * cadenas que se le dieron, que son UTC) o como milisegundos. Se vuelven a
+   * minutos para poder compararlas con la ventana. */
+  function toMinute(value) {
+    if (value === null || value === undefined) { return null; }
+    if (typeof value === "number") { return Math.round(value / 60000); }
+    var text = String(value).trim().replace(" ", "T");
+    if (!/(Z|[+-]\d{2}:?\d{2})$/.test(text)) { text += "Z"; }
+    var ms = Date.parse(text);
+    return isNaN(ms) ? null : Math.round(ms / 60000);
+  }
+
+  function axisRange(event, axis) {
+    var pair = event[axis + ".range"];
+    var lo = event[axis + ".range[0]"];
+    var hi = event[axis + ".range[1]"];
+    if (lo === undefined && pair) { lo = pair[0]; hi = pair[1]; }
+    return [lo, hi];
+  }
+
+  /* Lo que el usuario acaba de hacer con la rueda, arrastrando o con el doble
+   * clic. Sólo se guarda el encuadre; el gráfico ya está pintado como él quiere
+   * y volver a dibujarlo aquí pelearía con su gesto. El doble clic (autorange)
+   * es la salida: suelta el encuadre y devuelve el mando al replay. */
+  function captureZoom(event) {
+    if (!event) { return; }
+    var released = false;
+    ["xaxis", "yaxis"].forEach(function (axis) {
+      var key = axis === "xaxis" ? "x" : "y";
+      if (event[axis + ".autorange"]) { state.zoom[key] = null; released = true; return; }
+      var pair = axisRange(event, axis);
+      var lo = key === "x" ? toMinute(pair[0]) : Number(pair[0]);
+      var hi = key === "x" ? toMinute(pair[1]) : Number(pair[1]);
+      if (lo === null || hi === null || isNaN(lo) || isNaN(hi) || hi <= lo) { return; }
+      state.zoom[key] = [lo, hi];
+    });
+    if (released) { draw(); }
+  }
+
+  function releaseZoom() {
+    if (!state.zoom.x && !state.zoom.y) { return; }
+    state.zoom = { x: null, y: null };
+    draw();
+  }
+
+  /* Cambiar de tramo de historia —preset, fechas, ventana ciega, arrancar o
+   * salir del replay— es pedir otro sitio, no otro zoom: ahí el encuadre manual
+   * estorba. Alternar capas o dar un paso del replay no lo tocan. */
+  function dropZoom() { state.zoom = { x: null, y: null }; }
+
+  /* Desplaza el encuadre del usuario lo justo para que el presente siga dentro,
+   * conservando su anchura: el nivel de zoom es suyo, la posición la manda el
+   * reloj. Mientras el borde derecho quepa, no se mueve nada. */
+  function followX(view, present) {
+    var air = span(state.chart);
+    var edge = present + 2 * air;        // la vela en formación, más un respiro
+    var width = view[1] - view[0];
+    if (edge > view[1]) { return [Math.round(edge - width), Math.round(edge)]; }
+    if (present < view[0]) {
+      return [Math.round(present - width / 2), Math.round(present + width / 2)];
+    }
+    return view;
+  }
+
+  function xRange(range) {
+    if (state.zoom.x) { return [iso(state.zoom.x[0]), iso(state.zoom.x[1])]; }
+    // En replay el eje se fija a mano y deja aire a la derecha: si se
+    // autoescalara, la última vela quedaría pegada al borde y el gráfico daría
+    // un salto en cada paso.
+    return state.replay
+      ? [iso(range.lo), iso(range.hi + 8 * span(state.chart))]
+      : undefined;
+  }
+
+  /* Se engancha una sola vez, después del primer dibujo: `Plotly.react` conserva
+   * los oyentes del div. El `on` lo pone Plotly al montar el gráfico, así que si
+   * todavía no está se reintenta en cuanto el navegador respire; sin esto, el
+   * enganche dependería de que el propietario tocara otro control. */
+  var zoomBound = false;
+  var zoomTries = 0;
+
+  function bindZoom() {
+    if (zoomBound) { return; }
+    var chart = document.getElementById("chart");
+    if (!chart || typeof chart.on !== "function") {
+      // Acotado: si el gráfico no aparece, se deja de insistir en vez de dejar
+      // un temporizador dando vueltas para siempre.
+      if (typeof setTimeout === "function" && zoomTries < 20) {
+        zoomTries += 1;
+        setTimeout(bindZoom, 50);
+      }
+      return;
+    }
+    zoomBound = true;
+    chart.on("plotly_relayout", captureZoom);
+  }
+
   // --- Figura ---------------------------------------------------------------
 
   function layout(range) {
+    var x = xRange(range);
     return {
       height: 720,
       margin: { l: 66, r: 18, t: 16, b: 44 },
@@ -521,13 +786,25 @@
       shapes: limboShapes(range),
       xaxis: {
         type: "date", gridcolor: COLORS.grid, rangeslider: { visible: false },
+        // El rango va siempre con su `autorange`: si se diera uno sin apagar el
+        // otro, Plotly reescalaría el eje y el encuadre no aguantaría el paso.
+        range: x, autorange: x ? false : true,
         title: { text: "UTC", font: { size: 11, color: COLORS.muted } }
       },
-      yaxis: { gridcolor: COLORS.grid, tickformat: "." + DECIMALS + "f", fixedrange: false }
+      yaxis: {
+        gridcolor: COLORS.grid, tickformat: "." + DECIMALS + "f", fixedrange: false,
+        // Sin esto el eje de precios se rehace en cada paso y el gráfico "salta"
+        // en vertical: con encuadre manual manda lo que fijó el propietario.
+        range: state.zoom.y || undefined,
+        autorange: state.zoom.y ? false : true
+      }
     };
   }
 
   function draw() {
+    // El encuadre manual sigue al reloj ANTES de recortar: la ventana de datos
+    // se calcula sobre el tramo que va a quedar a la vista, no sobre el anterior.
+    if (state.replay && state.zoom.x) { state.zoom.x = followX(state.zoom.x, now_()); }
     var range = bounds();
     var cut = slice(range);
     var traces = priceTraces(cut)
@@ -546,6 +823,7 @@
         "drawcircle", "drawrect", "eraseshape"
       ]
     });
+    bindZoom();
     syncControls(range);
     document.getElementById("notes").textContent = notes(range, cut);
   }
@@ -572,6 +850,20 @@
 
     var text = label(state.chart) + " · " + range.from + " → " + range.to + " · " +
       visible.toLocaleString("es-ES") + " velas en la ventana";
+    if (state.replay) {
+      var half = formingCandle();
+      text = "REPLAY · " + label(state.chart) + " · última vela cerrada " +
+        stamp(b.t[state.cursor]) + " (nº " + (state.cursor + 1).toLocaleString("es-ES") +
+        " de " + b.t.length.toLocaleString("es-ES") + ")" +
+        (half
+          ? " · vela en formación con " + half.done + " de " + half.total + " velas de " +
+            label(half.timeframe)
+          : "") +
+        " · sólo se dibuja lo que el motor sabía a esa hora";
+    }
+    if (state.zoom.x || state.zoom.y) {
+      text += " · encuadre manual: el zoom se mantiene entre pasos (Ajustar para soltarlo)";
+    }
     if (dibujados.length) { text += " · impulsos dibujados: " + dibujados.join(", "); }
     if (state.visible !== "all") {
       text += " · filtro de dibujo «" +
@@ -608,6 +900,10 @@
   }
 
   function startBlind(seed) {
+    // La ciega y el replay son dos pruebas distintas sobre la misma ventana: al
+    // empezar una se sale de la otra en vez de dejar controles muertos.
+    resetReplay();
+    dropZoom();
     var range = bounds();
     if (!state.blind) { state.scope = { from: range.from, to: range.to }; }
     state.seed = seed;
@@ -623,13 +919,19 @@
     draw();
   }
 
-  function exitBlind() {
+  function resetBlind() {
     if (!state.blind) { return; }
+    dropZoom();
     state.from = state.scope.from;
     state.to = state.scope.to;
     state.blind = false;
     state.revealed = false;
     state.scope = null;
+  }
+
+  function exitBlind() {
+    if (!state.blind) { return; }
+    resetBlind();
     draw();
   }
 
@@ -648,6 +950,100 @@
     return Math.floor(Math.random() * 1000000);
   }
 
+  // --- Replay (G.1) -----------------------------------------------------------
+
+  /* Arranca en la fecha elegida con el cursor en la última vela ANTERIOR a ese
+   * día: el primer paso descubre la primera vela de la fecha, que es lo que se
+   * quiere auditar, y no la enseña ya hecha. */
+  function startReplay(day) {
+    var t = bars().t;
+    var index = lowerBound(t, dayStart(day)) - 1;
+    if (index < 0) { index = 0; }
+    if (index > t.length - 1) { index = t.length - 1; }
+    if (!state.replay) {
+      state.resume = { from: state.from, to: state.to, preset: state.preset };
+    }
+    resetBlind();
+    pauseReplay();
+    dropZoom();
+    state.replay = true;
+    state.cursor = index;
+    state.sub = 0;
+    draw();
+  }
+
+  function resetReplay() {
+    if (!state.replay) { return; }
+    pauseReplay();
+    dropZoom();
+    state.replay = false;
+    state.from = state.resume.from;
+    state.to = state.resume.to;
+    state.preset = state.resume.preset;
+    state.resume = null;
+    state.sub = 0;
+  }
+
+  function exitReplay() {
+    if (!state.replay) { return; }
+    resetReplay();
+    draw();
+  }
+
+  /* Al cambiar de temporalidad en mitad del replay el reloj no se mueve: se
+   * busca la última vela de la nueva que ya hubiera cerrado a esa misma hora. Si
+   * no se hiciera, el índice del cursor —que es de otro array— señalaría a una
+   * fecha cualquiera. */
+  function alignCursor(at) {
+    var t = bars().t;
+    var index = lowerBound(t, at - span(state.chart) + 1) - 1;
+    state.cursor = Math.min(Math.max(index, 0), t.length - 1);
+    state.sub = 0;
+  }
+
+  /* Un paso: o se forma un trozo más de la vela en curso, o la vela cierra y el
+   * motor reacciona. Nunca las dos cosas a la vez. Devuelve si se movió algo. */
+  function stepReplay(direction) {
+    var t = bars().t;
+    if (direction > 0) {
+      if (state.sub < subSteps()) { state.sub += 1; }
+      else if (state.cursor + 1 < t.length) { state.cursor += 1; state.sub = 0; }
+      else { return false; }
+    } else if (state.sub > 0) {
+      state.sub -= 1;
+    } else if (state.cursor > 0) {
+      state.cursor -= 1;
+      state.sub = 0;
+    } else {
+      return false;
+    }
+    draw();
+    return true;
+  }
+
+  function playReplay() {
+    if (!state.replay || state.playing) { return; }
+    state.playing = true;
+    schedule();
+    draw();
+  }
+
+  /* Encadenada con `setTimeout` y no con `setInterval`: si un paso tarda más que
+   * el intervalo —ventanas grandes, muchas capas— los pasos no se apilan. */
+  function schedule() {
+    timer = setTimeout(function () {
+      timer = null;
+      if (!state.playing) { return; }
+      if (!stepReplay(1)) { pauseReplay(); draw(); }
+      else { schedule(); }
+    }, state.speed);
+  }
+
+  function pauseReplay() {
+    if (timer !== null) { clearTimeout(timer); timer = null; }
+    state.playing = false;
+  }
+
   // --- Controles ------------------------------------------------------------
 
   function buildChartButtons() {
@@ -659,7 +1055,9 @@
       button.dataset.tf = chart;
       button.title = "Dibuja el impulso de " + DATA.layout[chart].map(label).join(" y ");
       button.addEventListener("click", function () {
+        var at = state.replay ? now_() : null;
         state.chart = chart;
+        if (at !== null) { alignCursor(at); }
         buildImpulseLayers();
         draw();
       });
@@ -718,6 +1116,7 @@
       button.addEventListener("click", function () {
         state.preset = preset.id;
         state.from = state.to = null;
+        dropZoom();
         draw();
       });
       container.appendChild(button);
@@ -764,6 +1163,7 @@
     if (to > range.last) { to = range.last; from = shiftDays(to, -(width - 1)); }
     state.from = from < range.first ? range.first : from;
     state.to = to > range.last ? range.last : to;
+    dropZoom();
     draw();
   }
 
@@ -779,6 +1179,9 @@
       button.setAttribute(
         "aria-pressed", String(usingPreset && button.dataset.preset === state.preset)
       );
+      // Durante el replay la ventana la manda el cursor: los controles de
+      // periodo se apagan en vez de mentir sobre lo que se está viendo.
+      button.disabled = state.replay;
     });
     document.querySelectorAll("#visible-buttons button").forEach(function (button) {
       button.setAttribute("aria-pressed", String(button.dataset.visible === state.visible));
@@ -793,11 +1196,39 @@
     from.value = range.from;
     to.value = range.to;
 
+    // Sólo hay algo que soltar si el encuadre está tomado a mano.
+    document.getElementById("zoom-reset").disabled = !state.zoom.x && !state.zoom.y;
+
     seedInput().value = state.seed === null ? "" : String(state.seed);
     document.getElementById("blind-reveal").disabled = !blindfolded();
     document.getElementById("blind-exit").disabled = !state.blind;
     document.getElementById("blind-start").textContent =
       state.blind ? "Otra ventana" : "Empezar";
+
+    syncReplay(range);
+  }
+
+  function syncReplay(range) {
+    var group = document.getElementById("replay-group");
+    if (group) { group.className = state.replay ? "group on" : "group"; }
+
+    var day = document.getElementById("replay-date");
+    day.min = range.first;
+    day.max = range.last;
+    if (state.replay) { day.value = dayOf(bars().t[state.cursor]); }
+    else if (!day.value) { day.value = range.to; }
+
+    ["replay-step", "replay-back", "replay-play", "replay-exit"].forEach(function (id) {
+      document.getElementById(id).disabled = !state.replay;
+    });
+    document.getElementById("replay-start").textContent =
+      state.replay ? "Reiniciar" : "Empezar";
+    document.getElementById("replay-play").textContent = state.playing ? "⏸" : "▶";
+    document.getElementById("replay-forming").checked = state.forming;
+    document.getElementById("replay-window").value = String(state.window);
+    ["from", "to", "prev", "next"].forEach(function (id) {
+      document.getElementById(id).disabled = state.replay;
+    });
   }
 
   function bindControls() {
@@ -807,6 +1238,7 @@
         draw();
       });
     });
+    document.getElementById("zoom-reset").addEventListener("click", releaseZoom);
     document.getElementById("prev").addEventListener("click", function () { step(-1); });
     document.getElementById("next").addEventListener("click", function () { step(1); });
     ["from", "to"].forEach(function (id) {
@@ -816,6 +1248,7 @@
         state[id] = value;
         var range = bounds();
         if (range.from > range.to) { state[id === "from" ? "to" : "from"] = value; }
+        dropZoom();
         draw();
       });
     });
@@ -841,21 +1274,68 @@
       draw();
     });
     document.getElementById("blind-exit").addEventListener("click", exitBlind);
+    bindReplay();
     bindArrowKeys();
   }
 
-  /* ◀ ▶ también con las flechas del teclado (B.3). Se ignoran mientras el foco
-   * está en un campo de texto: ahí las flechas mueven el cursor y robarlas haría
-   * imposible escribir una fecha o una semilla. */
+  function bindReplay() {
+    document.getElementById("replay-start").addEventListener("click", function () {
+      var day = document.getElementById("replay-date").value;
+      startReplay(day || bounds().last);
+    });
+    document.getElementById("replay-step").addEventListener("click", function () {
+      if (state.replay) { stepReplay(1); }
+    });
+    document.getElementById("replay-back").addEventListener("click", function () {
+      if (state.replay) { stepReplay(-1); }
+    });
+    document.getElementById("replay-play").addEventListener("click", toggleReplay);
+    document.getElementById("replay-exit").addEventListener("click", exitReplay);
+    document.getElementById("replay-forming").addEventListener("change", function (event) {
+      state.forming = event.target.checked;
+      if (!state.forming) { state.sub = 0; }
+      draw();
+    });
+    document.getElementById("replay-speed").addEventListener("change", function (event) {
+      var speed = parseInt(event.target.value, 10);
+      if (!isNaN(speed) && speed > 0) { state.speed = speed; }
+    });
+    document.getElementById("replay-window").addEventListener("change", function (event) {
+      var count = parseInt(event.target.value, 10);
+      if (isNaN(count) || count < 2) { return; }
+      state.window = count;
+      dropZoom();
+      draw();
+    });
+  }
+
+  function toggleReplay() {
+    if (!state.replay) { return; }
+    if (state.playing) { pauseReplay(); draw(); } else { playReplay(); }
+  }
+
+  /* ◀ ▶ también con las flechas del teclado (B.3), y la barra espaciadora para
+   * arrancar y parar el replay. Se ignoran mientras el foco está en un campo de
+   * texto: ahí las flechas mueven el cursor y robarlas haría imposible escribir
+   * una fecha o una semilla.
+   *
+   * En replay las flechas dan pasos en vez de mover la ventana: es el mismo
+   * gesto —avanzar y retroceder en el tiempo— a la escala de lo que se mira. */
   function bindArrowKeys() {
     if (!document.addEventListener) { return; }
     document.addEventListener("keydown", function (event) {
-      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") { return; }
+      var arrow = event.key === "ArrowLeft" || event.key === "ArrowRight";
+      var space = event.key === " " || event.key === "Spacebar";
+      if (!arrow && !space) { return; }
       var focused = document.activeElement;
       var tag = focused && focused.tagName ? focused.tagName.toUpperCase() : "";
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") { return; }
+      // La barra espaciadora sobre un botón lo pulsa: ahí no se roba.
+      if (space && (tag === "BUTTON" || !state.replay)) { return; }
       if (event.preventDefault) { event.preventDefault(); }
-      step(event.key === "ArrowLeft" ? -1 : 1);
+      if (space) { toggleReplay(); return; }
+      var back = event.key === "ArrowLeft" ? -1 : 1;
+      if (state.replay) { stepReplay(back); } else { step(back); }
     });
   }
 

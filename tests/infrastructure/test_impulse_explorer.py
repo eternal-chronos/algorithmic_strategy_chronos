@@ -210,6 +210,19 @@ def test_no_quedan_marcadores_sin_sustituir(run: ImpulseRun) -> None:
     assert not {marcador for marcador in marcadores if marcador in html}
 
 
+def test_todos_los_controles_que_busca_el_javascript_estan_en_la_plantilla() -> None:
+    """El DOM simulado de los tests declara los elementos a mano, así que un
+    identificador mal escrito en la plantilla se le escaparía: aquí se compara
+    contra el HTML de verdad."""
+    script = (ASSETS / "impulse_explorer.js").read_text(encoding="utf-8")
+    template = (ASSETS / "impulse_explorer.html").read_text(encoding="utf-8")
+    buscados = set(re.findall(r'getElementById\("([^"]+)"\)', script))
+    declarados = set(re.findall(r'id="([^"]+)"', template))
+
+    assert buscados, "el explorador tiene que buscar sus controles"
+    assert not buscados - declarados
+
+
 def test_la_cabecera_declara_el_reparto_y_el_hash(run: ImpulseRun) -> None:
     html = render_explorer(run)
     assert "lado bid" in html
@@ -418,8 +431,7 @@ def test_la_ventana_no_se_sale_del_historico(run: ImpulseRun, tmp_path: Path) ->
     payload = build_payload(run)
     epoch = pd.Timestamp("1970-01-01", tz="UTC")
     for step in resultado["steps"]:
-        chart = step["label"].removeprefix("grafico-") if "grafico-" in step["label"] else DAILY
-        tiempos = payload["bars"][chart]["t"]
+        tiempos = payload["bars"][step["chart"]]["t"]
         primera = (epoch + pd.Timedelta(minutes=tiempos[0])).strftime("%Y-%m-%d")
         ultima = (epoch + pd.Timedelta(minutes=tiempos[-1])).strftime("%Y-%m-%d")
         assert step["from"] >= primera
@@ -748,6 +760,357 @@ def test_la_marca_de_r36_aparece_donde_hay_extremos_contrarios(
 
     assert any("R-36" in nombre for nombre in con_marca), con_marca
     assert not any("R-36" in nombre for nombre in sin_marca), sin_marca
+
+
+# --- G.1 · Replay desde una fecha -------------------------------------------
+#
+# El replay reproduce la historia paso a paso y en cada paso sólo puede dibujar
+# lo que el motor ya sabía. Como las velas se etiquetan al inicio del intervalo,
+# eso se mide por el CIERRE: la vela de `t` cierra en `t + span`. Todo lo que se
+# comprueba aquí es esa frontera; si se colara un impulso constituido más tarde,
+# el explorador estaría enseñando el futuro y la auditoría no valdría nada.
+
+EPOCH = pd.Timestamp("1970-01-01", tz="UTC")
+
+
+def _minute(stamp: str) -> int:
+    return int((pd.Timestamp(stamp, tz="UTC") - EPOCH) // pd.Timedelta(minutes=1))
+
+
+def _replay_steps(resultado: dict) -> list[dict]:
+    return [
+        step
+        for step in resultado["steps"]
+        if step["label"].startswith("replay-") and step["label"] != "replay-fuera"
+    ]
+
+
+def _clock(payload: dict, step: dict) -> int:
+    """Minuto en que cerró la última vela dibujada: el presente de ese paso."""
+    return _minute(step["plot"]["lastBar"]) + payload["spans"][step["chart"]]
+
+
+def _points(step: dict, name: str) -> int:
+    return sum(trace["points"] for trace in step["plot"]["traces"] if trace["name"] == name)
+
+
+def _a_su_hora(marcas: list[dict], desde: int, reloj: int, span: int) -> list[dict]:
+    """Las marcas de la ventana cuya vela ya había cerrado a esa hora."""
+    return [item for item in marcas if desde <= item["x"] and item["x"] + span <= reloj]
+
+
+def test_cada_temporalidad_declara_cuanto_dura_su_vela(run: ImpulseRun) -> None:
+    """Sin la duración no se puede saber cuándo cerró una vela, y sin eso el
+    replay no sabe qué puede dibujar."""
+    spans = build_payload(run)["spans"]
+    assert spans == {DAILY: 1440, H4: 240, H1: 60, M15: 15}
+
+
+def test_el_replay_arranca_en_la_fecha_elegida(run: ImpulseRun, tmp_path: Path) -> None:
+    resultado = _draw(run, tmp_path)
+    antes = _step(resultado, "antes-del-replay")
+    inicio = _step(resultado, "replay-inicio")
+
+    assert "REPLAY" in inicio["notes"]
+    assert inicio["plot"]["lastBar"] < antes["plot"]["lastBar"]
+    # La ventana arranca justo antes del día pedido: el primer paso descubre su
+    # primera vela en vez de enseñarla ya hecha.
+    assert inicio["plot"]["lastBar"][:10] <= inicio["replayDate"]
+
+
+def test_el_replay_no_dibuja_nada_que_el_motor_no_supiera(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    resultado = _draw(run, tmp_path)
+    payload = build_payload(run, lateralization=measure(run))
+    pasos = _replay_steps(resultado)
+    assert pasos, "el recorrido tiene que pasar por el replay"
+
+    for paso in pasos:
+        dibujado = paso["plot"]["maxEngineX"]
+        assert dibujado is not None, f"{paso['label']}: no se dibujó ninguna capa"
+        assert _minute(dibujado) <= _clock(payload, paso), paso["label"]
+
+
+def test_el_replay_ensena_cada_marca_a_su_hora(run: ImpulseRun, tmp_path: Path) -> None:
+    """Ni una constitución ni una rotura antes de que cierre su vela, y todas las
+    que ya cerraron dentro de la ventana."""
+    resultado = _draw(run, tmp_path)
+    payload = build_payload(run, lateralization=measure(run))
+    comprobados = 0
+
+    for paso in _replay_steps(resultado):
+        if paso["chart"] != H4:
+            continue
+        reloj = _clock(payload, paso)
+        desde = _minute(paso["plot"]["firstBar"])
+        span = payload["spans"][H4]
+        marcas = payload["impulses"][H4]
+
+        assert _points(paso, "Constitución H4") == len(
+            _a_su_hora(marcas["constitutions"], desde, reloj, span)
+        ), paso["label"]
+        assert _points(paso, "ROTURA_A_FAVOR H4") + _points(paso, "ROTURA_EN_CONTRA H4") == len(
+            _a_su_hora(marcas["breaks"], desde, reloj, span)
+        ), paso["label"]
+        comprobados += 1
+
+    assert comprobados, "ningún paso del replay dibujó los marcadores de H4"
+
+
+def test_la_linea_del_id_vigente_se_corta_en_el_presente(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    """El ID en curso llega hasta el reloj y ni un minuto más: dibujarlo entero
+    delataría cuándo se rompe."""
+    resultado = _draw(run, tmp_path)
+    payload = build_payload(run, lateralization=measure(run))
+    span = payload["spans"][H4]
+    comprobados = 0
+
+    for paso in _replay_steps(resultado):
+        if paso["chart"] != H4:
+            continue
+        reloj = _clock(payload, paso)
+        vigente = [
+            impulse
+            for impulse in payload["impulses"][H4]["list"]
+            if impulse["x0"] + span <= reloj < impulse["x1"]
+        ]
+        if not vigente:
+            continue
+        assert _minute(paso["plot"]["maxEngineX"]) == reloj, paso["label"]
+        comprobados += 1
+
+    assert comprobados, "en ningún paso había un ID vigente que recortar"
+
+
+def test_el_id_no_esta_dibujado_antes_de_que_lo_constituya_su_vela(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    """El caso que decide si el replay sirve para auditar: la constitución que se
+    está a punto de cruzar no puede aparecer hasta que su vela cierra."""
+    resultado = _draw(run, tmp_path)
+    payload = build_payload(run, lateralization=measure(run))
+    span = payload["spans"][H4]
+    marcas = payload["impulses"][H4]["constitutions"]
+    marca = marcas[len(marcas) // 2]
+
+    pasos = [
+        step for step in resultado["steps"] if step["label"].startswith("replay-nacimiento-")
+    ]
+
+    def dibujables(paso: dict) -> set[int]:
+        visibles = _a_su_hora(
+            marcas, _minute(paso["plot"]["firstBar"]), _clock(payload, paso), span
+        )
+        return {item["id"] for item in visibles}
+
+    antes = [paso for paso in pasos if _clock(payload, paso) < marca["x"] + span]
+    despues = [paso for paso in pasos if _clock(payload, paso) >= marca["x"] + span]
+    assert antes and despues, "el recorrido no llega a cruzar la constitución"
+
+    ultimo, primero = antes[-1], despues[0]
+    assert marca["id"] not in dibujables(ultimo)
+    assert marca["id"] in dibujables(primero)
+    # Y lo dibujado coincide con lo que se podía dibujar a cada lado del cruce.
+    assert _points(ultimo, "Constitución H4") == len(dibujables(ultimo))
+    assert _points(primero, "Constitución H4") == len(dibujables(primero))
+
+
+def test_la_vela_se_arma_con_la_temporalidad_inferior(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    resultado = _draw(run, tmp_path)
+    payload = build_payload(run)
+    inicio = _step(resultado, "replay-inicio")
+    pasos = [_step(resultado, f"replay-paso-{numero}") for numero in range(1, 5)]
+    intermedios = payload["spans"][H4] // payload["spans"][H1] - 1
+
+    assert "Vela en formación" not in _trace_names(inicio)
+    for numero, paso in enumerate(pasos[:intermedios], start=1):
+        assert "Vela en formación" in _trace_names(paso)
+        assert f"{numero} de {intermedios + 1} velas de H1" in paso["notes"]
+        # Mientras se arma, la vela no ha cerrado: el motor no se entera.
+        assert paso["plot"]["lastBar"] == inicio["plot"]["lastBar"]
+
+    cierre = pasos[intermedios]
+    assert cierre["plot"]["lastBar"] > inicio["plot"]["lastBar"]
+    assert "Vela en formación" not in _trace_names(cierre)
+
+
+def test_sin_vela_en_formacion_cada_paso_es_una_vela_entera(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    resultado = _draw(run, tmp_path)
+    apagada = _step(resultado, "replay-sin-formacion")
+    siguiente = _step(resultado, "replay-vela-entera")
+
+    assert "Vela en formación" not in _trace_names(apagada)
+    assert siguiente["plot"]["lastBar"] > apagada["plot"]["lastBar"]
+
+
+def test_el_paso_atras_deshace_el_ultimo(run: ImpulseRun, tmp_path: Path) -> None:
+    resultado = _draw(run, tmp_path)
+    antes = _step(resultado, "replay-paso-5")
+    atras = _step(resultado, "replay-atras")
+    teclado = _step(resultado, "replay-teclado")
+
+    assert atras["notes"] == antes["notes"]
+    # Y la flecha derecha vuelve a avanzar, como el botón.
+    assert teclado["notes"] == _step(resultado, "replay-paso-6")["notes"]
+
+
+def test_la_reproduccion_se_enciende_y_se_apaga(run: ImpulseRun, tmp_path: Path) -> None:
+    resultado = _draw(run, tmp_path)
+    assert _step(resultado, "replay-reproduciendo")["replayPlay"] == "⏸"
+    assert _step(resultado, "replay-pausado")["replayPlay"] == "▶"
+
+
+def test_cambiar_de_temporalidad_no_mueve_el_reloj(run: ImpulseRun, tmp_path: Path) -> None:
+    """El mismo instante visto en otra temporalidad: la última vela cerrada de la
+    nueva, ni una más."""
+    resultado = _draw(run, tmp_path)
+    payload = build_payload(run)
+    origen = _step(resultado, "replay-sin-formacion")
+    destino = _step(resultado, "replay-otra-temporalidad")
+
+    assert destino["chart"] == DAILY
+    reloj = _clock(payload, origen)
+    cierre = _clock(payload, destino)
+    assert cierre <= reloj
+    assert cierre + payload["spans"][DAILY] > reloj, "la vela diaria siguiente aún no cerró"
+
+
+def test_durante_el_replay_los_controles_de_periodo_se_apagan(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    """Con el cursor mandando, un selector de fechas vivo mentiría."""
+    resultado = _draw(run, tmp_path)
+    assert all(paso["replayLocked"] for paso in _replay_steps(resultado))
+    assert not _step(resultado, "antes-del-replay")["replayLocked"]
+    assert not _step(resultado, "replay-fuera")["replayLocked"]
+
+
+def test_el_replay_deja_aire_a_la_derecha(run: ImpulseRun, tmp_path: Path) -> None:
+    """Sin margen la última vela quedaría pegada al borde y el eje daría un salto
+    en cada paso."""
+    inicio = _step(_draw(run, tmp_path), "replay-inicio")
+    rango = inicio["plot"]["xRange"]
+
+    assert rango is not None
+    assert rango[0] <= inicio["plot"]["firstBar"]
+    assert rango[1] > inicio["plot"]["lastBar"]
+
+
+def test_salir_del_replay_devuelve_el_periodo_de_partida(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    resultado = _draw(run, tmp_path)
+    antes = _step(resultado, "antes-del-replay")
+    fuera = _step(resultado, "replay-fuera")
+
+    assert (fuera["from"], fuera["to"]) == (antes["from"], antes["to"])
+    assert fuera["plot"]["bars"] == antes["plot"]["bars"]
+    assert fuera["plot"]["xRange"] is None
+    assert "REPLAY" not in fuera["notes"]
+
+
+# El encuadre manual (G.2). Auditar de cerca exige acercar el zoom y quedarse
+# ahí: si cada paso del replay devolviera el gráfico a su escala, no se podría
+# mirar una vela concreta mientras se avanza.
+
+
+def _width(step: dict) -> pd.Timedelta:
+    x = step["plot"]["xRange"]
+    return pd.Timestamp(x[1]) - pd.Timestamp(x[0])
+
+
+def test_el_zoom_manual_sobrevive_a_los_pasos_del_replay(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    resultado = _draw(run, tmp_path)
+    pasos = [
+        _step(resultado, f"replay-zoom-{etiqueta}")
+        for etiqueta in ("ancho-1", "ancho-2", "estrecho-1", "estrecho-2")
+    ]
+
+    for paso in pasos:
+        assert paso["plot"]["yRange"] == [1.05, 1.35], "el eje de precios se rehízo"
+        assert "encuadre manual" in paso["notes"]
+        assert not paso["zoomFree"], "«Ajustar» tiene que quedar disponible"
+    # La anchura es la que fijó el propietario y no cambia de un paso al otro.
+    assert _width(pasos[0]) == _width(pasos[1])
+    assert _width(pasos[2]) == _width(pasos[3])
+    assert _width(pasos[2]) < _width(pasos[0])
+
+
+def test_el_encuadre_manual_sigue_al_presente(run: ImpulseRun, tmp_path: Path) -> None:
+    """Conservar el zoom no puede dejar la vela nueva fuera de la pantalla: la
+    ventana se desplaza justo un paso, sin cambiar de escala."""
+    resultado = _draw(run, tmp_path)
+    payload = build_payload(run)
+    uno = _step(resultado, "replay-zoom-estrecho-1")
+    dos = _step(resultado, "replay-zoom-estrecho-2")
+
+    vela = pd.Timedelta(minutes=payload["spans"][H4])
+    corrimiento = pd.Timestamp(dos["plot"]["xRange"][0]) - pd.Timestamp(uno["plot"]["xRange"][0])
+    assert corrimiento == vela
+    for paso in (uno, dos):
+        ultima = pd.Timestamp(paso["plot"]["lastBar"])
+        assert pd.Timestamp(paso["plot"]["xRange"][0]) <= ultima
+        assert ultima <= pd.Timestamp(paso["plot"]["xRange"][1])
+
+
+def test_el_paso_atras_no_mueve_el_encuadre_manual(run: ImpulseRun, tmp_path: Path) -> None:
+    """Mientras el presente siga dentro, retroceder no toca el eje."""
+    resultado = _draw(run, tmp_path)
+    atras = _step(resultado, "replay-zoom-atras")
+    ultimo = _step(resultado, "replay-zoom-estrecho-2")
+
+    assert atras["plot"]["xRange"] == ultimo["plot"]["xRange"]
+    assert atras["plot"]["lastBar"] < ultimo["plot"]["lastBar"]
+
+
+def test_el_encuadre_manual_pide_las_velas_que_tapa(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    """Alejar el zoom más allá de las velas a la vista no puede dejar media
+    pantalla vacía: el recorte se amplía hasta cubrir lo que se ve."""
+    resultado = _draw(run, tmp_path)
+    sin_zoom = _step(resultado, "replay-zoom-sin-zoom")
+    ancho = _step(resultado, "replay-zoom-ancho-1")
+
+    assert ancho["plot"]["bars"] > sin_zoom["plot"]["bars"]
+    assert pd.Timestamp(ancho["plot"]["firstBar"]) <= pd.Timestamp(ancho["plot"]["xRange"][0])
+
+
+def test_ajustar_devuelve_el_encuadre_automatico(run: ImpulseRun, tmp_path: Path) -> None:
+    resultado = _draw(run, tmp_path)
+    suelto = _step(resultado, "replay-zoom-suelto")
+
+    assert suelto["zoomFree"]
+    assert suelto["plot"]["yRange"] is None
+    assert "encuadre manual" not in suelto["notes"]
+    # Y vuelve el encuadre del replay, con su aire a la derecha.
+    assert pd.Timestamp(suelto["plot"]["xRange"][1]) > pd.Timestamp(suelto["plot"]["lastBar"])
+
+
+def test_fuera_del_replay_el_encuadre_manual_tambien_manda(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    """Encender una capa no devuelve el gráfico a su sitio; pedir otro tramo de
+    historia sí, porque ahí el encuadre anterior ya no significa nada."""
+    resultado = _draw(run, tmp_path)
+    capa = _step(resultado, "zoom-fuera-del-replay")
+    preset = _step(resultado, "zoom-suelto-por-el-preset")
+
+    assert capa["plot"]["xRange"] is not None
+    assert capa["plot"]["yRange"] == [1.05, 1.35]
+    assert not capa["zoomFree"]
+    assert preset["plot"]["xRange"] is None
+    assert preset["plot"]["yRange"] is None
+    assert preset["zoomFree"]
 
 
 def test_el_modo_activo_no_se_duplica_en_el_payload(

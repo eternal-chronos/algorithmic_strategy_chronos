@@ -156,6 +156,7 @@ def build_payload(
         "charts": list(available),
         "layout": {chart: list(charts.overlays(chart)) for chart in available},
         "labels": {chart: _label(chart) for chart in {*available, *charts.detected}},
+        "spans": _spans(run),
         "bars": bars,
         "impulses": {
             timeframe: _impulse_payload(analysis, contacts.get(timeframe))
@@ -208,6 +209,29 @@ def _mode_summary(variant: ModeVariant) -> dict[str, Any]:
 
 def _label(timeframe: str) -> str:
     return "Diario" if timeframe == "D" else timeframe
+
+
+def _spans(run: ImpulseRun) -> dict[str, int]:
+    """Duración de la vela de cada temporalidad, en minutos.
+
+    Es lo que le falta al replay para saber **cuándo** se supo cada cosa. Las
+    velas van etiquetadas al inicio del intervalo (§1.2), así que la vela de `t`
+    no cierra hasta `t + span`: el impulso diario que nace el lunes no puede
+    aparecer sobre el gráfico de H4 hasta que el lunes ha terminado, y sin este
+    dato el replay lo pintaría veinticuatro horas antes de tiempo.
+
+    Se mide sobre las propias velas —la moda de las diferencias— en vez de
+    deducirla del nombre de la temporalidad: con ancla de sesión el diario no
+    dura siempre lo mismo y el nombre mentiría.
+    """
+    frames: dict[str, pd.DataFrame] = {
+        timeframe: analysis.bars for timeframe, analysis in run.analyses.items()
+    }
+    frames.update(run.chart_bars)
+    return {
+        timeframe: int(_bar_span(pd.DatetimeIndex(frame.index)) // pd.Timedelta(minutes=1))
+        for timeframe, frame in frames.items()
+    }
 
 
 # --- Velas ------------------------------------------------------------------
