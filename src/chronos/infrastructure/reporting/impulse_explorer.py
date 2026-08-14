@@ -35,7 +35,9 @@ from chronos.application.structure.lateralization import (
     LateralizationStudy,
     TimeframeLateralization,
 )
+from chronos.application.structure.zones import ImpulseZones, TimeframeZones, ZonesRun
 from chronos.domain.structure.enums import BreakKind, ContactKind, MachineState
+from chronos.domain.structure.zones import Zone
 from chronos.infrastructure.clock import SystemClock
 from chronos.infrastructure.reporting import theme
 
@@ -84,10 +86,11 @@ def render_explorer(
     generated_at: datetime | None = None,
     lateralization: LateralizationStudy | None = None,
     variants: Sequence[ModeVariant] = (),
+    zones: ZonesRun | None = None,
 ) -> str:
     """Devuelve el HTML completo del explorador."""
     generated_at = generated_at or SystemClock().now()
-    payload = build_payload(run, max_bars, lateralization, variants)
+    payload = build_payload(run, max_bars, lateralization, variants, zones)
     # El JSON viaja dentro de un <script>: escapar `</` evita que un texto
     # cualquiera pueda cerrar la etiqueta antes de tiempo.
     data = json.dumps(payload, separators=(",", ":"), ensure_ascii=False, default=str).replace(
@@ -113,15 +116,22 @@ def build_payload(
     max_bars: int = 60_000,
     lateralization: LateralizationStudy | None = None,
     variants: Sequence[ModeVariant] = (),
+    zones: ZonesRun | None = None,
 ) -> dict[str, Any]:
     """Serializa la corrida a la estructura que consume el explorador.
 
     Con `variants` el payload lleva además los impulsos de los otros modos de
     R-36. Las velas van una sola vez —son idénticas en los tres— y lo que se
     repite son los impulsos, que al lado de ocho años de M15 no pesan nada.
+
+    Las zonas de la fase 2.0 viajan **sólo con el modo activo**: se calculan
+    sobre los impulsos de esa corrida y superponerlas a los de otro modo
+    enseñaría zonas de impulsos que en ese modo no existen. El explorador apaga
+    sus capas al cambiar de modo y lo dice en las notas.
     """
     charts = run.config.charts
     contacts = lateralization.per_timeframe if lateralization is not None else {}
+    zoned = zones.per_timeframe if zones is not None and zones.enabled else {}
     bars = {
         chart: _bars_payload(frame, max_bars) for chart, frame in run.chart_bars.items()
     }
@@ -156,11 +166,15 @@ def build_payload(
         "charts": list(available),
         "layout": {chart: list(charts.overlays(chart)) for chart in available},
         "labels": {chart: _label(chart) for chart in {*available, *charts.detected}},
+        "spans": _spans(run),
         "bars": bars,
         "impulses": {
-            timeframe: _impulse_payload(analysis, contacts.get(timeframe))
+            timeframe: _impulse_payload(analysis, contacts.get(timeframe), zoned.get(timeframe))
             for timeframe, analysis in run.analyses.items()
         },
+        #: `False` cuando la corrida no llevaba zonas: el explorador esconde sus
+        #: casillas en vez de ofrecer capas que no pueden dibujar nada.
+        "hasZones": bool(zoned),
         "modes": [_mode_summary(variant) for variant in variants],
         # El modo activo ya viaja en `impulses` y repetirlo aquí costaba 4,5 MB
         # de fichero. El explorador lo lee de `impulses` por identidad del modo,
@@ -210,6 +224,29 @@ def _label(timeframe: str) -> str:
     return "Diario" if timeframe == "D" else timeframe
 
 
+def _spans(run: ImpulseRun) -> dict[str, int]:
+    """Duración de la vela de cada temporalidad, en minutos.
+
+    Es lo que le falta al replay para saber **cuándo** se supo cada cosa. Las
+    velas van etiquetadas al inicio del intervalo (§1.2), así que la vela de `t`
+    no cierra hasta `t + span`: el impulso diario que nace el lunes no puede
+    aparecer sobre el gráfico de H4 hasta que el lunes ha terminado, y sin este
+    dato el replay lo pintaría veinticuatro horas antes de tiempo.
+
+    Se mide sobre las propias velas —la moda de las diferencias— en vez de
+    deducirla del nombre de la temporalidad: con ancla de sesión el diario no
+    dura siempre lo mismo y el nombre mentiría.
+    """
+    frames: dict[str, pd.DataFrame] = {
+        timeframe: analysis.bars for timeframe, analysis in run.analyses.items()
+    }
+    frames.update(run.chart_bars)
+    return {
+        timeframe: int(_bar_span(pd.DatetimeIndex(frame.index)) // pd.Timedelta(minutes=1))
+        for timeframe, frame in frames.items()
+    }
+
+
 # --- Velas ------------------------------------------------------------------
 
 
@@ -248,7 +285,9 @@ def _round(series: pd.Series) -> list[float]:
 
 
 def _impulse_payload(
-    analysis: TimeframeAnalysis, measurement: TimeframeLateralization | None
+    analysis: TimeframeAnalysis,
+    measurement: TimeframeLateralization | None,
+    zones: TimeframeZones | None = None,
 ) -> dict[str, Any]:
     bars = analysis.bars
     last = pd.Timestamp(pd.DatetimeIndex(bars.index)[-1])
@@ -260,6 +299,97 @@ def _impulse_payload(
         "breaks": _breaks(analysis),
         "limbo": _limbo_regions(analysis),
         "contacts": _contacts(measurement),
+        "zones": _zones(zones, analysis, last),
+        #: Velas de ancla de los ID que murieron sin OB. La zona no existe, pero
+        #: el propietario necesita ver dónde estaba la candidata (§8).
+        "obCandidates": _candidates(zones, analysis, last),
+    }
+
+
+def _zones(
+    zones: TimeframeZones | None, analysis: TimeframeAnalysis, last: pd.Timestamp
+) -> list[dict[str, Any]]:
+    """Capas "Zonas UL" y "OB" (§8). Puramente visual: no interviene en nada.
+
+    Cada zona viaja con dos tramos horizontales distintos, igual que las líneas
+    del ID en B.1: el rectángulo lleno va del **nacimiento** al fin del ID —que
+    es exactamente cuando la zona existe— y `xd` marca la vela que la define,
+    para poder dibujar hasta ahí un contorno atenuado. Sin esa distinción el
+    dibujo diría que la zona existía antes de tiempo.
+    """
+    if zones is None:
+        return []
+    ends = _impulse_ends(analysis, last)
+    return [
+        _zone_record(zoned, zone, ends[zoned.id_num])
+        for zoned in zones.items
+        for zone in zoned.zones()
+    ]
+
+
+def _zone_record(zoned: ImpulseZones, zone: Zone, end: pd.Timestamp) -> dict[str, Any]:
+    return {
+        "id": zoned.id_num,
+        "k": zone.kind.value,
+        "d": zoned.direction.value,
+        "x0": _minute(pd.Timestamp(zone.ts_birth)),
+        "x1": _minute(end),
+        "xd": _minute(pd.Timestamp(zone.ts_defining)),
+        "lo": round(zone.low, DECIMALS),
+        "hi": round(zone.high, DECIMALS),
+        "i": round(zone.inner, DECIMALS),
+        "o": round(zone.outer, DECIMALS),
+        "ext": zone.extended,
+        "flat": zone.is_flat,
+        "xc": (
+            None
+            if zone.ts_confirmation is None
+            else _minute(pd.Timestamp(zone.ts_confirmation))
+        ),
+    }
+
+
+def _candidates(
+    zones: TimeframeZones | None, analysis: TimeframeAnalysis, last: pd.Timestamp
+) -> list[dict[str, Any]]:
+    """La vela del ancla de los ID sin OB confirmado, para dibujarla punteada."""
+    if zones is None:
+        return []
+    ends = _impulse_ends(analysis, last)
+    anchors = {impulse.id_num: impulse for impulse in analysis.impulses}
+    bars = analysis.bars
+    positions = {stamp: position for position, stamp in enumerate(pd.DatetimeIndex(bars.index))}
+    high = bars["high"].to_numpy(dtype=float)
+    low = bars["low"].to_numpy(dtype=float)
+
+    payload: list[dict[str, Any]] = []
+    for zoned in zones.without_order_block:
+        impulse = anchors.get(zoned.id_num)
+        if impulse is None:
+            continue
+        position = positions.get(pd.Timestamp(impulse.ts_anchor))
+        if position is None:
+            continue
+        payload.append(
+            {
+                "id": zoned.id_num,
+                "d": zoned.direction.value,
+                "xd": _minute(pd.Timestamp(impulse.ts_anchor)),
+                "x0": _minute(pd.Timestamp(zoned.ts_constitution)),
+                "x1": _minute(ends[zoned.id_num]),
+                "lo": round(float(low[position]), DECIMALS),
+                "hi": round(float(high[position]), DECIMALS),
+            }
+        )
+    return payload
+
+
+def _impulse_ends(analysis: TimeframeAnalysis, last: pd.Timestamp) -> dict[int, pd.Timestamp]:
+    return {
+        impulse.id_num: (
+            pd.Timestamp(impulse.ts_end) if impulse.ts_end is not None else last
+        )
+        for impulse in analysis.impulses
     }
 
 

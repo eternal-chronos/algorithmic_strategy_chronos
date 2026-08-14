@@ -1023,10 +1023,19 @@ def _scope_block(run: ImpulseRun) -> str:
     )
 
 
-def render_evidence(evidence: Evidence) -> str:
-    """Sección G en texto plano: esperado y obtenido, uno al lado del otro."""
+#: Cabecera por defecto: la de la sección G de la fase 1.
+EVIDENCE_TITLE = "G. Evidencia de las comprobaciones de la fase 1"
+
+
+def render_evidence(evidence: Evidence, title: str = EVIDENCE_TITLE) -> str:
+    """Evidencia en texto plano: esperado y obtenido, uno al lado del otro.
+
+    El título es un parámetro porque el mismo formato lo usan la sección G de la
+    fase 1 y la evidencia de la fase 2.0, y una cabecera que mienta sobre qué se
+    está comprobando es peor que no tenerla.
+    """
     blocks = [
-        section("G. Evidencia de las comprobaciones de la fase 1"),
+        section(title),
         "",
         "Cada línea trae el valor esperado —escrito a mano antes de correr el motor— y",
         "el obtenido en esta misma corrida. Sin resúmenes: las dos columnas.",
@@ -1048,7 +1057,9 @@ def render_evidence(evidence: Evidence) -> str:
             "",
         ]
     veredicto = "TODO OK" if evidence.ok else f"{len(evidence.failures)} COMPROBACIONES FALLAN"
-    blocks.append(f"Veredicto de la sección G: {veredicto}")
+    # El veredicto nombra el mismo bloque que la cabecera: repetir "sección G" en
+    # la evidencia de la fase 2.0 diría que se ha comprobado otra cosa.
+    blocks.append(f"Veredicto de {title.split('.')[0]}: {veredicto}")
     return "\n".join(blocks) + "\n"
 
 

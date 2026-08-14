@@ -42,11 +42,13 @@ h1 { font-size: 20px; margin: 0 0 4px; }
 .buttons button:last-child { border-radius: 0 6px 6px 0; border-right-width: 1px; }
 .buttons button[aria-pressed="true"] { background: var(--ink); color: var(--surface); border-color: var(--ink); }
 label.toggle { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--secondary); }
-input[type="date"], input[type="number"] {
+input[type="date"], input[type="number"], select {
   font: inherit; font-size: 13px; padding: 5px 8px; color: var(--ink);
   background: var(--page); border: 1px solid var(--grid); border-radius: 6px;
 }
 .buttons button[disabled] { opacity: .45; cursor: default; }
+input[disabled], select[disabled] { opacity: .45; }
+#replay-group.on > span { color: var(--ink); font-weight: 600; }
 #chart { background: var(--surface); border: 1px solid var(--grid); border-radius: 10px; }
 .legend {
   display: flex; flex-wrap: wrap; gap: 18px; margin-top: 14px;
@@ -72,9 +74,15 @@ footer code { background: var(--surface); border: 1px solid var(--grid); border-
     </div>
     <div class="group">
       <span>Vista</span>
-      <div class="buttons" id="view-buttons">
-        <button type="button" data-view="candles">Velas</button>
-        <button type="button" data-view="line">Líneas (cierres)</button>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <div class="buttons" id="view-buttons">
+          <button type="button" data-view="candles">Velas</button>
+          <button type="button" data-view="line">Líneas (cierres)</button>
+        </div>
+        <div class="buttons">
+          <button type="button" id="zoom-reset" title="Suelta el zoom hecho a mano y vuelve al
+encuadre automático. También con doble clic sobre el gráfico.">Ajustar</button>
+        </div>
       </div>
     </div>
     <div class="group">
@@ -113,8 +121,52 @@ footer code { background: var(--surface); border: 1px solid var(--grid); border-
         <label class="toggle"><input type="checkbox" id="layer-marks" checked> Constituciones y roturas</label>
         <label class="toggle"><input type="checkbox" id="layer-contacts"> Contactos</label>
         <label class="toggle"><input type="checkbox" id="layer-mid"> Nivel 50 %</label>
+        <span id="zone-layers" style="display:flex; gap:16px; flex-wrap:wrap;">
+          <label class="toggle" title="Fase 2.0: el tramo de mecha del extremo del ID.
+Nunca cubre el cuerpo. Se estira una vela si la siguiente llega más lejos.">
+            <input type="checkbox" id="layer-zones-ul" checked> Zonas UL</label>
+          <label class="toggle" title="Fase 2.0: la vela del ancla entera, mechas incluidas.
+Punteada mientras no la confirma una vela del color del impulso.">
+            <input type="checkbox" id="layer-zones-ob" checked> OB</label>
+        </span>
         <label class="toggle"><input type="checkbox" id="layer-wrong" checked>
           Extremo de color contrario (R-36)</label>
+      </div>
+    </div>
+    <div class="group" id="replay-group">
+      <span title="Reproduce la historia vela a vela desde una fecha; en cada paso
+sólo se dibuja lo que el motor ya sabía a esa hora">
+        Replay (desde una fecha)
+      </span>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <input type="date" id="replay-date" aria-label="Fecha de arranque del replay">
+        <div class="buttons">
+          <button type="button" id="replay-start" title="Arranca el replay en esa fecha">
+            Empezar</button>
+          <button type="button" id="replay-back" title="Un paso atrás (flecha izquierda)">
+            ◀◀</button>
+          <button type="button" id="replay-step" title="Siguiente paso (flecha derecha)">
+            ▶▶</button>
+          <button type="button" id="replay-play"
+                  title="Reproducir sin parar (barra espaciadora)">▶</button>
+          <button type="button" id="replay-exit" title="Vuelve al rango de partida">
+            Salir</button>
+        </div>
+        <label class="toggle" title="Arma la vela en curso con las velas de la
+temporalidad inferior. El motor no la ve hasta que cierra.">
+          <input type="checkbox" id="replay-forming" checked> Vela en formación</label>
+        <label class="toggle">Velocidad
+          <select id="replay-speed" aria-label="Velocidad del replay">
+            <option value="1500">Lenta</option>
+            <option value="700" selected>Normal</option>
+            <option value="250">Rápida</option>
+            <option value="60">Muy rápida</option>
+          </select>
+        </label>
+        <label class="toggle">Velas a la vista
+          <input type="number" id="replay-window" value="180" min="20" max="2000" step="20"
+                 style="width:86px" aria-label="Velas visibles en el replay">
+        </label>
       </div>
     </div>
     <div class="group">
@@ -146,8 +198,22 @@ footer code { background: var(--surface); border: 1px solid var(--grid); border-
     <span>○ TOQUE_MECHA</span>
     <span>□ ROTURA_FALLIDA</span>
     <span>línea punteada fina = nivel del 50 % del ID</span>
+    <span><i class="box" style="background:#1baf7a; opacity:.30"></i>Zona UL (fase 2.0):
+      del cuerpo de la vela del extremo a la punta de su mecha</span>
+    <span><i class="box" style="background:#1baf7a; opacity:.16"></i>Zona OB (fase 2.0):
+      la vela del ancla entera</span>
+    <span>rectángulo de borde punteado = vela del ancla de un ID SIN OB confirmado:
+      la zona no existe, la vela sí</span>
+    <span>★ vela que confirma el OB</span>
+    <span>contorno atenuado a la izquierda de una zona = la vela ya la definía pero
+      la zona todavía no existía (el ID aún no se había constituido)</span>
     <span>✕ grueso = extremo fijado por una vela del color contrario al impulso (R-36),
       sobre la vela que lo fijó</span>
+    <span>vela hueca a la derecha = vela en formación durante el replay: el motor
+      todavía no la ha visto cerrar</span>
+    <span>el zoom hecho a mano (rueda o arrastre) se conserva paso a paso durante el
+      replay: la ventana sólo se desplaza para seguir a la última vela. «Ajustar»
+      o doble clic devuelven el encuadre automático</span>
   </div>
 
   <footer>

@@ -19,6 +19,7 @@ from chronos.application.structure.config import (
     StructureDataConfig,
     StructureReportingConfig,
     TimezoneAuditConfig,
+    ZonesConfig,
 )
 from chronos.domain.structure.enums import AnchorMode, DojiBreakMode, LegStartMode, SeedMode
 
@@ -70,6 +71,15 @@ class ImpulseRulesSchema(_Strict):
         )
 
 
+class ZonesSchema(_Strict):
+    #: Fase 2.0. Apagadas por defecto: la línea base de la fase 1 se reproduce
+    #: con este fichero tal cual, sin tocar nada.
+    enabled: bool = False
+
+    def to_domain(self) -> ZonesConfig:
+        return ZonesConfig(**self.model_dump())
+
+
 class TimezoneAuditSchema(_Strict):
     enabled: bool = True
     expected_peak_utc: str = "13:30"
@@ -103,6 +113,7 @@ class ImpulseSchema(_Strict):
     #: reparto por defecto, que es el que usa el propietario.
     charts: dict[str, list[str]] | None = None
     rules: ImpulseRulesSchema = Field(default_factory=ImpulseRulesSchema)
+    zones: ZonesSchema = Field(default_factory=ZonesSchema)
     timezone_audit: TimezoneAuditSchema = Field(default_factory=TimezoneAuditSchema)
     reporting: StructureReportingSchema = Field(default_factory=StructureReportingSchema)
 
@@ -121,6 +132,7 @@ class ImpulseSchema(_Strict):
                 )
             ),
             rules=self.rules.to_domain(),
+            zones=self.zones.to_domain(),
             timezone_audit=self.timezone_audit.to_domain(),
             reporting=self.reporting.to_domain(),
         )

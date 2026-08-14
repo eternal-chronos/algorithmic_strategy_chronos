@@ -140,7 +140,7 @@ def id_card_figure(
 
     first = max(0, request.first - context)
     last = min(last_index, request.last + context)
-    labels = _labels(pd.DatetimeIndex(analysis.bars.index[first : last + 1]))
+    labels = bar_labels(pd.DatetimeIndex(analysis.bars.index[first : last + 1]))
     colour = BULLISH if impulse.direction.value == "alcista" else BEARISH
     for position, level, name in (
         (impulse.index_anchor, impulse.anchor, "ancla"),
@@ -451,7 +451,7 @@ def _figure(
     # Eje de categorías con una etiqueta por vela: así el fin de semana no abre
     # un hueco vacío y la captura se parece a la pantalla del propietario. Todas
     # las trazas tienen que usar exactamente estas etiquetas o caerían fuera.
-    labels = _labels(pd.DatetimeIndex(window.index))
+    labels = bar_labels(pd.DatetimeIndex(window.index))
 
     figure = go.Figure(
         go.Candlestick(
@@ -496,7 +496,13 @@ def _figure(
     return figure
 
 
-def _labels(index: pd.DatetimeIndex) -> list[str]:
+def bar_labels(index: pd.DatetimeIndex) -> list[str]:
+    """Etiquetas del eje de categorías: una por vela, en UTC.
+
+    Todas las trazas de una captura tienen que usar exactamente estas cadenas
+    o caerían fuera del eje. Es pública porque las capturas de la fase 2.0
+    dibujan sus zonas sobre las mismas velas y necesitan las mismas etiquetas.
+    """
     return [stamp.strftime("%Y-%m-%d %H:%M") for stamp in index]
 
 
@@ -579,7 +585,7 @@ def _draw_contacts(
         subset = inside[inside["tipo_contacto"] == kind.value]
         if subset.empty:
             continue
-        marks = _labels(pd.DatetimeIndex(subset["timestamp"]))
+        marks = bar_labels(pd.DatetimeIndex(subset["timestamp"]))
         figure.add_trace(
             go.Scatter(
                 x=[positions[mark] for mark in marks if mark in positions],

@@ -27,10 +27,12 @@ from chronos.application.structure.lateralization import (
     measure,
 )
 from chronos.application.structure.statistics import ImpulseStatistics, summarize
+from chronos.application.structure.zones import ZonesRun, detect_zones
 from chronos.infrastructure.clock import SystemClock
 from chronos.infrastructure.reporting.impulse_captures import write_captures
 from chronos.infrastructure.reporting.impulse_explorer import ModeVariant, render_explorer
 from chronos.infrastructure.reporting.impulse_report import render_report
+from chronos.infrastructure.reporting.zone_report import render_zone_report
 
 
 class ImpulseReportWriter:
@@ -53,6 +55,9 @@ class ImpulseReportWriter:
         #: para poder alternarlas sobre las mismas velas. Vacío = explorador de un
         #: solo modo, como antes.
         variants: Sequence[ModeVariant] = (),
+        #: Fase 2.0. Con las zonas apagadas viene vacío y no se escribe ni un
+        #: fichero suyo: la carpeta sale exactamente como en la fase 1.
+        zones: ZonesRun | None = None,
         run_id: str | None = None,
     ) -> Path | None:
         """Devuelve la carpeta escrita, o `None` si el módulo está apagado."""
@@ -61,6 +66,7 @@ class ImpulseReportWriter:
 
         statistics = statistics or summarize(run)
         lateralization = lateralization or measure(run)
+        zones = zones if zones is not None else detect_zones(run)
         generated_at = self._clock.now()
         stamp = run_id or generated_at.strftime("%Y%m%d_%H%M%S")
         folder = self._root / f"{stamp}_impulso_dominante"
@@ -85,6 +91,12 @@ class ImpulseReportWriter:
             )
         if baseline is not None:
             _baseline_frame(baseline).to_csv(folder / "antes_y_despues.csv", index=False)
+        if zones.enabled:
+            zones.table().to_csv(folder / "zonas.csv", index=False)
+            zones.survivals().to_csv(folder / "roturas_y_zonas.csv", index=False)
+            (folder / "reporte_zonas.txt").write_text(
+                render_zone_report(run, zones, generated_at), encoding="utf-8"
+            )
         if run.config.reporting.captures:
             # Kaleido abre un navegador headless por imagen: son un par de
             # minutos, así que se puede apagar en las corridas de trabajo.
@@ -97,6 +109,7 @@ class ImpulseReportWriter:
                     generated_at,
                     lateralization,
                     variants,
+                    zones,
                 ),
                 encoding="utf-8",
             )
@@ -132,6 +145,7 @@ class ImpulseReportWriter:
                         }
                         for timeframe, analysis in run.analyses.items()
                     },
+                    "zonas": _zones_summary(zones),
                     "decisiones_cerradas": list(run.config.closed_decisions()),
                     "decisiones_abiertas": list(run.config.open_decisions()),
                     "sustituye_a": (
@@ -151,6 +165,32 @@ class ImpulseReportWriter:
             encoding="utf-8",
         )
         return folder
+
+
+def _zones_summary(zones: ZonesRun) -> dict[str, object]:
+    """Fase 2.0 en el `run.json`: apagada, o con el recuento por temporalidad.
+
+    Se deja constancia también cuando están apagadas para que un informe
+    archivado diga si la corrida las llevaba o no, en vez de tener que deducirlo
+    de la ausencia de ficheros.
+    """
+    if not zones.enabled:
+        return {"activas": False}
+    return {
+        "activas": True,
+        "fase": "2.0 · sólo detección",
+        "por_temporalidad": {
+            timeframe: {
+                "impulsos_con_zonas": len(item.items),
+                "zonas": len(item.table),
+                "con_ob_confirmado": len(item.with_order_block),
+                "sin_ob_confirmado": len(item.without_order_block),
+                "ul_altura_cero": sum(1 for zoned in item.items if zoned.last.is_flat),
+                "ul_extendidos": sum(1 for zoned in item.items if zoned.last.extended),
+            }
+            for timeframe, item in zones.per_timeframe.items()
+        },
+    }
 
 
 def _baseline_frame(baseline: BaselineComparison) -> pd.DataFrame:
