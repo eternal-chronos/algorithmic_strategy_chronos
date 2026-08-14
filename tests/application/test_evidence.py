@@ -154,4 +154,14 @@ def test_el_informe_de_evidencia_enseña_las_dos_columnas(
     assert "esperado" in texto and "obtenido" in texto
     assert "G.1 Día sintético" in texto
     assert "G.6 Regresión" in texto
-    assert "Veredicto de la sección G" in texto
+    assert "Veredicto de G: " in texto
+
+
+def test_el_veredicto_nombra_el_bloque_de_la_cabecera(
+    config: ImpulseConfig, series: dict[str, pd.DataFrame]
+) -> None:
+    """La fase 2.0 reutiliza el formato: el veredicto no puede decir "sección G"."""
+    texto = render_evidence(collect(config, series), "Z. Evidencia de la fase 2.0")
+    assert "Z. Evidencia de la fase 2.0" in texto
+    assert "Veredicto de Z: " in texto
+    assert "sección G" not in texto

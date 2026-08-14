@@ -451,10 +451,20 @@ lo que ocurrió dentro. En la práctica:
   que el lunes ha terminado;
 - las constituciones, roturas, contactos y la ✕ de R-36 esperan a su hora.
 
-Cambiar de temporalidad en mitad del replay no mueve el reloj: se busca la última
-vela de la nueva temporalidad que ya hubiera cerrado a esa misma hora, así que
-saltar de H4 a Diario enseña el diario **incompleto** que tenías en ese momento,
-no el de hoy. Mientras el replay está en marcha los controles de periodo quedan
+**El reloj es uno solo para todas las temporalidades.** No vive en la vela que
+estás mirando: es un minuto, y se enseña en las notas del pie (`reloj ... UTC`).
+Cambiar de temporalidad en mitad del replay no lo mueve —se busca la última vela
+de la nueva que ya hubiera cerrado a esa hora, así que saltar de H4 a Diario
+enseña el diario **incompleto** que tenías en ese momento, no el de hoy— y
+tampoco lo recorta: si en H1 llevas hora y cuarto corrida del día, el diario no
+puede enseñarla como vela cerrada, pero al volver a H1 sigues en el mismo minuto.
+
+La vela en formación se dibuja hasta ese reloj y con la temporalidad **más fina**
+embebida, no con la del paso: en el diario cada ▶▶ avanza una H4, pero el día en
+curso aparece con lo que lleve corrido aunque no haya cerrado ninguna H4 todavía.
+Es lo que hace que saltar de H1 al diario no parezca un salto atrás de un día
+entero. Sigue sin ser una vela del motor —se dibuja hueca—: lo que el detector ve
+no cambia. Mientras el replay está en marcha los controles de periodo quedan
 apagados: la ventana la manda el cursor, y un selector de fechas vivo mentiría.
 
 El replay y la auditoría ciega son dos pruebas distintas sobre la misma ventana y

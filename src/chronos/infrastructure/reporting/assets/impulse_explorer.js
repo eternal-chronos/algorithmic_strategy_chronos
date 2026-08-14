@@ -68,6 +68,11 @@
     marks: true,
     contacts: false,   // capa de contactos: apagada por defecto (F.2)
     mid: false,        // nivel del 50 % de cada ID (F.3)
+    /* Fase 2.0. Encendidas de salida cuando la corrida trae zonas: auditarlas es
+     * justo para lo que se abre este fichero. Si no las trae, las casillas ni
+     * siquiera se enseñan. */
+    zonesUl: true,
+    zonesOb: true,
     blind: false,      // auditoría ciega en curso (F.1)
     revealed: false,
     seed: null,
@@ -79,6 +84,13 @@
     replay: false,
     cursor: 0,
     sub: 0,
+    /* El reloj, en minutos: hasta dónde ha visto el mercado el replay. Es el
+     * estado canónico y no depende de la temporalidad que se esté mirando; el
+     * par (`cursor`, `sub`) es la lectura de ese reloj en el gráfico actual.
+     * Guardarlo aparte es lo que permite ir y volver entre temporalidades sin
+     * perder resolución: el diario no puede enseñar la hora y cuarto que llevas
+     * corrida, pero el reloj no la olvida. */
+    at: 0,
     forming: true,     // armar la vela en curso con la temporalidad inferior
     playing: false,
     speed: 700,        // milisegundos entre pasos
@@ -354,21 +366,64 @@
     return edges ? edges.to - edges.from - 1 : 0;
   }
 
-  function formingCandle() {
-    if (!state.replay || !state.sub) { return null; }
+  /* El reloj fino: el minuto exacto hasta el que se ha visto el mercado. Con la
+   * vela en curso a medio armar no es el cierre de la última vela cerrada sino
+   * el de la última vela inferior formada, y esa diferencia es justo la que hay
+   * que conservar al saltar de temporalidad. */
+  function clock() {
     var edges = formingRange();
-    if (!edges) { return null; }
-    var fine = DATA.bars[edges.timeframe];
-    var count = Math.min(state.sub, edges.to - edges.from);
+    if (!state.sub || !edges) { return now_(); }
+    var fine = DATA.bars[edges.timeframe].t;
+    var last = Math.min(edges.from + state.sub, edges.to) - 1;
+    return fine[last] + span(edges.timeframe);
+  }
+
+  /* La temporalidad más fina embebida por debajo de la que se mira. No es la de
+   * los pasos —en el diario se avanza de H4 en H4—, sino la que da resolución al
+   * dibujo de la vela en curso. */
+  function finest() {
+    var charts = DATA.charts;
+    for (var i = charts.length - 1; i >= 0; i--) {
+      if (DATA.bars[charts[i]] && span(charts[i]) < span(state.chart)) { return charts[i]; }
+    }
+    return null;
+  }
+
+  /* La vela a medio hacer del borde derecho. Llega exactamente hasta el reloj y
+   * se arma con la temporalidad más fina que haya, no con la de los pasos: en el
+   * diario cada paso es una H4, pero si el reloj lleva hora y cuarto corrida el
+   * día tiene que verse con esa hora y cuarto dentro. Es lo que hace que saltar
+   * de H1 al diario no parezca un salto atrás de un día entero.
+   *
+   * Sigue sin ser una vela del motor —por eso se dibuja hueca—: el detector no
+   * ve nada hasta que la vela cierra. */
+  function formingCandle() {
+    if (!state.replay || !state.forming) { return null; }
+    var t = bars().t;
+    if (state.cursor + 1 >= t.length) { return null; }
+    var start = t[state.cursor + 1];
+    var timeframe = finest();
+    if (!timeframe || state.at <= start) { return null; }
+    var fine = DATA.bars[timeframe];
+    var from = lowerBound(fine.t, start);
+    var end = Math.min(
+      lowerBound(fine.t, state.at - span(timeframe) + 1),  // cerradas al reloj
+      lowerBound(fine.t, start + span(state.chart))        // y dentro de la vela
+    );
+    if (end <= from) { return null; }
     var high = -Infinity, low = Infinity;
-    for (var i = edges.from; i < edges.from + count; i++) {
+    for (var i = from; i < end; i++) {
       if (fine.h[i] > high) { high = fine.h[i]; }
       if (fine.l[i] < low) { low = fine.l[i]; }
     }
+    // El recuento que se enseña es el de los PASOS, que es lo que el propietario
+    // controla con ▶▶; el dibujo va más fino cuando el reloj lo permite.
+    var steps = formingRange();
     return {
-      x: edges.at, o: fine.o[edges.from], h: high, l: low,
-      c: fine.c[edges.from + count - 1],
-      done: count, total: edges.to - edges.from, timeframe: edges.timeframe
+      x: start, o: fine.o[from], h: high, l: low, c: fine.c[end - 1],
+      done: state.sub, total: steps ? steps.to - steps.from : 0,
+      timeframe: steps ? steps.timeframe : timeframe,
+      until: fine.t[end - 1] + span(timeframe)
     };
   }
 
@@ -384,6 +439,7 @@
       text: ["VELA EN FORMACIÓN · el motor aún no la ha visto cerrar<br>" +
         stamp(half.x) + " → " + label(state.chart) +
         "<br>" + half.done + " de " + half.total + " velas de " + label(half.timeframe) +
+        " · precio hasta " + iso(half.until).slice(0, 16) + " UTC" +
         "<br>O " + price(half.o) + " · H " + price(half.h) +
         "<br>L " + price(half.l) + " · C " + price(half.c)],
       hoverinfo: "text", hoverlabel: { align: "left" }
@@ -549,6 +605,229 @@
       marker: {
         symbol: "x-thin", size: 13, color: COLORS.ink,
         line: { color: COLORS.ink, width: 2.4 }
+      }
+    }];
+  }
+
+  /* --- Fase 2.0: zonas UL y OB ---------------------------------------------
+   *
+   * DIBUJO Y NADA MÁS. Las zonas llegan calculadas desde Python y no intervienen
+   * en la detección de impulsos ni en la regla de rotura, que en esta fase sigue
+   * siendo por línea.
+   *
+   * Cada zona se pinta en dos tramos, con la misma convención que las líneas del
+   * ID en B.1: relleno sólido desde que la zona NACE hasta que muere el ID —que
+   * es exactamente cuando existe— y un contorno atenuado desde la vela que la
+   * define hasta ese nacimiento. Sin esa distinción el dibujo diría que la zona
+   * estaba ahí antes de tiempo, que es justo lo contrario de lo que ocurre: el
+   * UL no existe hasta la constitución y el OB, hasta que se confirma.
+   *
+   * Las zonas viajan sólo con el modo activo de R-36: se calcularon sobre sus
+   * impulsos y superponerlas a las de otro modo enseñaría zonas de impulsos que
+   * en ese modo no existen. Al cambiar de modo, las capas se quedan vacías.
+   */
+  function hasZones() { return DATA.hasZones === true; }
+
+  function zonesAvailable() {
+    return hasZones() && state.mode === DATA.meta.legStartMode;
+  }
+
+  function zonesOf(timeframe) {
+    if (!zonesAvailable()) { return []; }
+    return impulsesOf(timeframe).zones || [];
+  }
+
+  function candidatesOf(timeframe) {
+    if (!zonesAvailable()) { return []; }
+    return impulsesOf(timeframe).obCandidates || [];
+  }
+
+  function wantsZone(kind) {
+    return kind === "UL" ? state.zonesUl : state.zonesOb;
+  }
+
+  /* Un polígono por zona dentro de una sola traza por (temporalidad, tipo,
+   * dirección): con `fill: toself` y separadores nulos, Plotly los dibuja todos
+   * sin multiplicar las trazas por cada ID de la ventana. */
+  function zoneTraces(range) {
+    if (blindfolded() || !zonesAvailable()) { return []; }
+    if (!state.zonesUl && !state.zonesOb) { return []; }
+    var edges = window_(range);
+    var traces = [];
+
+    overlays().forEach(function (timeframe, position) {
+      if (!isVisible(timeframe)) { return; }
+      var own = position === 0;
+      var allowed = visibleIds(timeframe, edges);
+      var buckets = {};
+
+      zonesOf(timeframe).forEach(function (zone) {
+        if (!wantsZone(zone.k)) { return; }
+        if (zone.x1 < edges.lo || zone.xd > edges.hi) { return; }
+        // La zona no existe hasta que cierra la vela que la hace nacer.
+        if (pending(zone.x0, timeframe, edges)) { return; }
+        if (!keeps(allowed, zone.id)) { return; }
+        var key = zone.k + ":" + zone.d;
+        if (!buckets[key]) { buckets[key] = { live: shape(), before: shape(), zone: zone }; }
+        pushZone(buckets[key].live, zone.x0, clip(zone.x1, edges), zone, timeframe, false);
+        if (zone.xd < zone.x0) {
+          pushZone(buckets[key].before, zone.xd, zone.x0, zone, timeframe, true);
+        }
+      });
+
+      Object.keys(buckets).forEach(function (key) {
+        var kind = key.split(":")[0];
+        var direction = key.split(":")[1];
+        var colour = direction === "alcista" ? COLORS.bullish : COLORS.bearish;
+        var name = (kind === "UL" ? "Zona UL " : "Zona OB ") + label(timeframe) +
+          " " + direction + (own ? "" : " (contexto)");
+        if (buckets[key].live.x.length) {
+          traces.push(zoneTrace(name, buckets[key].live, colour, kind, own, false));
+        }
+        if (buckets[key].before.x.length) {
+          traces.push(zoneTrace(
+            "Antes de existir · " + name, buckets[key].before, colour, kind, own, true
+          ));
+        }
+      });
+    });
+    return traces;
+  }
+
+  function shape() { return { x: [], y: [], text: [] }; }
+
+  /* Un rectángulo cerrado, en el orden que espera `fill: toself`, más el nulo
+   * que lo separa del siguiente. */
+  function pushZone(bucket, from, to, zone, timeframe, before) {
+    var a = iso(from), b = iso(to);
+    var caption = zoneCaption(zone, timeframe, before);
+    // Una zona plana no tiene rectángulo: es una línea, y se dibuja como tal.
+    var lo = zone.lo, hi = zone.hi;
+    bucket.x.push(a, b, b, a, a, null);
+    bucket.y.push(lo, lo, hi, hi, lo, null);
+    bucket.text.push(caption, caption, caption, caption, caption, "");
+  }
+
+  function zoneCaption(zone, timeframe, before) {
+    var head = before
+      ? "ANTES DE EXISTIR · la vela ya definía la zona, el ID no estaba constituido<br>"
+      : "";
+    var body = "Zona " + zone.k + " del ID " + timeframe + " nº " + zone.id +
+      " · " + zone.d +
+      "<br>interior " + price(zone.i) + " · exterior " + price(zone.o) +
+      "<br>altura " + price(zone.hi - zone.lo) +
+      "<br>la define la vela de " + stamp(zone.xd);
+    if (zone.k === "UL") {
+      body += zone.ext
+        ? "<br>extendida a la vela siguiente"
+        : "<br>sin extender";
+      if (zone.flat) { body += "<br>ALTURA CERO: la vela no dejó mecha"; }
+    } else if (zone.xc !== null && zone.xc !== undefined) {
+      body += "<br>confirmado por la vela de " + stamp(zone.xc);
+    }
+    body += "<br>la zona existe desde " + stamp(zone.x0);
+    return head + body;
+  }
+
+  function zoneTrace(name, bucket, colour, kind, own, before) {
+    return {
+      type: "scatter", mode: "lines", name: name,
+      x: bucket.x, y: bucket.y, text: bucket.text,
+      hoverinfo: "text", hoverlabel: { align: "left" }, connectgaps: false,
+      fill: before ? "none" : "toself",
+      fillcolor: before ? undefined : rgba(colour, kind === "UL" ? 0.30 : 0.16),
+      opacity: before ? 0.35 : (own ? 1 : 0.7),
+      line: {
+        color: colour,
+        width: before ? 1 : (own ? 1.2 : 1),
+        dash: before ? "dot" : "solid"
+      }
+    };
+  }
+
+  /* El color de la paleta llega como `#rrggbb`; el relleno necesita alfa. */
+  function rgba(hex, alpha) {
+    var value = String(hex).replace("#", "");
+    if (value.length !== 6) { return hex; }
+    var r = parseInt(value.slice(0, 2), 16);
+    var g = parseInt(value.slice(2, 4), 16);
+    var b = parseInt(value.slice(4, 6), 16);
+    return "rgba(" + r + "," + g + "," + b + "," + alpha + ")";
+  }
+
+  /* La vela del ancla de un ID que murió sin OB confirmado. La zona NO existe
+   * —por eso va sin relleno y con el borde punteado— pero el propietario tiene
+   * que ver dónde estaba la candidata para juzgar la regla (§8). */
+  function candidateTraces(range) {
+    if (blindfolded() || !state.zonesOb || !zonesAvailable()) { return []; }
+    var edges = window_(range);
+    var bucket = shape();
+
+    overlays().forEach(function (timeframe) {
+      if (!isVisible(timeframe)) { return; }
+      var allowed = visibleIds(timeframe, edges);
+      candidatesOf(timeframe).forEach(function (item) {
+        if (item.x1 < edges.lo || item.xd > edges.hi) { return; }
+        if (pending(item.x0, timeframe, edges)) { return; }
+        if (!keeps(allowed, item.id)) { return; }
+        var caption = "OB SIN CONFIRMAR · esta zona NO existe<br>ID " + timeframe +
+          " nº " + item.id + " · " + item.d +
+          "<br>vela del ancla " + stamp(item.xd) +
+          "<br>de " + price(item.lo) + " a " + price(item.hi) +
+          "<br>ninguna vela del color del impulso superó su mecha antes de morir el ID" +
+          "<br>en la fase 2.1 este ID se rompería por línea";
+        var a = iso(Math.max(item.xd, edges.lo)), b = iso(clip(item.x1, edges));
+        bucket.x.push(a, b, b, a, a, null);
+        bucket.y.push(item.lo, item.lo, item.hi, item.hi, item.lo, null);
+        bucket.text.push(caption, caption, caption, caption, caption, "");
+      });
+    });
+    if (!bucket.x.length) { return []; }
+    return [{
+      type: "scatter", mode: "lines", name: "OB sin confirmar",
+      x: bucket.x, y: bucket.y, text: bucket.text,
+      hoverinfo: "text", hoverlabel: { align: "left" }, connectgaps: false,
+      fill: "none", opacity: 0.8,
+      line: { color: COLORS.muted, width: 1.4, dash: "dot" }
+    }];
+  }
+
+  /* Marcador sobre la vela que confirma cada OB (§8). Va sobre esa vela y no
+   * sobre la del ancla: es la que hace nacer la zona. */
+  function confirmationTraces(range) {
+    if (blindfolded() || !state.zonesOb || !zonesAvailable()) { return []; }
+    var edges = window_(range);
+    var items = [];
+
+    overlays().forEach(function (timeframe) {
+      if (!isVisible(timeframe)) { return; }
+      var allowed = visibleIds(timeframe, edges);
+      zonesOf(timeframe).forEach(function (zone) {
+        if (zone.k !== "OB" || zone.xc === null || zone.xc === undefined) { return; }
+        if (zone.xc < edges.lo || zone.xc > edges.hi) { return; }
+        // Se sabe que esa vela confirmó, pero la zona no aparece hasta nacer.
+        if (pending(zone.x0, timeframe, edges)) { return; }
+        if (!keeps(allowed, zone.id)) { return; }
+        items.push({ tf: timeframe, zone: zone });
+      });
+    });
+    if (!items.length) { return []; }
+    return [{
+      type: "scatter", mode: "markers", name: "Confirmación del OB",
+      x: items.map(function (item) { return iso(item.zone.xc); }),
+      y: items.map(function (item) { return item.zone.i; }),
+      text: items.map(function (item) {
+        var zone = item.zone;
+        return "CONFIRMA EL OB del ID " + item.tf + " nº " + zone.id +
+          " (" + zone.d + ")<br>" + stamp(zone.xc) +
+          "<br>una vela " + (zone.d === "alcista" ? "verde" : "roja") +
+          " superó la mecha de la vela del ancla" +
+          "<br>la zona OB existe desde " + stamp(zone.x0);
+      }),
+      hoverinfo: "text", hoverlabel: { align: "left" },
+      marker: {
+        symbol: "star", size: 11, color: COLORS.ink,
+        line: { color: COLORS.surface, width: 1 }
       }
     }];
   }
@@ -807,10 +1086,15 @@
     if (state.replay && state.zoom.x) { state.zoom.x = followX(state.zoom.x, now_()); }
     var range = bounds();
     var cut = slice(range);
+    // Las zonas van justo detrás de las velas: son áreas, y encima de las
+    // líneas del ID taparían lo que se está auditando.
     var traces = priceTraces(cut)
+      .concat(zoneTraces(range))
+      .concat(candidateTraces(range))
       .concat(impulseTraces(range))
       .concat(midTraces(range))
       .concat(markerTraces(range))
+      .concat(confirmationTraces(range))
       .concat(contactTraces(range))
       .concat(wrongExtremeTraces(range));
 
@@ -852,12 +1136,18 @@
       visible.toLocaleString("es-ES") + " velas en la ventana";
     if (state.replay) {
       var half = formingCandle();
-      text = "REPLAY · " + label(state.chart) + " · última vela cerrada " +
+      text = "REPLAY · " + label(state.chart) + " · reloj " +
+        iso(state.at).slice(0, 16) + " UTC · última vela cerrada " +
         stamp(b.t[state.cursor]) + " (nº " + (state.cursor + 1).toLocaleString("es-ES") +
         " de " + b.t.length.toLocaleString("es-ES") + ")" +
         (half
-          ? " · vela en formación con " + half.done + " de " + half.total + " velas de " +
-            label(half.timeframe)
+          ? (half.done
+            ? " · vela en formación con " + half.done + " de " + half.total + " velas de " +
+              label(half.timeframe)
+            // Puede haber vela a medio armar sin que haya cerrado ninguna vela
+            // del paso: es lo que pasa al llegar al diario desde H1.
+            : " · vela en formación, todavía sin ninguna vela de " +
+              label(half.timeframe) + " cerrada")
           : "") +
         " · sólo se dibuja lo que el motor sabía a esa hora";
     }
@@ -869,6 +1159,21 @@
       text += " · filtro de dibujo «" +
         (state.visible === "current" ? "ID actual" : "ID actual + anterior") +
         "»: los demás siguen en los datos y en los informes";
+    }
+    if (hasZones() && !zonesAvailable()) {
+      text += " · las zonas de la fase 2.0 se calcularon sobre " +
+        DATA.meta.legStartMode + " y no se dibujan en otro modo: serían zonas de " +
+        "impulsos que en este modo no existen";
+    } else if (zonesAvailable() && (state.zonesUl || state.zonesOb)) {
+      var conZona = overlays().filter(isVisible).reduce(function (total, timeframe) {
+        var allowed = visibleIds(timeframe, edges);
+        return total + zonesOf(timeframe).filter(function (zone) {
+          return wantsZone(zone.k) && zone.x1 >= edges.lo && zone.xd <= edges.hi &&
+            keeps(allowed, zone.id);
+        }).length;
+      }, 0);
+      text += " · zonas dibujadas: " + conZona.toLocaleString("es-ES") +
+        " (fase 2.0: sólo se dibujan, no rompen nada)";
     }
     var info = modeInfo(state.mode);
     if (info) {
@@ -969,6 +1274,7 @@
     state.replay = true;
     state.cursor = index;
     state.sub = 0;
+    state.at = now_();
     draw();
   }
 
@@ -993,12 +1299,26 @@
   /* Al cambiar de temporalidad en mitad del replay el reloj no se mueve: se
    * busca la última vela de la nueva que ya hubiera cerrado a esa misma hora. Si
    * no se hiciera, el índice del cursor —que es de otro array— señalaría a una
-   * fecha cualquiera. */
+   * fecha cualquiera.
+   *
+   * Y lo que va corrido de la vela en curso se conserva igual: si en H4 llevas
+   * dos velas dentro del día, el diario tiene que enseñar su vela a medio armar
+   * con esas dos horas dentro. Sin esto, saltar de temporalidad devolvía el
+   * gráfico al último cierre —el día anterior— y parecía que el replay se
+   * reiniciaba. El reloj no puede ir a más resolución que la temporalidad
+   * inferior de la nueva: lo que no completa una de sus velas se queda fuera. */
   function alignCursor(at) {
     var t = bars().t;
     var index = lowerBound(t, at - span(state.chart) + 1) - 1;
     state.cursor = Math.min(Math.max(index, 0), t.length - 1);
     state.sub = 0;
+    if (!state.forming) { return; }
+    var edges = formingRange();
+    if (!edges) { return; }
+    var fine = DATA.bars[edges.timeframe].t;
+    // Velas inferiores cerradas a esa hora que caen dentro de la que se forma.
+    var formed = lowerBound(fine, at - span(edges.timeframe) + 1) - edges.from;
+    state.sub = Math.max(0, Math.min(formed, edges.to - edges.from - 1));
   }
 
   /* Un paso: o se forma un trozo más de la vela en curso, o la vela cierra y el
@@ -1017,6 +1337,7 @@
     } else {
       return false;
     }
+    state.at = clock();
     draw();
     return true;
   }
@@ -1055,7 +1376,9 @@
       button.dataset.tf = chart;
       button.title = "Dibuja el impulso de " + DATA.layout[chart].map(label).join(" y ");
       button.addEventListener("click", function () {
-        var at = state.replay ? now_() : null;
+        // El reloj canónico, no el que se lee en este gráfico: si vienes de
+        // pasar por el diario, lo que allí no cabía sigue estando aquí.
+        var at = state.replay ? state.at : null;
         state.chart = chart;
         if (at !== null) { alignCursor(at); }
         buildImpulseLayers();
@@ -1088,6 +1411,15 @@
       });
       container.appendChild(button);
     });
+  }
+
+  /* Fase 2.0. Sin zonas en el payload las casillas no se enseñan: una capa que
+   * no puede dibujar nada sólo hace dudar de si está fallando. */
+  function buildZoneLayers() {
+    var group = document.getElementById("zone-layers");
+    if (!group || hasZones()) { return; }
+    if (group.style) { group.style.display = "none"; }
+    state.zonesUl = state.zonesOb = false;
   }
 
   function buildVisibleButtons() {
@@ -1199,6 +1531,15 @@
     // Sólo hay algo que soltar si el encuadre está tomado a mano.
     document.getElementById("zoom-reset").disabled = !state.zoom.x && !state.zoom.y;
 
+    // Fase 2.0: las zonas sólo existen para el modo con el que se calcularon.
+    if (hasZones()) {
+      ["layer-zones-ul", "layer-zones-ob"].forEach(function (id) {
+        document.getElementById(id).disabled = !zonesAvailable();
+      });
+      document.getElementById("layer-zones-ul").checked = state.zonesUl;
+      document.getElementById("layer-zones-ob").checked = state.zonesOb;
+    }
+
     seedInput().value = state.seed === null ? "" : String(state.seed);
     document.getElementById("blind-reveal").disabled = !blindfolded();
     document.getElementById("blind-exit").disabled = !state.blind;
@@ -1257,7 +1598,9 @@
       ["layer-marks", "marks"],
       ["layer-contacts", "contacts"],
       ["layer-mid", "mid"],
-      ["layer-wrong", "wrong"]
+      ["layer-wrong", "wrong"],
+      ["layer-zones-ul", "zonesUl"],
+      ["layer-zones-ob", "zonesOb"]
     ].forEach(function (pair) {
       document.getElementById(pair[0]).addEventListener("change", function (event) {
         state[pair[1]] = event.target.checked;
@@ -1293,7 +1636,9 @@
     document.getElementById("replay-exit").addEventListener("click", exitReplay);
     document.getElementById("replay-forming").addEventListener("change", function (event) {
       state.forming = event.target.checked;
-      if (!state.forming) { state.sub = 0; }
+      // Sin vela en formación el reloj vuelve al último cierre: es lo que se está
+      // enseñando, y el reloj no puede prometer más de lo que se ve.
+      if (!state.forming) { state.sub = 0; state.at = now_(); }
       draw();
     });
     document.getElementById("replay-speed").addEventListener("change", function (event) {
@@ -1341,6 +1686,7 @@
 
   buildChartButtons();
   buildModeButtons();
+  buildZoneLayers();
   buildVisibleButtons();
   buildPresetButtons();
   buildImpulseLayers();

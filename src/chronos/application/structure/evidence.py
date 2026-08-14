@@ -330,8 +330,8 @@ def _determinism(config: ImpulseConfig, series: Mapping[str, pd.DataFrame]) -> C
             Check("config_hash", first.config_hash, second.config_hash),
             Check(
                 "impulsos por temporalidad",
-                _counts(counts),
-                _counts(
+                format_counts(counts),
+                format_counts(
                     {
                         timeframe: len(analysis.impulses)
                         for timeframe, analysis in second.analyses.items()
@@ -393,18 +393,19 @@ def _regression(config: ImpulseConfig, series: Mapping[str, pd.DataFrame]) -> Ch
     return CheckGroup(
         title="G.6 Regresión contra la línea base de la fase 1",
         note=(
-            f"{_counts(PHASE1_BASELINE)} con la configuración definitiva. Cualquier cosa "
-            f"que la mueva es una regresión. La base provisional —{_counts(PROVISIONAL_BASELINE)}, "
+            f"{format_counts(PHASE1_BASELINE)} con la configuración definitiva. Cualquier cosa "
+            f"que la mueva es una regresión. La base provisional —{format_counts(PROVISIONAL_BASELINE)}, "
             "ancla A2 y corte diario en 00:00 UTC— queda archivada y ya no se comprueba."
         ),
         checks=(
-            Check("impulsos detectados", _counts(expected), _counts(obtained)),
+            Check("impulsos detectados", format_counts(expected), format_counts(obtained)),
             Check("config_hash", BASELINE_HASH, config.fingerprint()),
         ),
     )
 
 
-def _counts(counts: Mapping[str, int]) -> str:
+def format_counts(counts: Mapping[str, int]) -> str:
+    """Recuentos por temporalidad en una línea. Pública: la fase 2.0 los imprime igual."""
     return " / ".join(f"{timeframe} {value:,}" for timeframe, value in counts.items())
 
 
@@ -426,4 +427,5 @@ __all__ = [
     "CheckGroup",
     "Evidence",
     "collect",
+    "format_counts",
 ]

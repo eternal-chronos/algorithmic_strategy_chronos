@@ -121,6 +121,14 @@ encuadre automático. También con doble clic sobre el gráfico.">Ajustar</butto
         <label class="toggle"><input type="checkbox" id="layer-marks" checked> Constituciones y roturas</label>
         <label class="toggle"><input type="checkbox" id="layer-contacts"> Contactos</label>
         <label class="toggle"><input type="checkbox" id="layer-mid"> Nivel 50 %</label>
+        <span id="zone-layers" style="display:flex; gap:16px; flex-wrap:wrap;">
+          <label class="toggle" title="Fase 2.0: el tramo de mecha del extremo del ID.
+Nunca cubre el cuerpo. Se estira una vela si la siguiente llega más lejos.">
+            <input type="checkbox" id="layer-zones-ul" checked> Zonas UL</label>
+          <label class="toggle" title="Fase 2.0: la vela del ancla entera, mechas incluidas.
+Punteada mientras no la confirma una vela del color del impulso.">
+            <input type="checkbox" id="layer-zones-ob" checked> OB</label>
+        </span>
         <label class="toggle"><input type="checkbox" id="layer-wrong" checked>
           Extremo de color contrario (R-36)</label>
       </div>
@@ -190,6 +198,15 @@ temporalidad inferior. El motor no la ve hasta que cierra.">
     <span>○ TOQUE_MECHA</span>
     <span>□ ROTURA_FALLIDA</span>
     <span>línea punteada fina = nivel del 50 % del ID</span>
+    <span><i class="box" style="background:#1baf7a; opacity:.30"></i>Zona UL (fase 2.0):
+      del cuerpo de la vela del extremo a la punta de su mecha</span>
+    <span><i class="box" style="background:#1baf7a; opacity:.16"></i>Zona OB (fase 2.0):
+      la vela del ancla entera</span>
+    <span>rectángulo de borde punteado = vela del ancla de un ID SIN OB confirmado:
+      la zona no existe, la vela sí</span>
+    <span>★ vela que confirma el OB</span>
+    <span>contorno atenuado a la izquierda de una zona = la vela ya la definía pero
+      la zona todavía no existía (el ID aún no se había constituido)</span>
     <span>✕ grueso = extremo fijado por una vela del color contrario al impulso (R-36),
       sobre la vela que lo fijó</span>
     <span>vela hueca a la derecha = vela en formación durante el replay: el motor

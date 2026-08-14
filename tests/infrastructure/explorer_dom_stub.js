@@ -57,6 +57,7 @@ function declare(id) {
  'mode-group', 'impulse-layers', 'chart', 'zoom-reset',
  'prev', 'next',
  'from', 'to', 'layer-limbo', 'layer-marks', 'layer-contacts', 'layer-mid', 'layer-wrong',
+ 'zone-layers', 'layer-zones-ul', 'layer-zones-ob',
  'blind-seed', 'blind-start', 'blind-reveal', 'blind-exit',
  'replay-group', 'replay-date', 'replay-start', 'replay-back', 'replay-step',
  'replay-play', 'replay-exit', 'replay-forming', 'replay-speed', 'replay-window',
@@ -129,6 +130,10 @@ global.Plotly = {
           type: trace.type,
           points: (trace.x && trace.x.length) || 0,
           dash: (trace.line && trace.line.dash) || null,
+          // Fase 2.0: una zona que existe va rellena; una candidata sin
+          // confirmar, sólo con el contorno. La diferencia se comprueba aquí.
+          fill: trace.fill || null,
+          fillcolor: trace.fillcolor || null,
         };
       }),
       bars: (traces[0] && traces[0].x && traces[0].x.length) || 0,
@@ -172,6 +177,7 @@ function snapshot(label) {
 global.window = global;
 eval(fs.readFileSync(scriptPath, 'utf8'));
 
+const payloadMeta = JSON.parse(elements['explorer-data'].textContent).meta;
 const steps = [];
 const tabs = elements['tf-buttons'].children;
 const presets = elements['preset-buttons'].children;
@@ -234,6 +240,38 @@ steps.push(snapshot('con-nivel-50'));
 elements['layer-contacts'].fire('change', { target: { checked: false } });
 elements['layer-mid'].fire('change', { target: { checked: false } });
 
+// Fase 2.0 — las dos capas de zonas se encienden y se apagan por separado. El
+// gráfico con contexto lleva dos temporalidades, así que también comprueba que
+// las zonas de la superior se dibujan.
+const conZonas = tabs.filter(function (tab) {
+  return JSON.parse(elements['explorer-data'].textContent).layout[tab.dataset.tf].length > 1;
+})[0] || tabs[0];
+conZonas.fire('click');
+presets[0].fire('click');
+steps.push(snapshot('zonas-por-defecto'));
+elements['layer-zones-ob'].fire('change', { target: { checked: false } });
+steps.push(snapshot('zonas-solo-ul'));
+elements['layer-zones-ul'].fire('change', { target: { checked: false } });
+elements['layer-zones-ob'].fire('change', { target: { checked: true } });
+steps.push(snapshot('zonas-solo-ob'));
+elements['layer-zones-ul'].fire('change', { target: { checked: false } });
+elements['layer-zones-ob'].fire('change', { target: { checked: false } });
+steps.push(snapshot('zonas-apagadas'));
+elements['layer-zones-ul'].fire('change', { target: { checked: true } });
+elements['layer-zones-ob'].fire('change', { target: { checked: true } });
+// El filtro de ID visibles también recorta las zonas.
+const visiblesZonas = elements['visible-buttons'].children;
+visiblesZonas.forEach(function (button) {
+  button.fire('click');
+  steps.push(snapshot('zonas-ids-' + button.dataset.visible));
+});
+// Se devuelve el filtro a su valor de salida: los pasos de más abajo lo dan por
+// supuesto y este bloque no debe cambiar el estado con el que se encuentran.
+visiblesZonas.filter(function (button) { return button.dataset.visible === 'pair'; })
+  .forEach(function (button) { button.fire('click'); });
+tabs[0].fire('click');
+presets[presets.length - 1].fire('click');
+
 // Auditoría ciega (F.1): sortear con semilla, revelar, repetir y salir.
 elements['blind-seed'].value = '4242';
 elements['blind-seed'].fire('change', {});
@@ -267,6 +305,11 @@ elements['mode-buttons'].children.forEach(function (button) {
   button.fire('click');
   steps.push(snapshot('modo-' + button.dataset.mode));
 });
+// De vuelta al modo de la corrida: es el único que lleva zonas, y los pasos del
+// replay tienen que poder comprobar que tampoco se adelantan.
+elements['mode-buttons'].children
+  .filter(function (button) { return button.dataset.mode === payloadMeta.legStartMode; })
+  .forEach(function (button) { button.fire('click'); });
 elements['layer-wrong'].fire('change', { target: { checked: false } });
 steps.push(snapshot('sin-marca-r36'));
 elements['layer-wrong'].fire('change', { target: { checked: true } });
@@ -333,6 +376,36 @@ for (let paso = 0; paso <= 7; paso += 1) {
   elements['replay-step'].fire('click');
 }
 elements['replay-exit'].fire('click');
+
+// G.1 — el reloj es uno solo para todas las temporalidades: lo que avanzas en H4
+// se tiene que ver en el diario como su vela a medio armar, y volver a H4 no
+// puede devolverte al principio.
+elements['replay-date'].value = arranque;
+elements['replay-start'].fire('click');
+elements['replay-forming'].fire('change', { target: { checked: true } });
+for (let paso = 0; paso < 10; paso += 1) { elements['replay-step'].fire('click'); }
+steps.push(snapshot('reloj-h4-avanzado'));
+tabs[0].fire('click');
+steps.push(snapshot('reloj-en-diario'));
+h4.fire('click');
+steps.push(snapshot('reloj-de-vuelta-en-h4'));
+elements['replay-exit'].fire('click');
+
+// El reloj no se degrada al pasar por una temporalidad de grano grueso: ir de H1
+// al diario y volver tiene que devolver el mismo minuto, no el último cierre.
+const h1 = tabs.filter(function (tab) { return tab.dataset.tf === 'H1'; })[0] || tabs[0];
+h1.fire('click');
+elements['replay-date'].value = arranque;
+elements['replay-start'].fire('click');
+elements['replay-forming'].fire('change', { target: { checked: true } });
+for (let paso = 0; paso < 9; paso += 1) { elements['replay-step'].fire('click'); }
+steps.push(snapshot('reloj-fino-h1'));
+tabs[0].fire('click');
+steps.push(snapshot('reloj-fino-en-diario'));
+h1.fire('click');
+steps.push(snapshot('reloj-fino-de-vuelta'));
+elements['replay-exit'].fire('click');
+h4.fire('click');
 
 // G.2 — el encuadre hecho a mano tiene que sobrevivir a los pasos: el zoom no se
 // rehace en cada dibujo y la ventana sólo se desplaza para seguir al presente.

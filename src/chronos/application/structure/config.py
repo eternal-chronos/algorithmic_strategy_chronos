@@ -261,6 +261,26 @@ class ImpulseRulesConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class ZonesConfig:
+    """Zonas UL y OB de la fase 2.0. **Sólo detección y dibujo.**
+
+    Con `enabled: False` el sistema no emite ni una zona y todo lo demás sale
+    byte a byte como en la fase 1. Con `True` se calculan y se publican, pero
+    ninguna interviene en la detección de impulsos: la regla de rotura sigue
+    siendo por línea hasta la fase 2.1.
+
+    No hay ningún otro parámetro y es a propósito. Las dos zonas se derivan de
+    velas que el detector ya registró —`ts_extreme` y `ts_anchor`— sin ninguna
+    holgura, umbral ni ventana que ajustar, así que no existe una configuración
+    que produzca zonas *distintas*: sólo zonas o ninguna zona. Por eso este
+    bloque queda fuera de `fingerprint()` y el `config_hash` sigue significando
+    exactamente lo que significaba: los parámetros que mueven un impulso.
+    """
+
+    enabled: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class TimezoneAuditConfig:
     """Verificación empírica de zona horaria (§1.1). Obligatoria antes de calcular."""
 
@@ -307,6 +327,8 @@ class ImpulseConfig:
     aggregation: AggregationConfig = field(default_factory=AggregationConfig)
     charts: ChartsConfig = field(default_factory=ChartsConfig)
     rules: ImpulseRulesConfig = field(default_factory=ImpulseRulesConfig)
+    #: Fase 2.0. Apagadas por defecto: encenderlas no puede mover ni un impulso.
+    zones: ZonesConfig = field(default_factory=ZonesConfig)
     timezone_audit: TimezoneAuditConfig = field(default_factory=TimezoneAuditConfig)
     reporting: StructureReportingConfig = field(default_factory=StructureReportingConfig)
 
@@ -320,6 +342,11 @@ class ImpulseConfig:
         Deja fuera lo que no cambia ni una vela ni un impulso (rutas, carpeta de
         salida, opciones de informe): dos corridas con el mismo hash producen la
         misma tabla de impulsos.
+
+        Las zonas de la fase 2.0 tampoco entran, por la misma razón y con la
+        misma consecuencia buscada: encenderlas no mueve un solo impulso, así
+        que la línea base `8e51cd9140c8` se conserva con las zonas puestas y las
+        corridas de la fase 1 siguen siendo comparables con las de ahora.
         """
         rules = asdict(self.rules)
         # R-36. `L1_actual` reproduce barra por barra lo que hacía el módulo antes

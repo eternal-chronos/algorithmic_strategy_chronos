@@ -33,9 +33,11 @@ from chronos.application.structure.config import (
     ImpulseConfig,
     ImpulseRulesConfig,
     StructureDataConfig,
+    ZonesConfig,
 )
 from chronos.application.structure.detect_impulses import DetectDominantImpulses, ImpulseRun
 from chronos.application.structure.lateralization import measure
+from chronos.application.structure.zones import ZonesRun, detect_zones
 from chronos.domain.structure.enums import LegStartMode
 from chronos.infrastructure.reporting.impulse_explorer import (
     ASSETS,
@@ -260,7 +262,10 @@ def variants(run: ImpulseRun) -> tuple[ModeVariant, ...]:
 
 
 def _draw(
-    run: ImpulseRun, tmp_path: Path, variants: Sequence[ModeVariant] = ()
+    run: ImpulseRun,
+    tmp_path: Path,
+    variants: Sequence[ModeVariant] = (),
+    zones: ZonesRun | None = None,
 ) -> dict:
     node = shutil.which("node")
     if node is None:
@@ -269,7 +274,10 @@ def _draw(
     payload_path = tmp_path / "payload.json"
     payload_path.write_text(
         json.dumps(
-            build_payload(run, lateralization=measure(run), variants=variants), default=str
+            build_payload(
+                run, lateralization=measure(run), variants=variants, zones=zones
+            ),
+            default=str,
         ),
         encoding="utf-8",
     )
@@ -790,6 +798,17 @@ def _clock(payload: dict, step: dict) -> int:
     return _minute(step["plot"]["lastBar"]) + payload["spans"][step["chart"]]
 
 
+def _fine_clock(step: dict) -> int:
+    """El reloj que declaran las notas: hasta qué minuto se ha visto el mercado.
+
+    No es el cierre de la última vela dibujada cuando hay una a medio armar, y es
+    lo único que tiene que coincidir entre temporalidades.
+    """
+    marca = re.search(r"reloj (\d{4}-\d{2}-\d{2} \d{2}:\d{2}) UTC", step["notes"])
+    assert marca is not None, f"el replay no declara su reloj: {step['notes']}"
+    return _minute(marca.group(1))
+
+
 def _points(step: dict, name: str) -> int:
     return sum(trace["points"] for trace in step["plot"]["traces"] if trace["name"] == name)
 
@@ -1016,6 +1035,58 @@ def test_salir_del_replay_devuelve_el_periodo_de_partida(
     assert "REPLAY" not in fuera["notes"]
 
 
+def test_lo_avanzado_en_una_temporalidad_se_ve_en_las_demas(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    """El reloj es uno solo. Lo que llevas corrido dentro de la vela de H4 tiene
+    que aparecer en el diario como su vela a medio armar; si no, saltar de
+    temporalidad devolvía el gráfico al último cierre y parecía un reinicio."""
+    resultado = _draw(run, tmp_path)
+    payload = build_payload(run, lateralization=measure(run))
+    h4_antes = _step(resultado, "reloj-h4-avanzado")
+    diario = _step(resultado, "reloj-en-diario")
+
+    assert diario["chart"] == DAILY
+    assert "Vela en formación" in _trace_names(diario), "el diario volvió al cierre de ayer"
+    formadas = re.search(r"vela en formación con (\d+) de \d+ velas de H4", diario["notes"])
+    assert formadas is not None and int(formadas.group(1)) >= 1
+
+    # El reloj es el mismo: lo que el diario no puede enseñar no se olvida.
+    assert _fine_clock(diario) == _fine_clock(h4_antes)
+    # Y lo dibujado sigue sin adelantarse a lo que el motor sabía.
+    assert _clock(payload, diario) <= _fine_clock(diario)
+
+
+def test_el_reloj_no_se_degrada_al_pasar_por_el_diario(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    """El diario no tiene resolución para la hora y cuarto que llevas corrida en
+    H1, pero el reloj no la olvida: volver a H1 devuelve el mismo minuto. Antes
+    el reloj vivía en el par (vela, sub-vela) del gráfico que mirabas, así que
+    pasar por el diario recortaba el reloj para todas las demás."""
+    resultado = _draw(run, tmp_path)
+    en_h1 = _step(resultado, "reloj-fino-h1")
+    diario = _step(resultado, "reloj-fino-en-diario")
+    vuelta = _step(resultado, "reloj-fino-de-vuelta")
+
+    assert _fine_clock(en_h1) == _fine_clock(diario) == _fine_clock(vuelta)
+    assert vuelta["notes"] == en_h1["notes"], "volver a H1 no devolvió el mismo paso"
+    # Y el diario enseña el día en curso a medio armar, no el cierre de ayer a
+    # secas: el avance de H1 se ve también ahí.
+    assert "Vela en formación" in _trace_names(diario)
+
+
+def test_volver_a_la_temporalidad_de_partida_no_retrocede(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    resultado = _draw(run, tmp_path)
+    antes = _step(resultado, "reloj-h4-avanzado")
+    vuelta = _step(resultado, "reloj-de-vuelta-en-h4")
+
+    assert vuelta["chart"] == H4
+    assert vuelta["plot"]["lastBar"] == antes["plot"]["lastBar"]
+
+
 # El encuadre manual (G.2). Auditar de cerca exige acercar el zoom y quedarse
 # ahí: si cada paso del replay devolviera el gráfico a su escala, no se podría
 # mirar una vela concreta mientras se avanza.
@@ -1111,6 +1182,188 @@ def test_fuera_del_replay_el_encuadre_manual_tambien_manda(
     assert preset["plot"]["xRange"] is None
     assert preset["plot"]["yRange"] is None
     assert preset["zoomFree"]
+
+
+# --- Fase 2.0 · las capas de zonas UL y OB ----------------------------------
+
+
+@pytest.fixture
+def zones(run: ImpulseRun) -> ZonesRun:
+    """Las zonas de la misma corrida. La fixture del módulo las trae apagadas."""
+    return detect_zones(run, replace(run.config, zones=ZonesConfig(enabled=True)))
+
+
+def test_sin_zonas_el_payload_no_las_declara(run: ImpulseRun) -> None:
+    """Un explorador de la fase 1 sigue siendo exactamente el de antes."""
+    payload = build_payload(run)
+    assert payload["hasZones"] is False
+    assert payload["impulses"][H4]["zones"] == []
+    assert payload["impulses"][H4]["obCandidates"] == []
+
+
+def test_cada_zona_viaja_con_sus_dos_bordes(run: ImpulseRun, zones: ZonesRun) -> None:
+    payload = build_payload(run, zones=zones)
+    assert payload["hasZones"] is True
+
+    registros = payload["impulses"][H4]["zones"]
+    assert len(registros) == len(zones.per_timeframe[H4].table)
+    for registro in registros:
+        assert registro["k"] in {"UL", "OB"}
+        assert registro["lo"] <= registro["hi"]
+        assert {registro["i"], registro["o"]} == {registro["lo"], registro["hi"]} or (
+            registro["i"] == registro["o"]
+        )
+
+
+def test_la_zona_no_nace_antes_que_su_vela_definitoria(
+    run: ImpulseRun, zones: ZonesRun
+) -> None:
+    """El contorno atenuado va de `xd` a `x0`: si no, no habría nada que atenuar."""
+    for registro in build_payload(run, zones=zones)["impulses"][H4]["zones"]:
+        assert registro["xd"] <= registro["x0"]
+        assert registro["x0"] <= registro["x1"]
+
+
+def test_solo_el_ob_viaja_con_su_confirmacion(run: ImpulseRun, zones: ZonesRun) -> None:
+    registros = build_payload(run, zones=zones)["impulses"][H4]["zones"]
+    uls = [item for item in registros if item["k"] == "UL"]
+    obs = [item for item in registros if item["k"] == "OB"]
+
+    assert uls and obs
+    assert all(item["xc"] is None for item in uls)
+    assert all(item["xc"] is not None for item in obs)
+    # Y el nacimiento del OB nunca precede a la vela que lo confirmó.
+    assert all(item["x0"] >= item["xc"] for item in obs)
+
+
+def test_los_id_sin_ob_viajan_como_candidatos(run: ImpulseRun, zones: ZonesRun) -> None:
+    """La zona no existe, pero la vela candidata hay que poder verla (§8)."""
+    payload = build_payload(run, zones=zones)
+    candidatos = payload["impulses"][H4]["obCandidates"]
+    sin_ob = {zoned.id_num for zoned in zones.per_timeframe[H4].without_order_block}
+
+    assert {item["id"] for item in candidatos} == sin_ob
+    con_ob = {
+        item["id"] for item in payload["impulses"][H4]["zones"] if item["k"] == "OB"
+    }
+    assert not (con_ob & sin_ob)
+
+
+def test_las_dos_capas_se_dibujan_por_defecto(
+    run: ImpulseRun, zones: ZonesRun, tmp_path: Path
+) -> None:
+    nombres = _trace_names(_step(_draw(run, tmp_path, zones=zones), "zonas-por-defecto"))
+    assert any(nombre.startswith("Zona UL") for nombre in nombres), nombres
+    assert any(nombre.startswith("Zona OB") for nombre in nombres), nombres
+
+
+def test_las_dos_capas_se_encienden_por_separado(
+    run: ImpulseRun, zones: ZonesRun, tmp_path: Path
+) -> None:
+    resultado = _draw(run, tmp_path, zones=zones)
+    solo_ul = _trace_names(_step(resultado, "zonas-solo-ul"))
+    solo_ob = _trace_names(_step(resultado, "zonas-solo-ob"))
+    apagadas = _trace_names(_step(resultado, "zonas-apagadas"))
+
+    assert any(nombre.startswith("Zona UL") for nombre in solo_ul)
+    assert not any(nombre.startswith("Zona OB") for nombre in solo_ul)
+    assert any(nombre.startswith("Zona OB") for nombre in solo_ob)
+    assert not any(nombre.startswith("Zona UL") for nombre in solo_ob)
+    assert not any(nombre.startswith("Zona ") for nombre in apagadas)
+
+
+def test_la_zona_que_existe_va_rellena_y_la_candidata_no(
+    run: ImpulseRun, zones: ZonesRun, tmp_path: Path
+) -> None:
+    """§8: el OB sin confirmar se dibuja con otro borde porque no es una zona."""
+    trazas = _step(_draw(run, tmp_path, zones=zones), "zonas-por-defecto")["plot"]["traces"]
+    reales = [t for t in trazas if t["name"].startswith("Zona ")]
+    candidatas = [t for t in trazas if t["name"] == "OB sin confirmar"]
+
+    assert reales
+    assert all(t["fill"] == "toself" for t in reales)
+    assert all(t["dash"] in (None, "solid") for t in reales)
+    if candidatas:
+        assert all(t["fill"] == "none" for t in candidatas)
+        assert all(t["dash"] == "dot" for t in candidatas)
+
+
+def test_el_tramo_anterior_al_nacimiento_va_sin_relleno(
+    run: ImpulseRun, zones: ZonesRun, tmp_path: Path
+) -> None:
+    """Antes de nacer la zona no existe: se insinúa, no se pinta."""
+    trazas = _step(_draw(run, tmp_path, zones=zones), "zonas-por-defecto")["plot"]["traces"]
+    previos = [t for t in trazas if t["name"].startswith("Antes de existir")]
+
+    assert previos, "falta el contorno de la vela que define la zona"
+    assert all(t["fill"] == "none" for t in previos)
+    assert all(t["dash"] == "dot" for t in previos)
+
+
+def test_hay_marcador_sobre_la_vela_que_confirma(
+    run: ImpulseRun, zones: ZonesRun, tmp_path: Path
+) -> None:
+    nombres = _trace_names(_step(_draw(run, tmp_path, zones=zones), "zonas-por-defecto"))
+    assert "Confirmación del OB" in nombres
+
+
+def test_el_filtro_de_id_visibles_recorta_tambien_las_zonas(
+    run: ImpulseRun, zones: ZonesRun, tmp_path: Path
+) -> None:
+    resultado = _draw(run, tmp_path, zones=zones)
+
+    def puntos(label: str) -> int:
+        return sum(
+            trace["points"]
+            for trace in _step(resultado, label)["plot"]["traces"]
+            if trace["name"].startswith("Zona ")
+        )
+
+    assert puntos("zonas-ids-current") < puntos("zonas-ids-pair") < puntos("zonas-ids-all")
+
+
+def test_las_notas_declaran_que_las_zonas_no_rompen_nada(
+    run: ImpulseRun, zones: ZonesRun, tmp_path: Path
+) -> None:
+    notas = _step(_draw(run, tmp_path, zones=zones), "zonas-por-defecto")["notes"]
+    assert "zonas dibujadas" in notas
+    assert "no rompen nada" in notas
+
+
+def test_la_auditoria_ciega_tampoco_ensena_las_zonas(
+    run: ImpulseRun, zones: ZonesRun, tmp_path: Path
+) -> None:
+    ciega = _step(_draw(run, tmp_path, zones=zones), "ciega")
+    assert len(ciega["plot"]["traces"]) == 1, _trace_names(ciega)
+
+
+def test_las_zonas_no_se_dibujan_en_otro_modo_de_r36(
+    run: ImpulseRun,
+    zones: ZonesRun,
+    variants: tuple[ModeVariant, ...],
+    tmp_path: Path,
+) -> None:
+    """Se calcularon sobre los impulsos del modo activo: en otro serían de otros ID."""
+    resultado = _draw(run, tmp_path, variants, zones=zones)
+    otro = _step(resultado, "modo-L2_siguiente_barra")
+
+    assert not any(nombre.startswith("Zona ") for nombre in _trace_names(otro))
+    assert "no se dibujan en otro modo" in otro["notes"]
+
+
+def test_el_replay_no_dibuja_una_zona_antes_de_que_nazca(
+    run: ImpulseRun, zones: ZonesRun, tmp_path: Path
+) -> None:
+    """La misma frontera que el resto de capas: nada más allá del reloj."""
+    resultado = _draw(run, tmp_path, zones=zones)
+    payload = build_payload(run, lateralization=measure(run), zones=zones)
+    pasos = _replay_steps(resultado)
+    assert pasos, "el recorrido tiene que pasar por el replay"
+
+    for paso in pasos:
+        dibujado = paso["plot"]["maxEngineX"]
+        assert dibujado is not None, paso["label"]
+        assert _minute(dibujado) <= _clock(payload, paso), paso["label"]
 
 
 def test_el_modo_activo_no_se_duplica_en_el_payload(

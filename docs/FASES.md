@@ -49,7 +49,9 @@ implementada, testeada y con un backtest reproducible.
 |---|---|---|---|---|
 | 0 | `ema_cross` | Baseline de referencia para validar el motor | Hecha | — |
 | 1 | Impulso dominante | Detección del ID en Diario, H4 y H1 (M15 se dibuja con el de H1): rotura → limbo → constitución | Implementada y corrida sobre 2018–2025 de Dukascopy; **pendiente de auditoría visual del propietario** | `chronos structure detect` |
-| 2 | — | *(pendiente: último / penúltimo impulso)* | — | — |
+| 2.0 | Zonas UL y OB | Detección y dibujo de las dos zonas de cada ID; la rotura sigue siendo por línea | Implementada sobre 2018–2025; **pendiente de auditoría visual del propietario** | `chronos structure zonas` |
+| 2.1 | — | *(pendiente: rotura por zona en vez de por línea)* | — | — |
+| 2.2 | — | *(pendiente: FVG)* | — | — |
 
 ### Fase 1 — impulso dominante
 
@@ -109,6 +111,44 @@ Tres cosas cambian lo que había que dar por supuesto:
 Ninguna de esas mediciones ha tocado la detección, y `chronos structure
 evidencia` comprueba la línea base y el `config_hash` con el esperado y el
 obtenido a la vista.
+
+### Fase 2.0 — zonas UL y OB, sólo detección
+
+Tampoco es una estrategia registrada con `@register`: no emite señales. Añade
+dos zonas de precio a cada impulso ya detectado y las dibuja. El detalle
+completo —reglas, casos límite, garantía anti-lookahead y procedimiento— está en
+[`MODULO_2_ZONAS.md`](MODULO_2_ZONAS.md).
+
+La línea base de la fase 1 se conserva intacta y verificada: mismo hash
+`8e51cd9140c8` y mismos 401 / 1.914 / 7.231 impulsos con las zonas encendidas y
+apagadas. Encenderlas no puede mover un impulso, y el comando lo comprueba antes
+de escribir nada.
+
+Lo que salió de medirla:
+
+- **El 5,4 % / 5,0 % / 4,4 % de los ID (D / H4 / H1) nunca llega a tener OB
+  confirmado.** Es la cifra que manda: en la fase 2.1 esos impulsos se romperán
+  por línea, porque no tienen zona con la que romper.
+- **El UL se extiende a la vela siguiente en un 54 % / 44 % / 44 % de los casos.**
+  La regla de la vela de margen no es un detalle de borde: afecta a la mitad de
+  las zonas.
+- **El OB es mayor que el UL en el 90,0 % / 84,7 % / 85,2 %**, como se esperaba,
+  porque incluye el cuerpo. Las excepciones apenas se explican por la extensión
+  del UL —su porcentaje se mueve poco entre las dos poblaciones— sino porque ahí
+  el UL es unas 2,5 veces más alto de lo normal y el OB, más bajo: una vela de
+  extremo con mechazo contra una vela de ancla pequeña.
+- **El solape entre las dos zonas del mismo ID es del 10,0 % / 7,4 % / 9,2 %, no
+  cero.** Son ID cuyo rango mediano es unas tres veces menor que el del resto
+  (0,45-0,54 ATR frente a 1,54-1,68): tan cortos que caben dentro de la vela del
+  ancla. Es la población enana que C.5 ya contaba, mirada desde otro sitio.
+- **Anticipo de la fase 2.1 (sólo medición):** el 44,1 % / 41,9 % / 45,8 % de las
+  roturas del histórico cerraron dentro de su zona sin atravesarla entera. La
+  diferencia entre las dos clases es grande: 50-55 % en las roturas a favor y
+  29-35 % en las de en contra, donde además 17 / 76 / 253 no tienen siquiera OB
+  con el que romper.
+
+Antes de pasar a la fase 2.1 hace falta que el propietario audite las capturas y
+el explorador y confirme que las zonas se dibujan donde él las dibuja.
 
 ## Antes de pensar en demo
 
