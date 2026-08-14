@@ -15,7 +15,13 @@ from dataclasses import asdict, dataclass, field
 from datetime import time
 
 from chronos.domain.errors import DomainError
-from chronos.domain.structure.enums import AnchorMode, DojiBreakMode, LegStartMode, SeedMode
+from chronos.domain.structure.enums import (
+    AnchorMode,
+    DojiBreakMode,
+    LegStartMode,
+    OverlapPriority,
+    SeedMode,
+)
 
 #: Temporalidades del módulo. Un ID sólo se rompe con cierres de su propia
 #: temporalidad, así que cada una lleva su propio detector (§1.2, §2.4).
@@ -250,6 +256,17 @@ class ImpulseRulesConfig:
     #: R-36. Por defecto queda el comportamiento anterior para que la línea base
     #: siga siendo reproducible mientras el propietario compara los tres modos.
     leg_start_mode: LegStartMode = LegStartMode.L1_CURRENT
+    #: FASE 2.1. `False` = la rotura es por línea, que es la línea base de la
+    #: fase 1. `True` = manda la zona: el UL en el lado a favor y el OB en el
+    #: lado en contra, y romper es atravesar la zona entera. Es el primer cambio
+    #: de comportamiento del proyecto, así que va apagado por defecto y su
+    #: apagado reproduce el hash y los recuentos archivados.
+    break_by_zone: bool = False
+    #: FASE 2.1, **parámetro abierto**. Qué lado se evalúa primero cuando una
+    #: misma vela cumple las dos condiciones de rotura, que sólo puede pasar con
+    #: las dos zonas solapadas en precio. Con `break_by_zone: false` no cambia
+    #: nada: reproduce el orden que la máquina ya tenía escrito.
+    overlap_priority: OverlapPriority = OverlapPriority.A_FAVOR_FIRST
     warmup_bars: int = 50
     atr_period: int = 14
 
@@ -355,6 +372,16 @@ class ImpulseConfig:
         # cambian el resultado, entran en el hash y producen uno distinto.
         if self.rules.leg_start_mode is LegStartMode.L1_CURRENT:
             del rules["leg_start_mode"]
+        # Fase 2.1, mismo criterio y por la misma razón. `break_by_zone: false`
+        # reproduce barra por barra lo que hacía el módulo antes de que el
+        # parámetro existiera, así que se omite del hash y la línea base
+        # `8e51cd9140c8` se conserva. Con `true` el resultado cambia, entra en el
+        # hash —y con él el orden de solape, que sólo decide algo ahí— y produce
+        # uno distinto: ninguna salida de la regla nueva puede confundirse con la
+        # de la vieja.
+        if not self.rules.break_by_zone:
+            del rules["break_by_zone"]
+            del rules["overlap_priority"]
         payload = {
             "symbol": self.symbol,
             "structure_side": self.structure_side,
@@ -387,9 +414,17 @@ class ImpulseConfig:
 
     def open_decisions(self) -> tuple[str, ...]:
         """Parámetros que aún debe cerrar el propietario. Se imprimen en el informe."""
-        return (
+        decisions = [
             f"SEED_MODE = {self.rules.seed_mode.value} "
             "(arranque del histórico: la especificación no lo cubre)",
             f"DOJI_BREAK_MODE = {self.rules.doji_break_mode.value} "
             "(§2.2 y §2.6 se contradicen sobre si un doji puede romper)",
-        )
+            f"BREAK_BY_ZONE = {str(self.rules.break_by_zone).lower()} "
+            "(fase 2.1: false = rotura por línea, la línea base; true = manda la zona)",
+        ]
+        if self.rules.break_by_zone:
+            decisions.append(
+                f"OVERLAP_PRIORITY = {self.rules.overlap_priority.value} "
+                "(fase 2.1 §2: qué lado se evalúa primero con las dos zonas solapadas)"
+            )
+        return tuple(decisions)

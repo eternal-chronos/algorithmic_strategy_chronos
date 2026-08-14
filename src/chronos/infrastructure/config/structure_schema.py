@@ -21,7 +21,13 @@ from chronos.application.structure.config import (
     TimezoneAuditConfig,
     ZonesConfig,
 )
-from chronos.domain.structure.enums import AnchorMode, DojiBreakMode, LegStartMode, SeedMode
+from chronos.domain.structure.enums import (
+    AnchorMode,
+    DojiBreakMode,
+    LegStartMode,
+    OverlapPriority,
+    SeedMode,
+)
 
 
 class _Strict(BaseModel):
@@ -57,6 +63,9 @@ class ImpulseRulesSchema(_Strict):
     leg_start_mode: Literal[
         "L1_actual", "L2_siguiente_barra", "L3_extremo_solo_color_valido"
     ] = "L1_actual"
+    #: Fase 2.1. Apagado por defecto: el fichero tal cual reproduce la línea base.
+    break_by_zone: bool = False
+    overlap_priority: Literal["a_favor_primero", "en_contra_primero"] = "a_favor_primero"
     warmup_bars: int = Field(default=50, ge=0)
     atr_period: int = Field(default=14, ge=1)
 
@@ -66,6 +75,8 @@ class ImpulseRulesSchema(_Strict):
             seed_mode=SeedMode(self.seed_mode),
             doji_break_mode=DojiBreakMode(self.doji_break_mode),
             leg_start_mode=LegStartMode(self.leg_start_mode),
+            break_by_zone=self.break_by_zone,
+            overlap_priority=OverlapPriority(self.overlap_priority),
             warmup_bars=self.warmup_bars,
             atr_period=self.atr_period,
         )

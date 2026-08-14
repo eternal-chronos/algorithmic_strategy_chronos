@@ -4,10 +4,11 @@ Cada impulso dominante lleva asociadas dos zonas de precio, calculadas sobre
 velas de **su misma temporalidad** (D, H4, H1; en M15 no, porque no lleva
 detector). Esta fase las **detecta y las dibuja**. No hace nada más.
 
-En la fase 2.1 estas zonas pasarán a decidir la vida y la muerte de los
-impulsos, así que su detección tiene que estar auditada y confirmada por el
-propietario **antes** de darles ese poder. Ése es todo el motivo de que esta
-fase exista por separado.
+En la **fase 2.1** estas zonas pasaron a decidir la vida y la muerte de los
+impulsos, y esta fase existe por separado precisamente para que su detección
+pudiera auditarse **antes** de darles ese poder. Lo que hicieron con él está en
+[`FASES.md`](FASES.md#fase-21--la-zona-decide-la-rotura); nada de lo de aquí ha
+cambiado: la fase 2.1 no toca cómo se detecta una zona, sólo qué se hace con ella.
 
 ## Lo que esta fase NO hace
 
@@ -48,8 +49,9 @@ borde interior no se mueve. La comparación es estricta: un empate no extiende.
 hay mecha y la zona mide cero. **Decisión: se conserva como zona degenerada**,
 con los dos bordes en el mismo precio, que es exactamente la línea del ID.
 Descartarla diría que el ID no tiene UL, y sí lo tiene: lo que no tiene es
-mecha. Con la regla de la fase 2.1 se comportaría igual que la línea de la fase
-1. Se cuentan aparte en el informe.
+mecha. Con la regla de la fase 2.1 se comporta igual que la línea de la fase 1,
+y eso es lo correcto: no se trata aparte, se cuenta. Se cuentan aparte en el
+informe.
 
 ### OB (order block)
 
@@ -66,8 +68,8 @@ La vela donde arranca la pierna, la que fija `precio_ancla` (`ts_anchor`).
 - **Nace** cuando se cumplen las dos cosas: `max(constitución, confirmación)`.
 
 **Un ID sin OB confirmado es un estado legítimo** y se registra. En la fase 2.1
-esos impulsos se romperán por línea. Es la cifra que manda de esta fase:
-**5,4 % en D, 5,0 % en H4 y 4,4 % en H1**.
+esos impulsos se rompen por línea, y son los **únicos** que lo hacen. Es la cifra
+que manda de esta fase: **5,4 % en D, 5,0 % en H4 y 4,4 % en H1**.
 
 ### Interior y exterior
 
@@ -75,7 +77,8 @@ Significan lo mismo en las dos zonas: el borde **interior** es el que un precio
 que sale del rango encuentra primero, y el **exterior** el que tiene que cruzar
 para dejar la zona atrás. En un ID alcista el UL se recorre hacia arriba (cuerpo
 → mecha) y el OB hacia abajo (`high` → `low`), porque la rotura a favor sube y la
-rotura en contra baja. Es la lectura que necesita la fase 2.1.
+rotura en contra baja. Es la lectura que usa la fase 2.1: romper es cerrar más
+allá del borde **exterior**.
 
 ## Casos límite y qué se decidió
 
@@ -103,8 +106,10 @@ racha. El día sintético construye las dos lecturas sobre las mismas velas.
 
 ## Garantía anti-lookahead
 
-Vive en la propia zona y en el `ZoneBook`, que es la puerta por la que leerá la
-fase 2.1:
+Vive en la propia zona y en el `ZoneBook`. La fase 2.1 no lee por ahí —necesita
+las zonas barra a barra dentro de la máquina de estados y usa su propio
+`ZoneBreakLevels`, con la misma garantía— pero las cuatro vías siguen vivas para
+quien mida o dibuje:
 
 1. consultar una zona antes de `ts_nacimiento_zona` → `LookaheadError`;
 2. consultar un OB antes de su `ts_confirmacion` → `LookaheadError` (y uno que
@@ -161,5 +166,6 @@ movido ni un impulso, y aborta si la ha movido.
 ## Estado
 
 **Pendiente de auditoría visual del propietario.** No se recomienda nada ni se
-interpreta ningún resultado: el informe presenta números e imágenes y la decisión
-de darles poder sobre los impulsos —la fase 2.1— es suya.
+interpreta ningún resultado: el informe presenta números e imágenes. La fase 2.1
+ya les ha dado poder sobre los impulsos, así que auditar lo que se dibuja aquí
+sigue siendo el paso que valida todo lo que viene detrás.

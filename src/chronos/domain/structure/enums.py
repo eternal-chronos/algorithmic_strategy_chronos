@@ -143,6 +143,41 @@ class DojiBreakMode(StrEnum):
     D2_BREAKS = "D2_doji_rompe_por_cierre"
 
 
+class BreakLevelSource(StrEnum):
+    """De dónde salió el nivel que rompió el ID (fase 2.1).
+
+    Con `BREAK_BY_ZONE = false` es siempre `linea` y la columna no dice nada
+    nuevo. Con la regla nueva separa las dos formas de morir: atravesando una
+    zona entera, o por línea porque en ese lado no había zona que la sustituyera
+    —lo que sólo le pasa al ancla de un ID cuyo OB nunca llegó a confirmarse—.
+    """
+
+    #: El nivel es la línea del ID: el extremo a favor, el ancla en contra.
+    LINE = "linea"
+    #: Borde exterior de la zona UL, pegada al extremo.
+    LAST = "UL"
+    #: Borde exterior de la zona OB, la vela del ancla entera.
+    ORDER_BLOCK = "OB"
+
+
+class OverlapPriority(StrEnum):
+    """Qué lado se evalúa primero cuando una vela rompe por los dos (fase 2.1).
+
+    Con las zonas UL y OB solapadas en precio —impulsos cuyo rango cabe dentro de
+    la vela del ancla— un mismo cierre puede quedar más allá de los dos bordes
+    exteriores a la vez. El orden decide de qué muere el ID y, con él, la
+    dirección de la pierna que abre el limbo: no es cosmético mientras no se
+    demuestre con datos que lo es. **El motor no elige**: los dos órdenes se
+    implementan y el informe cuenta cuántas veces se dan y qué cambia.
+
+    `a_favor_primero` reproduce además el orden que la fase 1 ya tenía escrito en
+    la máquina de estados, así que con `BREAK_BY_ZONE = false` no mueve nada.
+    """
+
+    A_FAVOR_FIRST = "a_favor_primero"
+    EN_CONTRA_FIRST = "en_contra_primero"
+
+
 class MachineState(StrEnum):
     """Estados de la máquina (§2.6)."""
 

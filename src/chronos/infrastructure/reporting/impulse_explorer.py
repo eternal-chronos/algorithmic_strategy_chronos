@@ -149,6 +149,9 @@ def build_payload(
             "seedMode": run.config.rules.seed_mode.value,
             "dojiBreakMode": run.config.rules.doji_break_mode.value,
             "legStartMode": run.config.rules.leg_start_mode.value,
+            #: Fase 2.1: qué regla de rotura produjo estos impulsos.
+            "breakByZone": run.config.rules.break_by_zone,
+            "overlapPriority": run.config.rules.overlap_priority.value,
             "h4OffsetHours": run.config.aggregation.h4_offset_hours,
             "dSessionStart": run.config.aggregation.d_session_start,
             "decimals": DECIMALS,
@@ -175,6 +178,9 @@ def build_payload(
         #: `False` cuando la corrida no llevaba zonas: el explorador esconde sus
         #: casillas en vez de ofrecer capas que no pueden dibujar nada.
         "hasZones": bool(zoned),
+        #: Lo mismo para la capa de roturas evitadas de la fase 2.1: con la regla
+        #: apagada no hay ni una y la casilla no se enseña.
+        "hasAvoided": any(analysis.avoided for analysis in run.analyses.values()),
         "modes": [_mode_summary(variant) for variant in variants],
         # El modo activo ya viaja en `impulses` y repetirlo aquí costaba 4,5 MB
         # de fichero. El explorador lo lee de `impulses` por identidad del modo,
@@ -297,6 +303,9 @@ def _impulse_payload(
         "list": _impulse_list(impulses, last),
         "constitutions": _constitutions(impulses, bars),
         "breaks": _breaks(analysis),
+        #: Fase 2.1. Vacío con la regla apagada, y entonces la casilla no se
+        #: enseña: una capa que no puede dibujar nada sólo hace dudar.
+        "avoided": _avoided(analysis),
         "limbo": _limbo_regions(analysis),
         "contacts": _contacts(measurement),
         "zones": _zones(zones, analysis, last),
@@ -487,6 +496,11 @@ def _constitutions(impulses: list[Any], bars: pd.DataFrame) -> list[dict[str, An
 
 
 def _breaks(analysis: TimeframeAnalysis) -> list[dict[str, Any]]:
+    """Roturas reales. `src` distingue la fase 2.1: por zona o por línea (§7).
+
+    Con `break_by_zone: false` todas salen con `src = "linea"` y `lvl == ln`, así
+    que el explorador dibuja exactamente lo que dibujaba en la fase 1.
+    """
     return [
         {
             "x": _minute(pd.Timestamp(event.timestamp)),
@@ -496,8 +510,37 @@ def _breaks(analysis: TimeframeAnalysis) -> list[dict[str, Any]]:
             "d": event.broken_direction.value,
             "lvl": round(event.level, DECIMALS),
             "next": event.new_leg_direction.value,
+            "src": event.level_source.value,
+            "ln": round(
+                event.line if event.line is not None else event.level, DECIMALS
+            ),
         }
         for event in analysis.events
+    ]
+
+
+def _avoided(analysis: TimeframeAnalysis) -> list[dict[str, Any]]:
+    """Capa "Roturas evitadas" (§7): las velas que la zona ha salvado.
+
+    Es lo primero que el propietario quiere auditar, así que viaja con todo lo
+    que hace falta para juzgarla en el propio globo: el cierre, la línea que
+    cruzó, los dos bordes de la zona que no llegó a atravesar y si además movió
+    el extremo del ID. Vacío con `break_by_zone: false`.
+    """
+    return [
+        {
+            "x": _minute(pd.Timestamp(item.timestamp)),
+            "y": round(item.close, DECIMALS),
+            "k": "favor" if item.kind is BreakKind.A_FAVOR else "contra",
+            "id": item.id_num,
+            "d": item.direction.value,
+            "ln": round(item.line, DECIMALS),
+            "z": item.zone.value,
+            "zi": round(item.zone_inner, DECIMALS),
+            "zo": round(item.zone_outer, DECIMALS),
+            "ext": item.extended_extreme,
+        }
+        for item in analysis.avoided
     ]
 
 
@@ -536,9 +579,14 @@ def _subtitle(run: ImpulseRun) -> str:
         if chart in run.chart_bars
     )
     published = sum(len(analysis.published) for analysis in run.analyses.values())
+    # La regla de rotura va delante del hash: es lo que decide si lo que se está
+    # mirando es la línea base de la fase 1 o la de la 2.1, y confundirlas sería
+    # auditar una cosa creyendo que se audita la otra.
+    regla = "por ZONA (fase 2.1)" if run.config.rules.break_by_zone else "por línea"
     return (
         f"{published:,} impulsos · {reparto} · ancla {run.config.rules.anchor_mode.value} · "
-        f"arranque de pierna {run.config.rules.leg_start_mode.value} · hash {run.config_hash}"
+        f"arranque de pierna {run.config.rules.leg_start_mode.value} · "
+        f"rotura {regla} · hash {run.config_hash}"
     )
 
 

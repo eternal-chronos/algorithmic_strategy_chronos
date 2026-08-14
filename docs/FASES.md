@@ -50,7 +50,7 @@ implementada, testeada y con un backtest reproducible.
 | 0 | `ema_cross` | Baseline de referencia para validar el motor | Hecha | — |
 | 1 | Impulso dominante | Detección del ID en Diario, H4 y H1 (M15 se dibuja con el de H1): rotura → limbo → constitución | Implementada y corrida sobre 2018–2025 de Dukascopy; **pendiente de auditoría visual del propietario** | `chronos structure detect` |
 | 2.0 | Zonas UL y OB | Detección y dibujo de las dos zonas de cada ID; la rotura sigue siendo por línea | Implementada sobre 2018–2025; **pendiente de auditoría visual del propietario** | `chronos structure zonas` |
-| 2.1 | — | *(pendiente: rotura por zona en vez de por línea)* | — | — |
+| 2.1 | Rotura por zona | La zona sustituye a la línea como nivel de rotura del ID: el UL a favor, el OB en contra | Implementada sobre 2018–2025; **pendiente de auditoría visual del propietario** | `chronos structure rotura-por-zona` |
 | 2.2 | — | *(pendiente: FVG)* | — | — |
 
 ### Fase 1 — impulso dominante
@@ -149,6 +149,76 @@ Lo que salió de medirla:
 
 Antes de pasar a la fase 2.1 hace falta que el propietario audite las capturas y
 el explorador y confirme que las zonas se dibujan donde él las dibuja.
+
+### Fase 2.1 — la zona decide la rotura
+
+Primer **cambio de comportamiento** del proyecto desde que se fijó la línea base.
+Hasta aquí un ID moría cuando una vela cerraba más allá de una de sus dos líneas.
+A partir de `break_by_zone: true` la línea deja de ser el nivel de rotura cuando
+existe una zona que la sustituya:
+
+| Lado | Si la zona existe | Si no existe |
+|---|---|---|
+| A favor (extremo) | manda el **UL**, que existe siempre | — |
+| En contra (ancla) | manda el **OB** si está confirmado | manda la línea |
+
+Romper una zona es **cerrar más allá de su borde exterior**, atravesándola
+entera: perforarla con mecha y cerrar dentro no rompe, y cerrar dentro tampoco.
+Un UL de altura cero tiene los dos bordes en la línea y se comporta exactamente
+como ella.
+
+No es un filtro posterior: es un cambio en la máquina de estados. Salvar una
+rotura deja el ID vivo, **su extremo sigue extendiéndose** y el UL se recalcula
+sobre la vela nueva; el OB no se mueve nunca, porque lo fija la vela del ancla.
+Por eso la comparación de abajo son dos ejecuciones completas del módulo sobre
+las mismas velas, no una tabla reetiquetada.
+
+**Regresión verificada:** con `break_by_zone: false` el sistema reproduce
+`8e51cd9140c8` con D 401 / H4 1.914 / H1 7.231 detectados y 392 / 1.910 / 7.224
+publicados. **Línea base nueva: `801951b9cc26` · D 239 / H4 1.214 / H1 4.148
+detectados y 233 / 1.211 / 4.141 publicados.**
+
+Lo que salió de medirla (D / H4 / H1, totales de 2018–2025):
+
+- **Los ID enanos se van casi del todo.** ID con rango inferior a 0,25 ATR:
+  7 → 1, 57 → 1, 174 → 11. En fracción sobre los ID del periodo, del 1,8 % / 3,0 %
+  / 2,4 % al 0,4 % / 0,1 % / 0,3 %. Es la cifra que se perseguía desde la fase 1.
+- **El latigazo se reduce a la mitad.** Episodios en que el sesgo se invierte y se
+  deshace: 55 → 28, 267 → 177, 1.079 → 630. En ≤ 2 barras, 10 → 3, 37 → 11 y
+  175 → 50.
+- **Los impulsos viven más y el limbo se encoge.** Duración mediana 2 → 3, 2 → 4 y
+  2 → 4 barras; máximo 39 → 65, 180 → 181 y 191 → 227. Barras en limbo, del 36,0 %
+  / 31,2 % / 29,6 % al 21,4 % / 19,5 % / 16,9 %.
+- **Con las tres temporalidades vigentes se pasa del 36,9 % al 58,9 % del tiempo**,
+  y alineadas en la misma dirección, del 12,3 % al 19,0 %.
+- **Casi toda rotura es por zona.** Por línea sólo mueren 2 / 7 / 23 ID en todo el
+  histórico (0,8 % / 0,6 % / 0,6 % de las roturas), y siempre por el mismo motivo:
+  su OB nunca llegó a confirmarse. En el lado a favor no ocurre nunca, porque el
+  UL existe siempre.
+- **Las zonas solapadas se caen solas**, que era la hipótesis: del 10,0 % / 7,4 % /
+  9,2 % de los ID con OB al 1,7 % / 1,2 % / 1,9 % (37 → 4, 135 → 14, 637 → 79).
+- **`OVERLAP_PRIORITY` es cosmético sobre estos datos, y hay una razón.** El
+  conflicto de evaluación simultánea **no se da ni una vez**. Que dos zonas se
+  solapen no basta: para cumplir las dos condiciones hacen falta los dos bordes
+  exteriores *invertidos*, y eso es lo contrario de solaparse. En un ID alcista se
+  cumple siempre `borde exterior del UL >= extremo > ancla >= borde exterior del
+  OB` mientras el rango sea positivo, y con la regla nueva no queda ningún impulso
+  de rango no positivo. Los dos órdenes quedan implementados y producen la misma
+  historia (hashes `801951b9cc26` y `f4714ba0b488`).
+- **R-36 sigue abierto y cambia de puerta.** Extremos sobre vela de color contrario:
+  4 → 3, 39 → 17, 146 → 22. Los que quedan ya no entran sólo por el arranque de la
+  pierna: 3 / 4 / 9 de ellos entran por la vela que **extendió** el extremo con el
+  ID ya vigente, una puerta que en la fase 1 no existía. **No se corrige aquí.**
+- **La estimación de la fase 2.0 se quedó corta, como se avisó.** Estimaba un
+  44,1 % / 41,9 % / 45,8 % de roturas salvadas; de verdad se han evitado 214 / 938
+  / 3.836 velas frente a las 177 / 802 / 3.311 que salían de aplicar aquel
+  porcentaje. La estimación miraba cada rotura *en su instante*, con todo lo demás
+  igual; al re-ejecutar, cada rotura salvada cambia lo que viene después.
+
+Sigue sin haber señales, entradas, stops ni targets, y `OVERLAP_PRIORITY` es el
+único parámetro que esta fase deja abierto. Antes de la fase 2.2 (FVG) hace falta
+que el propietario audite `now/fase21/`, empezando por las capturas de roturas
+evitadas.
 
 ## Antes de pensar en demo
 
