@@ -268,11 +268,11 @@ def _figure(
     window_first = max(0, request.first - request.context)
     window_last = min(last_index, request.last + request.context)
     labels = bar_labels(pd.DatetimeIndex(analysis.bars.index[window_first : window_last + 1]))
-    note = _draw_zones(figure, analysis, zoned, window_first, window_last, labels)
+    note = draw_zones(figure, analysis, zoned, window_first, window_last, labels)
     return figure, note
 
 
-def _draw_zones(
+def draw_zones(
     figure: go.Figure,
     analysis: TimeframeAnalysis,
     zoned: ImpulseZones,
@@ -280,6 +280,12 @@ def _draw_zones(
     last: int,
     labels: Sequence[str],
 ) -> str:
+    """Dibuja el UL y el OB de un ID sobre una captura ya montada.
+
+    Pública porque las capturas de la fase 2.1 dibujan exactamente las mismas dos
+    zonas: son las que ahora deciden la rotura, y enseñarlas con otro trazo
+    obligaría al propietario a comparar dos dibujos distintos de lo mismo.
+    """
     colour = BULLISH if zoned.direction.value == "alcista" else BEARISH
     notes: list[str] = []
 
@@ -605,4 +611,4 @@ def _write_readme(captures: Sequence[ZoneCapture], folder: Path) -> None:
     (folder / "LEEME.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-__all__ = ["ZoneCapture", "write_zone_captures"]
+__all__ = ["ZoneCapture", "draw_zones", "write_zone_captures"]

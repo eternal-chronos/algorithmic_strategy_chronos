@@ -140,6 +140,42 @@ rules:
   # contraria sin ningún extremo de color válido, no nace ID: el limbo sigue.
   leg_start_mode: L1_actual
 
+  # FASE 2.1 — ROTURA DEL ID POR ZONA. Es el primer cambio de comportamiento del
+  # proyecto desde que se fijó la línea base: cambiar esto mueve los impulsos, el
+  # limbo y todas las estadísticas.
+  #
+  #   false -> la rotura es por LÍNEA. Comportamiento de la fase 1, línea base
+  #            8e51cd9140c8 con D 401 / H4 1.914 / H1 7.231 detectados.
+  #   true  -> manda la ZONA. La línea deja de ser el nivel de rotura cuando
+  #            existe una zona que la sustituya:
+  #              lado a favor (extremo) -> el UL, que existe siempre
+  #              lado en contra (ancla) -> el OB si está confirmado; si no, la
+  #                                        línea (le pasa al 4-5 % de los ID)
+  #            Romper una zona es CERRAR MÁS ALLÁ DE SU BORDE EXTERIOR, es decir
+  #            atravesarla entera. Perforarla con mecha y cerrar dentro no rompe;
+  #            cerrar dentro tampoco. Un UL de altura cero —la vela del extremo
+  #            cerró en su propio máximo— tiene los dos bordes en la línea y se
+  #            comporta exactamente como ella; el informe los cuenta.
+  #
+  # Un ID que sobrevive a lo que antes era una rotura sigue vivo y SIGUE
+  # EXTENDIENDO SU EXTREMO: la zona UL se recalcula sobre la vela nueva y
+  # sustituye a la anterior. El OB no se mueve nunca, porque lo fija la vela del
+  # ancla y ésa no cambia.
+  #
+  # La rotura se evalúa siempre con velas de la MISMA temporalidad del ID, igual
+  # que en la fase 1, y sólo contra zonas ya nacidas y —el OB— ya confirmadas.
+  break_by_zone: false
+
+  # PENDIENTE (fase 2.1 §2). Con las dos zonas SOLAPADAS en precio —impulsos cuyo
+  # rango cabe dentro de la vela del ancla— una misma vela puede cumplir a la vez
+  # la condición de rotura a favor y la de en contra. Hay que elegir un orden
+  # determinista, y no lo elige el motor:
+  #   a_favor_primero    -> se evalúa antes el UL
+  #   en_contra_primero  -> se evalúa antes el OB
+  # Con break_by_zone: false no cambia nada: reproduce el orden que la máquina de
+  # estados ya tenía escrito. El informe cuenta cuántas veces decide de verdad.
+  overlap_priority: a_favor_primero
+
   # Barras iniciales que no producen ID publicables.
   warmup_bars: 50
   # ATR usado para normalizar el rango de los impulsos. Sólo mira barras

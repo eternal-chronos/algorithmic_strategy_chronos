@@ -73,6 +73,10 @@
      * siquiera se enseñan. */
     zonesUl: true,
     zonesOb: true,
+    /* Fase 2.1. Las roturas evitadas son lo primero que hay que auditar de la
+     * regla nueva, así que la capa nace encendida cuando la corrida trae alguna.
+     * Con `break_by_zone: false` no hay ninguna y la casilla ni se enseña. */
+    avoided: true,
     blind: false,      // auditoría ciega en curso (F.1)
     revealed: false,
     seed: null,
@@ -909,27 +913,112 @@
       return item.x >= edges.lo && item.x <= edges.hi &&
         !pending(item.x, primary(), edges) && keeps(allowed, item.id);
     });
-    traces.push(breakTrace(breaks, "favor", "ROTURA_A_FAVOR", "triangle-up", COLORS.ink));
-    traces.push(breakTrace(breaks, "contra", "ROTURA_EN_CONTRA", "x", COLORS.muted));
+    /* Fase 2.1: morir atravesando una zona y morir por línea son dos cosas
+     * distintas y se distinguen en el dibujo. El símbolo relleno es el de
+     * siempre —así la fase 1 se sigue leyendo igual, porque ahí todo es línea— y
+     * el hueco marca la excepción: no había zona en ese lado. */
+    traces.push(breakTrace(breaks, "favor", "linea", "ROTURA_A_FAVOR", "triangle-up", COLORS.ink));
+    traces.push(breakTrace(breaks, "favor", "zona", "ROTURA_A_FAVOR", "triangle-up-open", COLORS.ink));
+    traces.push(breakTrace(breaks, "contra", "linea", "ROTURA_EN_CONTRA", "x", COLORS.muted));
+    traces.push(breakTrace(breaks, "contra", "zona", "ROTURA_EN_CONTRA", "x-open", COLORS.muted));
     return traces.filter(Boolean);
   }
 
-  function breakTrace(breaks, kind, name, symbol, color) {
-    var items = breaks.filter(function (item) { return item.k === kind; });
+  /* `source` separa las roturas por el nivel que las produjo: `linea` es la
+   * regla de la fase 1 y `zona` (UL u OB) la de la 2.1. Con `break_by_zone`
+   * apagado todas caen en `linea` y las dos trazas nuevas salen vacías. */
+  function breakTrace(breaks, kind, source, name, symbol, color) {
+    var items = breaks.filter(function (item) {
+      return item.k === kind && (item.src === "linea") === (source === "linea");
+    });
     if (!items.length) { return null; }
+    var suffix = DATA.meta.breakByZone
+      ? " · " + (source === "linea" ? "por línea" : "por zona")
+      : "";
     return {
-      type: "scatter", mode: "markers", name: name + " " + label(primary()),
+      type: "scatter", mode: "markers",
+      name: name + " " + label(primary()) + suffix,
       x: items.map(function (item) { return iso(item.x); }),
       y: items.map(function (item) { return item.y; }),
       text: items.map(function (item) {
+        var how = item.src === "linea"
+          ? (DATA.meta.breakByZone
+            ? "<br>por LÍNEA: ese lado no tenía zona (el OB nunca se confirmó)"
+            : "")
+          : "<br>por ZONA " + item.src + ": la atravesó entera" +
+            "<br>línea del ID en " + price(item.ln);
         return name + " (" + primary() + ")<br>" + stamp(item.x) +
           "<br>ID roto: " + item.id + " (" + item.d + ")" +
-          "<br>cierre " + price(item.y) + " más allá de " + price(item.lvl) +
+          "<br>cierre " + price(item.y) + " más allá de " + price(item.lvl) + how +
           "<br>pierna en curso: " + item.next;
       }),
       hoverinfo: "text", hoverlabel: { align: "left" },
       marker: { symbol: symbol, size: 10, color: color, line: { color: COLORS.surface, width: 1 } }
     };
+  }
+
+  /* --- Fase 2.1: las roturas evitadas ---------------------------------------
+   *
+   * Velas que bajo la regla antigua habrían matado el ID y con la nueva no:
+   * cerraron más allá de la línea sin atravesar la zona entera. Es la capa que
+   * el propietario audita primero, así que el dibujo lleva las dos cosas que
+   * hacen falta para juzgarla sin abrir ningún CSV: el segmento que va del
+   * cierre a la línea que cruzó —eso es exactamente lo que la regla antigua
+   * contaba como rotura— y el marcador sobre el cierre. */
+
+  function hasAvoided() { return DATA.hasAvoided === true; }
+
+  function avoidedOf(timeframe) {
+    return impulsesOf(timeframe).avoided || [];
+  }
+
+  function avoidedTraces(range) {
+    if (blindfolded() || !state.avoided || !hasAvoided()) { return []; }
+    if (!isVisible(primary())) { return []; }
+    var edges = window_(range);
+    var allowed = visibleIds(primary(), edges);
+    var items = avoidedOf(primary()).filter(function (item) {
+      return item.x >= edges.lo && item.x <= edges.hi &&
+        !pending(item.x, primary(), edges) && keeps(allowed, item.id);
+    });
+    if (!items.length) { return []; }
+
+    // Un solo trazo con separadores nulos: una traza por vela salvada
+    // multiplicaría por cien las trazas de una ventana larga.
+    var sx = [];
+    var sy = [];
+    items.forEach(function (item) {
+      sx.push(iso(item.x), iso(item.x), null);
+      sy.push(item.ln, item.y, null);
+    });
+
+    return [
+      {
+        type: "scatter", mode: "lines", name: "Rotura evitada · tramo",
+        x: sx, y: sy, hoverinfo: "skip", showlegend: false,
+        line: { color: COLORS.ink, width: 2.4 }
+      },
+      {
+        type: "scatter", mode: "markers",
+        name: "ROTURA EVITADA " + label(primary()),
+        x: items.map(function (item) { return iso(item.x); }),
+        y: items.map(function (item) { return item.y; }),
+        text: items.map(function (item) {
+          return "ROTURA EVITADA (" + (item.k === "favor"
+            ? "ROTURA_A_FAVOR" : "ROTURA_EN_CONTRA") + ")<br>" + stamp(item.x) +
+            "<br>ID " + item.id + " (" + item.d + ")" +
+            "<br>cierre " + price(item.y) + " más allá de la línea " + price(item.ln) +
+            "<br>zona " + item.z + " [" + price(item.zi) + ", " + price(item.zo) + "]" +
+            "<br>le faltó " + price(Math.abs(item.zo - item.y)) + " para atravesarla" +
+            (item.ext ? "<br>aquí el ID extiende su extremo" : "");
+        }),
+        hoverinfo: "text", hoverlabel: { align: "left" },
+        marker: {
+          symbol: "circle-x", size: 12, color: COLORS.ink,
+          line: { color: COLORS.surface, width: 1 }
+        }
+      }
+    ];
   }
 
   /* El sombreado es el del impulso principal: dos capas de limbo superpuestas
@@ -1094,6 +1183,7 @@
       .concat(impulseTraces(range))
       .concat(midTraces(range))
       .concat(markerTraces(range))
+      .concat(avoidedTraces(range))
       .concat(confirmationTraces(range))
       .concat(contactTraces(range))
       .concat(wrongExtremeTraces(range));
@@ -1173,7 +1263,17 @@
         }).length;
       }, 0);
       text += " · zonas dibujadas: " + conZona.toLocaleString("es-ES") +
-        " (fase 2.0: sólo se dibujan, no rompen nada)";
+        (DATA.meta.breakByZone
+          ? " (fase 2.1: éstas SÍ deciden la rotura)"
+          : " (fase 2.0: sólo se dibujan, no rompen nada)");
+    }
+    if (hasAvoided() && state.avoided && isVisible(primary())) {
+      var allowedAvoided = visibleIds(primary(), edges);
+      var evitadas = avoidedOf(primary()).filter(function (item) {
+        return item.x >= edges.lo && item.x <= edges.hi && keeps(allowedAvoided, item.id);
+      }).length;
+      text += " · roturas evitadas a la vista: " + evitadas.toLocaleString("es-ES") +
+        " (velas que con la regla antigua habrían matado el ID)";
     }
     var info = modeInfo(state.mode);
     if (info) {
@@ -1422,6 +1522,15 @@
     state.zonesUl = state.zonesOb = false;
   }
 
+  /* Fase 2.1, mismo criterio: con `break_by_zone: false` no hay ni una rotura
+   * evitada, y una casilla que no puede dibujar nada sólo hace dudar. */
+  function buildBreakLayers() {
+    var group = document.getElementById("break-layers");
+    if (!group || hasAvoided()) { return; }
+    if (group.style) { group.style.display = "none"; }
+    state.avoided = false;
+  }
+
   function buildVisibleButtons() {
     var container = document.getElementById("visible-buttons");
     VISIBLE_MODES.forEach(function (mode) {
@@ -1539,6 +1648,9 @@
       document.getElementById("layer-zones-ul").checked = state.zonesUl;
       document.getElementById("layer-zones-ob").checked = state.zonesOb;
     }
+    if (hasAvoided()) {
+      document.getElementById("layer-avoided").checked = state.avoided;
+    }
 
     seedInput().value = state.seed === null ? "" : String(state.seed);
     document.getElementById("blind-reveal").disabled = !blindfolded();
@@ -1600,7 +1712,8 @@
       ["layer-mid", "mid"],
       ["layer-wrong", "wrong"],
       ["layer-zones-ul", "zonesUl"],
-      ["layer-zones-ob", "zonesOb"]
+      ["layer-zones-ob", "zonesOb"],
+      ["layer-avoided", "avoided"]
     ].forEach(function (pair) {
       document.getElementById(pair[0]).addEventListener("change", function (event) {
         state[pair[1]] = event.target.checked;
@@ -1687,6 +1800,7 @@
   buildChartButtons();
   buildModeButtons();
   buildZoneLayers();
+  buildBreakLayers();
   buildVisibleButtons();
   buildPresetButtons();
   buildImpulseLayers();

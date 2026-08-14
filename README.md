@@ -53,6 +53,15 @@ chronos structure detect --config config/impulse.yaml
 
 # Evidencia de las comprobaciones: esperado y obtenido, lado a lado.
 chronos structure evidencia --config config/impulse.yaml
+
+# Zonas UL y OB de cada impulso (fase 2.0). Sólo detección y dibujo.
+chronos structure zonas --config config/impulse.yaml
+
+# Fase 2.1: la zona decide la rotura del ID en vez de la línea. Ejecuta el módulo
+# entero con las dos reglas sobre las mismas velas y las compara. Antes de nada
+# verifica que con `break_by_zone: false` sale la línea base exacta; si no sale,
+# para y avisa.
+chronos structure rotura-por-zona --config config/impulse.yaml
 ```
 
 Es un módulo aparte del backtest: detecta la estructura y no emite señales. Ver

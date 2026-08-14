@@ -58,6 +58,7 @@ function declare(id) {
  'prev', 'next',
  'from', 'to', 'layer-limbo', 'layer-marks', 'layer-contacts', 'layer-mid', 'layer-wrong',
  'zone-layers', 'layer-zones-ul', 'layer-zones-ob',
+ 'break-layers', 'layer-avoided',
  'blind-seed', 'blind-start', 'blind-reveal', 'blind-exit',
  'replay-group', 'replay-date', 'replay-start', 'replay-back', 'replay-step',
  'replay-play', 'replay-exit', 'replay-forming', 'replay-speed', 'replay-window',
@@ -267,6 +268,24 @@ visiblesZonas.forEach(function (button) {
 });
 // Se devuelve el filtro a su valor de salida: los pasos de más abajo lo dan por
 // supuesto y este bloque no debe cambiar el estado con el que se encuentran.
+visiblesZonas.filter(function (button) { return button.dataset.visible === 'pair'; })
+  .forEach(function (button) { button.fire('click'); });
+
+// Fase 2.1: la capa de roturas evitadas, encendida y apagada sobre las mismas
+// velas. Con `break_by_zone: false` no hay ninguna y los dos pasos salen iguales.
+// Se dibujan todos los ID: con el filtro «actual + anterior» las evitadas de los
+// impulsos antiguos quedan fuera y el paso no comprobaría la capa sino el filtro.
+// Y se vuelve a encender el impulso principal, que el paso `sin-principal` dejó
+// apagado: la capa de evitadas es sólo del principal, igual que los marcadores.
+visiblesZonas.filter(function (button) { return button.dataset.visible === 'all'; })
+  .forEach(function (button) { button.fire('click'); });
+const capaPrincipal = elements['impulse-layers'].children[0].children[0];
+capaPrincipal.fire('change', { target: { checked: true } });
+steps.push(snapshot('evitadas-por-defecto'));
+elements['layer-avoided'].fire('change', { target: { checked: false } });
+steps.push(snapshot('evitadas-apagadas'));
+elements['layer-avoided'].fire('change', { target: { checked: true } });
+capaPrincipal.fire('change', { target: { checked: false } });
 visiblesZonas.filter(function (button) { return button.dataset.visible === 'pair'; })
   .forEach(function (button) { button.fire('click'); });
 tabs[0].fire('click');

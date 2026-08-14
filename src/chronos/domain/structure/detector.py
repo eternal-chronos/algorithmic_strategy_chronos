@@ -32,6 +32,25 @@ así que nunca llega a fijar el extremo— y por esa puerta de atrás entraban
 extremos sobre velas del color contrario a su impulso. `LegStartMode` enumera las
 tres lecturas de ese borde; la decisión es del propietario. Los tres modos se
 describen uno a uno en `_open_leg`, `_extend_leg` y `_on_bar_in_limbo`.
+
+**Fase 2.1 · `break_by_zone`.** El único cambio de comportamiento del módulo
+desde que se fijó la línea base. Con el interruptor apagado todo lo anterior se
+lee tal cual. Con él encendido, la línea deja de ser el nivel de rotura cuando
+existe una zona que la sustituya: el UL manda el lado a favor y el OB el lado en
+contra, y romper es cerrar más allá del borde **exterior**, atravesando la zona
+entera. Tres consecuencias, todas dentro de esta máquina y ninguna en un filtro
+posterior:
+
+- Una vela que antes rompía y ahora no deja el ID **vivo**, así que toda la
+  historia posterior cambia: el ID sigue, el siguiente nace en otro sitio y con
+  otra numeración. Por eso se re-ejecuta la detección y no se reetiqueta nada.
+- Si esa vela salvada iba a favor, **el extremo se estira** hasta lo que alcanzó
+  su cuerpo y el UL se recalcula sobre ella (§3.2). El ancla no tiene
+  equivalente: la fija la vela del arranque de la pierna, que no cambia, y por
+  eso el OB no se mueve nunca.
+- Con las dos zonas solapadas en precio una misma vela puede cumplir las dos
+  condiciones a la vez. `OverlapPriority` decide el orden de evaluación; el motor
+  no elige por su cuenta y el informe cuenta cuántas veces decide.
 """
 
 from __future__ import annotations
@@ -45,14 +64,24 @@ from chronos.domain.structure.enums import (
     AnchorMode,
     BodyDirection,
     BreakKind,
+    BreakLevelSource,
     DojiBreakMode,
     ImpulseDirection,
     LegStartMode,
     MachineState,
+    OverlapPriority,
     SeedMode,
 )
 from chronos.domain.structure.errors import LookaheadError, StructureError
 from chronos.domain.structure.impulse import BarState, BreakEvent, DominantImpulse
+from chronos.domain.structure.zone_break import (
+    AvoidedBreak,
+    BreakLevels,
+    SideLevel,
+    ZoneBreakLevels,
+    line_levels,
+)
+from chronos.domain.structure.zones import ZoneKind
 
 DEFAULT_WARMUP_BARS = 50
 
@@ -103,15 +132,28 @@ class DominantImpulseDetector:
         doji_break_mode: DojiBreakMode = DojiBreakMode.D1_NEUTRAL,
         leg_start_mode: LegStartMode = LegStartMode.L1_CURRENT,
         warmup_bars: int = DEFAULT_WARMUP_BARS,
+        break_by_zone: bool = False,
+        overlap_priority: OverlapPriority = OverlapPriority.A_FAVOR_FIRST,
+        zone_levels: ZoneBreakLevels | None = None,
     ) -> None:
         if warmup_bars < 0:
             raise StructureError("warmup_bars no puede ser negativo")
+        if break_by_zone and zone_levels is None:
+            raise StructureError(
+                "BREAK_BY_ZONE exige las mechas de la temporalidad: pásale un "
+                "ZoneBreakLevels construido sobre las mismas velas"
+            )
         self._timeframe = timeframe
         self._anchor_mode = anchor_mode
         self._seed_mode = seed_mode
         self._doji_break_mode = doji_break_mode
         self._leg_start_mode = leg_start_mode
         self._warmup_bars = warmup_bars
+        self._break_by_zone = break_by_zone
+        self._overlap_priority = overlap_priority
+        #: Sólo se conserva si va a mandar. Con el interruptor apagado el
+        #: detector no tiene forma de leer una mecha ni por descuido.
+        self._zones = zone_levels if break_by_zone else None
 
         self._bars: list[BodyBar] = []
         self._state = MachineState.LIMBO
@@ -124,6 +166,9 @@ class DominantImpulseDetector:
         self._impulses: list[DominantImpulse] = []
         self._events: list[BreakEvent] = []
         self._states: list[BarState] = []
+        #: Fase 2.1. Velas que bajo la regla de la fase 1 habrían roto el ID y con
+        #: la nueva no. Vacío con el interruptor apagado.
+        self._avoided: list[AvoidedBreak] = []
         self._diagnostics: dict[str, int] = {
             "dojis": 0,
             "roturas_a_favor": 0,
@@ -142,6 +187,27 @@ class DominantImpulseDetector:
             #: `L3`: velas contrarias que llegaron antes de que la pierna tuviera
             #: extremo válido y por tanto no constituyeron ningún ID.
             "constituciones_aplazadas_sin_extremo": 0,
+            # --- Fase 2.1 · rotura por zona. Todos a cero con el interruptor
+            # apagado, que es como se comprueba que no se ha colado nada.
+            #: Roturas según de dónde salió el nivel que las produjo. Con la
+            #: regla nueva "por línea" sólo puede ocurrir en el lado en contra y
+            #: sólo cuando el OB del ID nunca llegó a confirmarse.
+            "roturas_a_favor_por_zona": 0,
+            "roturas_a_favor_por_linea": 0,
+            "roturas_en_contra_por_zona": 0,
+            "roturas_en_contra_por_linea": 0,
+            #: Velas que habrían roto por línea y la zona ha salvado.
+            "roturas_evitadas_a_favor": 0,
+            "roturas_evitadas_en_contra": 0,
+            #: Veces que el extremo de un ID vigente se estiró tras salvarse.
+            "extremos_extendidos": 0,
+            #: Velas en que se cumplieron a la vez las dos condiciones de rotura:
+            #: es donde `OVERLAP_PRIORITY` decide, y sólo puede pasar con las dos
+            #: zonas solapadas en precio.
+            "conflictos_de_solape": 0,
+            #: §1.3: roturas contra una zona degenerada, de altura cero. Ahí la
+            #: regla nueva se comporta exactamente como la antigua.
+            "roturas_con_zona_de_altura_cero": 0,
         }
 
     # --- Alimentación -------------------------------------------------------
@@ -154,6 +220,10 @@ class DominantImpulseDetector:
             )
         self._bars.append(bar)
         index = len(self._bars) - 1
+        if self._zones is not None:
+            # La frontera de las mechas avanza con la del cuerpo: las dos series
+            # son la misma vela vista de dos formas.
+            self._zones.advance(index)
 
         if bar.direction is BodyDirection.DOJI:
             self._diagnostics["dojis"] += 1
@@ -205,6 +275,15 @@ class DominantImpulseDetector:
         return tuple(self._states)
 
     @property
+    def avoided_breaks(self) -> tuple[AvoidedBreak, ...]:
+        """Fase 2.1: las velas que la regla nueva ha salvado. Vacío si está apagada."""
+        return tuple(self._avoided)
+
+    @property
+    def break_by_zone(self) -> bool:
+        return self._break_by_zone
+
+    @property
     def diagnostics(self) -> dict[str, int]:
         return dict(self._diagnostics)
 
@@ -226,6 +305,20 @@ class DominantImpulseDetector:
                 "el extremo de la pierna en curso todavía no está fijado"
             )
         return self._current.extreme
+
+    def current_break_levels(self) -> BreakLevels:
+        """Los dos niveles con los que se juzgará la barra siguiente (fase 2.1).
+
+        En limbo no existen: no hay ID al que romper y la pierna en curso todavía
+        no encierra nada. Preguntarlo ahí es mirar al futuro, igual que preguntar
+        por el extremo.
+        """
+        if self._current is None:
+            raise LookaheadError(
+                f"[{self._timeframe}] No hay ID constituido (estado {self._state.value}): "
+                "no hay niveles de rotura que consultar"
+            )
+        return self._levels_of(self._current, through=len(self._bars) - 1)
 
     def state_at(self, timestamp: datetime) -> BarState:
         """Estado publicado en el cierre de barra vigente en `timestamp`."""
@@ -275,31 +368,46 @@ class DominantImpulseDetector:
             self._open_leg(direction, start_index=index, break_index=None, limbo_start_index=0)
 
     def _on_bar_with_impulse(self, index: int, bar: BodyBar) -> None:
-        """Estado ID_VIGENTE: o rompe por uno de los dos límites, o es retroceso."""
+        """Estado ID_VIGENTE: o rompe por uno de los dos límites, o es retroceso.
+
+        Cuál es "el límite" lo decide `BREAK_BY_ZONE`: la línea del ID, o el borde
+        exterior de la zona que la sustituye. Lo demás de este método es idéntico
+        en las dos reglas, y ésa es la razón de que la fase 2.1 no sea un filtro
+        posterior sino un cambio de nivel dentro de la misma máquina.
+        """
         impulse = self._current
         assert impulse is not None  # invariante del estado ID_VIGENTE
 
-        beyond_extreme = self._is_beyond(bar.close, impulse.extreme, impulse.direction)
+        levels = self._levels_of(impulse, through=index - 1)
+        beyond_extreme = self._is_beyond(
+            bar.close, levels.favor.price, impulse.direction
+        )
         beyond_anchor = self._is_beyond(
-            bar.close, impulse.anchor, impulse.direction.opposite()
+            bar.close, levels.against.price, impulse.direction.opposite()
         )
         if bar.direction is BodyDirection.DOJI and (beyond_extreme or beyond_anchor):
             self._diagnostics["dojis_en_nivel_de_rotura"] += 1
             if self._doji_break_mode is DojiBreakMode.D1_NEUTRAL:
-                return  # §2.2: el doji no rompe nada
+                # §2.2: el doji no rompe nada. Tampoco estira el extremo: es
+                # neutro en todo el módulo, no neutro sólo para lo que estorba.
+                return
 
-        if beyond_extreme:
-            kind, level, new_direction = BreakKind.A_FAVOR, impulse.extreme, impulse.direction
-        elif beyond_anchor:
-            kind, level, new_direction = (
-                BreakKind.EN_CONTRA,
-                impulse.anchor,
-                impulse.direction.opposite(),
-            )
-        else:
-            return  # retroceso dentro del rango: no pasa nada
+        kind = self._first_hit(beyond_extreme, beyond_anchor)
+        if kind is None:
+            # Retroceso dentro del rango... o una vela que la fase 1 habría
+            # llamado rotura y la zona ha salvado.
+            self._survive(impulse, index, bar, levels)
+            return
 
-        impulse.close(timestamp=bar.timestamp, index=index, kind=kind)
+        side = levels.of(kind)
+        new_direction = (
+            impulse.direction
+            if kind is BreakKind.A_FAVOR
+            else impulse.direction.opposite()
+        )
+        impulse.close(
+            timestamp=bar.timestamp, index=index, kind=kind, level_source=side.source
+        )
         self._events.append(
             BreakEvent(
                 kind=kind,
@@ -310,12 +418,16 @@ class DominantImpulseDetector:
                 broken_direction=impulse.direction,
                 new_leg_direction=new_direction,
                 close=bar.close,
-                level=level,
+                level=side.price,
+                line=side.line,
+                level_source=side.source,
             )
         )
         self._diagnostics[
             "roturas_a_favor" if kind is BreakKind.A_FAVOR else "roturas_en_contra"
         ] += 1
+        if self._break_by_zone:
+            self._count_break_source(kind, side)
         self._current = None
 
         if self._leg_start_mode is LegStartMode.L2_NEXT_BAR:
@@ -440,6 +552,121 @@ class DominantImpulseDetector:
         self._current = impulse
         self._leg = None
         self._state = MachineState.ID_VIGENTE
+
+    # --- Fase 2.1: qué nivel manda y qué pasa cuando la zona salva -----------
+
+    def _levels_of(self, impulse: DominantImpulse, *, through: int) -> BreakLevels:
+        """Los dos niveles vigentes del ID con lo cerrado hasta `through`.
+
+        Con el interruptor apagado son las dos líneas y no se lee ni una mecha,
+        así que la línea base sale idéntica sin que la máquina tenga dos caminos.
+        """
+        if self._zones is None:
+            return line_levels(extreme=impulse.extreme, anchor=impulse.anchor)
+        return self._zones.levels(
+            direction=impulse.direction,
+            extreme=impulse.extreme,
+            index_extreme=impulse.index_extreme,
+            anchor=impulse.anchor,
+            index_anchor=impulse.index_anchor,
+            through=through,
+        )
+
+    def _first_hit(self, beyond_extreme: bool, beyond_anchor: bool) -> BreakKind | None:
+        """Cuál de las dos roturas se aplica cuando se cumplen las dos a la vez.
+
+        Con zonas solapadas —el rango del ID cabe dentro de la vela del ancla— un
+        mismo cierre puede quedar más allá de los dos bordes exteriores. Elegir es
+        obligatorio y determinista; **elegir bien no es cosa del motor**, así que
+        el orden es un parámetro y aquí sólo se aplica y se cuenta.
+        """
+        if beyond_extreme and beyond_anchor:
+            self._diagnostics["conflictos_de_solape"] += 1
+        if self._overlap_priority is OverlapPriority.EN_CONTRA_FIRST:
+            order = (
+                (beyond_anchor, BreakKind.EN_CONTRA),
+                (beyond_extreme, BreakKind.A_FAVOR),
+            )
+        else:
+            order = (
+                (beyond_extreme, BreakKind.A_FAVOR),
+                (beyond_anchor, BreakKind.EN_CONTRA),
+            )
+        return next((kind for hit, kind in order if hit), None)
+
+    def _survive(
+        self, impulse: DominantImpulse, index: int, bar: BodyBar, levels: BreakLevels
+    ) -> None:
+        """El ID no ha roto. Si la fase 1 lo habría matado aquí, se anota y se estira.
+
+        Que un cierre quede más allá de la **línea** sin llegar al borde exterior
+        de la zona es exactamente la rotura que la fase 2.1 evita. Sólo puede
+        pasar si ese lado tiene zona y la zona no es degenerada: con un UL de
+        altura cero los dos bordes están en la línea y no hay nada que salvar
+        (§1.3), y sin OB confirmado el ancla manda sola y ya habría roto.
+        """
+        if not self._break_by_zone:
+            return
+
+        if self._is_beyond(
+            bar.close, levels.against.line, impulse.direction.opposite()
+        ):
+            # El OB aguanta. El ancla no se mueve: la fija la vela del arranque de
+            # la pierna, y esa vela no cambia.
+            self._diagnostics["roturas_evitadas_en_contra"] += 1
+            self._record_avoided(
+                BreakKind.EN_CONTRA, impulse, index, bar, levels.against, extended=False
+            )
+
+        if self._is_beyond(bar.close, levels.favor.line, impulse.direction):
+            # §3.2: el ID sigue vivo y sigue extendiendo su extremo. El UL se
+            # recalcula solo, porque se deriva de la vela del extremo, y la zona
+            # nueva sustituye a la anterior desde la barra siguiente.
+            self._diagnostics["roturas_evitadas_a_favor"] += 1
+            self._record_avoided(
+                BreakKind.A_FAVOR, impulse, index, bar, levels.favor, extended=True
+            )
+            impulse.extend_extreme(
+                price=bar.extreme_towards(impulse.direction),
+                index=index,
+                timestamp=bar.timestamp,
+                bar_direction=bar.direction,
+            )
+            self._diagnostics["extremos_extendidos"] += 1
+
+    def _record_avoided(
+        self,
+        kind: BreakKind,
+        impulse: DominantImpulse,
+        index: int,
+        bar: BodyBar,
+        side: SideLevel,
+        *,
+        extended: bool,
+    ) -> None:
+        self._avoided.append(
+            AvoidedBreak(
+                kind=kind,
+                timestamp=bar.timestamp,
+                index=index,
+                timeframe=self._timeframe,
+                id_num=impulse.id_num,
+                direction=impulse.direction,
+                close=bar.close,
+                line=side.line,
+                zone=ZoneKind.LAST if kind is BreakKind.A_FAVOR else ZoneKind.ORDER_BLOCK,
+                zone_inner=side.inner,
+                zone_outer=side.price,
+                extended_extreme=extended,
+            )
+        )
+
+    def _count_break_source(self, kind: BreakKind, side: SideLevel) -> None:
+        lado = "a_favor" if kind is BreakKind.A_FAVOR else "en_contra"
+        origen = "linea" if side.source is BreakLevelSource.LINE else "zona"
+        self._diagnostics[f"roturas_{lado}_por_{origen}"] += 1
+        if side.is_flat:
+            self._diagnostics["roturas_con_zona_de_altura_cero"] += 1
 
     # --- Utilidades ---------------------------------------------------------
 

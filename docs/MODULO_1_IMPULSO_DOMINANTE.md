@@ -105,6 +105,15 @@ El limbo es un estado legítimo y puede durar varias barras. De este ciclo sale
 gratis la inmunidad al lookahead: el extremo no se conoce hasta que cierra la
 vela contraria, así que no hay nada que desplazar.
 
+> **Qué es «uno de los dos límites» depende de `break_by_zone` (fase 2.1).** Con
+> `false` —la línea base de esta fase— son las dos líneas del ID, el extremo y el
+> ancla. Con `true` la línea deja de mandar cuando existe una zona que la
+> sustituya: el UL en el lado a favor y el OB confirmado en el lado en contra, y
+> romper pasa a ser cerrar más allá de su borde **exterior**. El ciclo rotura →
+> limbo → constitución no cambia; lo único que cambia es **cuándo** se dispara la
+> rotura, y que un ID que sobrevive sigue extendiendo su extremo. Está en
+> [`FASES.md`](FASES.md#fase-21--la-zona-decide-la-rotura).
+
 ### Sin umbral de tamaño
 
 Cualquier cuerpo contrario constituye el impulso, por pequeño que sea. El
@@ -127,7 +136,7 @@ Todas están cubiertas por tests en `tests/domain/structure/test_synthetic_day.p
 | `n_barras_id` | Barras entre la constitución y la rotura que lo cierra | — |
 | Rango negativo | No se corrige: se cuenta en `impulsos_rango_no_positivo` | Sólo aparece con huecos violentos; taparlo escondería datos malos |
 
-## Parámetros — cuatro cerrados, dos abiertos
+## Parámetros — cuatro cerrados, cuatro abiertos
 
 El motor no ha elegido ninguno por criterio propio. El informe los imprime todos
 en cada corrida, cerrados y abiertos.
@@ -148,6 +157,8 @@ en cada corrida, cerrados y abiertos.
 |---|---|---|
 | `seed_mode` | `S1_first_non_doji` · `S2_first_counter_bar` | Cómo arranca la máquina al principio del histórico, donde no hay pasado a la izquierda. Afecta sólo a los primeros impulsos |
 | `doji_break_mode` | `D1_doji_no_rompe` · `D2_doji_rompe_por_cierre` | §2.2 dice que el doji "no rompe nada"; §2.6 evalúa la rotura por cierre sin mirar el cuerpo. El informe cuenta cuántas barras distinguen una lectura de la otra |
+| `break_by_zone` (fase 2.1) | `false` · `true` | Si la rotura es por línea o por zona. `false` es esta línea base; `true` es la de la fase 2.1 (`801951b9cc26`) |
+| `overlap_priority` (fase 2.1) | `a_favor_primero` · `en_contra_primero` | Qué lado se evalúa primero cuando una vela cumple las dos condiciones de rotura. Sobre este histórico no ocurre **ni una vez**, así que la elección es cosmética; los dos órdenes están implementados |
 
 `h4_offset_hours` sigue en el YAML pero **no pinta nada** mientras haya ancla de
 sesión: H4 arranca con la sesión y avanza de cuatro en cuatro dentro de ella
@@ -160,7 +171,10 @@ parámetros en vez de resolverlos por cuenta propia.
 
 `L1_actual` reproduce barra por barra el comportamiento previo a R-36 y por eso
 queda **fuera del hash de configuración**: las corridas ya archivadas siguen
-siendo comparables. `L2` y `L3` sí entran en el hash.
+siendo comparables. `L2` y `L3` sí entran en el hash. `break_by_zone: false` se
+omite por la misma razón y con la misma consecuencia buscada —la línea base
+`8e51cd9140c8` se conserva—, y con él se omite `overlap_priority`, que sólo puede
+decidir algo con la regla nueva encendida.
 
 ### La línea base definitiva y lo que sustituye
 

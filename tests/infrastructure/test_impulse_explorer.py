@@ -1378,3 +1378,75 @@ def test_el_modo_activo_no_se_duplica_en_el_payload(
     # Y aun así el fichero con los tres modos pesa menos que tres ficheros: las
     # velas, que son la mayor parte, viajan una sola vez.
     assert payload_size(payload) < 3 * payload_size(build_payload(run))
+
+
+# --- Fase 2.1 · la capa de roturas evitadas ---------------------------------
+
+
+@pytest.fixture
+def zoned_run(run: ImpulseRun) -> ImpulseRun:
+    """Las mismas velas con la rotura por zona, que es la que trae la capa."""
+    series = {timeframe: analysis.bars for timeframe, analysis in run.analyses.items()}
+    tuned = replace(run.config, rules=replace(run.config.rules, break_by_zone=True))
+    return DetectDominantImpulses(tuned).execute(series, provenance="fixture sintética")
+
+
+def test_sin_la_regla_nueva_el_payload_no_declara_la_capa(run: ImpulseRun) -> None:
+    payload = build_payload(run)
+
+    assert payload["hasAvoided"] is False
+    assert payload["meta"]["breakByZone"] is False
+    assert payload["impulses"][H4]["avoided"] == []
+    # Y toda rotura viaja como "por línea", que es lo que la fase 1 hacía.
+    assert all(item["src"] == "linea" for item in payload["impulses"][H4]["breaks"])
+
+
+def test_cada_rotura_evitada_viaja_con_su_zona_y_su_linea(zoned_run: ImpulseRun) -> None:
+    payload = build_payload(zoned_run)
+
+    assert payload["hasAvoided"] is True
+    assert payload["meta"]["breakByZone"] is True
+    registros = payload["impulses"][H4]["avoided"]
+    assert len(registros) == len(zoned_run.analyses[H4].avoided)
+    for registro in registros:
+        # Cerró más allá de la línea y sin llegar al borde exterior: las dos
+        # cosas se tienen que poder leer en el globo sin abrir ningún CSV.
+        bajo, alto = sorted((registro["zi"], registro["zo"]))
+        assert bajo <= registro["y"] <= alto
+        assert registro["z"] in ("UL", "OB")
+        assert registro["k"] in ("favor", "contra")
+
+
+def test_la_rotura_real_dice_si_fue_por_zona_o_por_linea(zoned_run: ImpulseRun) -> None:
+    registros = build_payload(zoned_run)["impulses"][H4]["breaks"]
+    fuentes = {item["src"] for item in registros}
+
+    assert fuentes <= {"linea", "UL", "OB"}
+    # El UL existe siempre, así que ninguna rotura a favor puede ser por línea.
+    assert all(
+        item["src"] == "UL" for item in registros if item["k"] == "favor"
+    )
+
+
+def test_la_capa_de_evitadas_se_dibuja_y_se_apaga(
+    zoned_run: ImpulseRun, tmp_path: Path
+) -> None:
+    resultado = _draw(zoned_run, tmp_path)
+    encendida = _trace_names(_step(resultado, "evitadas-por-defecto"))
+    apagada = _trace_names(_step(resultado, "evitadas-apagadas"))
+
+    assert any(nombre.startswith("ROTURA EVITADA") for nombre in encendida), encendida
+    assert not any(nombre.startswith("ROTURA EVITADA") for nombre in apagada)
+    assert "roturas evitadas a la vista" in _step(resultado, "evitadas-por-defecto")["notes"]
+
+
+def test_sin_la_regla_nueva_no_hay_nada_que_dibujar(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    """La casilla se esconde, así que los dos pasos tienen que salir iguales."""
+    resultado = _draw(run, tmp_path)
+    encendida = _trace_names(_step(resultado, "evitadas-por-defecto"))
+    apagada = _trace_names(_step(resultado, "evitadas-apagadas"))
+
+    assert encendida == apagada
+    assert not any(nombre.startswith("ROTURA EVITADA") for nombre in encendida)

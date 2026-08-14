@@ -19,7 +19,13 @@ import pytest
 
 from chronos.domain.structure.body import BodyBar
 from chronos.domain.structure.detector import DominantImpulseDetector
-from chronos.domain.structure.enums import AnchorMode, DojiBreakMode, LegStartMode, SeedMode
+from chronos.domain.structure.enums import (
+    AnchorMode,
+    DojiBreakMode,
+    LegStartMode,
+    OverlapPriority,
+    SeedMode,
+)
 from chronos.domain.structure.impulse import DominantImpulse
 from chronos.domain.structure.synthetic_day import (
     SYNTHETIC_DAY,
@@ -27,6 +33,7 @@ from chronos.domain.structure.synthetic_day import (
     SYNTHETIC_DAY_START,
 )
 from chronos.domain.structure.synthetic_zones import Candle
+from chronos.domain.structure.zone_break import ZoneBreakLevels
 from chronos.domain.structure.zones import (
     CandleSeries,
     Zone,
@@ -45,6 +52,7 @@ __all__ = [
     "ZonedImpulse",
     "make_bars",
     "make_series",
+    "run_break",
     "run_detector",
     "run_zones",
 ]
@@ -177,3 +185,51 @@ def run_zones(
         for impulse in detector.impulses
     ]
     return series, zoned
+
+
+# --- Fase 2.1: la rotura por zona --------------------------------------------
+
+
+def run_break(
+    candles: Sequence[Candle],
+    *,
+    break_by_zone: bool = True,
+    overlap_priority: OverlapPriority = OverlapPriority.A_FAVOR_FIRST,
+    anchor_mode: AnchorMode = AnchorMode.A1_LAST_COUNTER_BODY,
+    seed_mode: SeedMode = SeedMode.S2_FIRST_COUNTER_BAR,
+    doji_break_mode: DojiBreakMode = DojiBreakMode.D1_NEUTRAL,
+    leg_start_mode: LegStartMode = LegStartMode.L1_CURRENT,
+    warmup_bars: int = 0,
+    start: datetime = START,
+) -> tuple[CandleSeries, DominantImpulseDetector]:
+    """Corre el detector sobre una serie OHLC con la regla de rotura elegida.
+
+    Devuelve también la serie porque los tests de la fase 2.1 comprueban los
+    bordes de las zonas contra las mechas, y volver a construirla aparte abriría
+    la puerta a que las dos versiones se separasen.
+    """
+    series = make_series(candles, start=start)
+    detector = DominantImpulseDetector(
+        timeframe="H4",
+        anchor_mode=anchor_mode,
+        seed_mode=seed_mode,
+        doji_break_mode=doji_break_mode,
+        leg_start_mode=leg_start_mode,
+        warmup_bars=warmup_bars,
+        break_by_zone=break_by_zone,
+        overlap_priority=overlap_priority,
+        zone_levels=(
+            ZoneBreakLevels(series, timeframe="H4") if break_by_zone else None
+        ),
+    )
+    detector.process_all(
+        [
+            BodyBar(
+                timestamp=series.at(position),
+                open=float(series.open[position]),
+                close=float(series.close[position]),
+            )
+            for position in range(len(series))
+        ]
+    )
+    return series, detector

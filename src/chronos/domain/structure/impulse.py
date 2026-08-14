@@ -8,6 +8,7 @@ from datetime import datetime
 from chronos.domain.structure.enums import (
     BodyDirection,
     BreakKind,
+    BreakLevelSource,
     ImpulseDirection,
     MachineState,
 )
@@ -68,8 +69,29 @@ class DominantImpulse:
     ts_end: datetime | None = field(default=None, init=False)
     index_end: int | None = field(default=None, init=False)
     exit_break_kind: BreakKind | None = field(default=None, init=False)
+    #: Fase 2.1. De dónde salió el nivel que lo mató: la línea, el UL o el OB.
+    #: Con `BREAK_BY_ZONE = false` es siempre la línea.
+    exit_level_source: BreakLevelSource | None = field(default=None, init=False)
 
-    def close(self, *, timestamp: datetime, index: int, kind: BreakKind) -> None:
+    #: Fase 2.1. Veces que el extremo se estiró estando el ID ya vigente, porque
+    #: una vela cerró más allá de la línea sin atravesar el UL entero. En la fase
+    #: 1 esto no podía ocurrir: esa vela mataba el ID.
+    extreme_extensions: int = field(default=0, init=False)
+    #: El extremo con el que nació, antes de cualquier extensión. Se guarda para
+    #: poder medir cuánto se movió sin reconstruirlo desde los eventos.
+    extreme_at_constitution: float = field(default=float("nan"), init=False)
+
+    def __post_init__(self) -> None:
+        self.extreme_at_constitution = self.extreme
+
+    def close(
+        self,
+        *,
+        timestamp: datetime,
+        index: int,
+        kind: BreakKind,
+        level_source: BreakLevelSource = BreakLevelSource.LINE,
+    ) -> None:
         """Cierra el impulso en la barra que lo rompe."""
         if self.ts_end is not None:
             raise StructureError(f"El impulso {self.id_num} ya estaba cerrado")
@@ -80,6 +102,50 @@ class DominantImpulse:
         self.ts_end = timestamp
         self.index_end = index
         self.exit_break_kind = kind
+        self.exit_level_source = level_source
+
+    def extend_extreme(
+        self,
+        *,
+        price: float,
+        index: int,
+        timestamp: datetime,
+        bar_direction: BodyDirection,
+    ) -> None:
+        """Estira el extremo del ID vigente (fase 2.1, §3.2).
+
+        Sólo lo llama el detector cuando una vela cierra más allá de la línea del
+        extremo sin atravesar el UL entero: el ID sobrevive a lo que antes era
+        una rotura y su extremo pasa a ser lo que ha alcanzado esta vela. El UL se
+        recalcula solo, porque se deriva de `index_extreme`, y la zona nueva
+        sustituye a la anterior.
+
+        El ancla **no** tiene equivalente: la fija la vela del arranque de la
+        pierna, que no cambia, y por eso el OB no se mueve nunca.
+        """
+        if self.ts_end is not None:
+            raise StructureError(
+                f"El impulso {self.id_num} ya estaba cerrado: su extremo no se mueve"
+            )
+        if index < self.index_constitution:
+            raise StructureError(
+                f"El impulso {self.id_num} no puede extender su extremo antes de constituirse"
+            )
+        improves = (
+            price > self.extreme
+            if self.direction is ImpulseDirection.ALCISTA
+            else price < self.extreme
+        )
+        if not improves:
+            raise StructureError(
+                f"El extremo del impulso {self.id_num} no retrocede: "
+                f"{price} no mejora {self.extreme}"
+            )
+        self.extreme = price
+        self.index_extreme = index
+        self.ts_extreme = timestamp
+        self.extreme_bar_direction = bar_direction
+        self.extreme_extensions += 1
 
     @property
     def is_open(self) -> bool:
@@ -148,8 +214,18 @@ class BreakEvent:
     #: del ID que acabará constituyéndose.
     new_leg_direction: ImpulseDirection
     close: float
-    #: Nivel superado: el `extremo` en una rotura a favor, el `ancla` en contra.
+    #: Nivel que el cierre superó. En la fase 1 es siempre una de las dos líneas
+    #: del ID; con `BREAK_BY_ZONE` es el borde **exterior** de la zona que la
+    #: sustituye, salvo cuando no hay zona en ese lado.
     level: float
+    #: La línea del ID (`extremo` a favor, `ancla` en contra), mande o no. Con la
+    #: regla nueva es lo que permite ver cuánto más lejos hubo que ir para romper.
+    line: float | None = None
+    level_source: BreakLevelSource = BreakLevelSource.LINE
+
+    @property
+    def by_zone(self) -> bool:
+        return self.level_source is not BreakLevelSource.LINE
 
 
 @dataclass(frozen=True, slots=True)
