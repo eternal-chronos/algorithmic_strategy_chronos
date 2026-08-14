@@ -1307,9 +1307,15 @@ def test_hay_marcador_sobre_la_vela_que_confirma(
     assert "Confirmación del OB" in nombres
 
 
-def test_el_filtro_de_id_visibles_recorta_tambien_las_zonas(
+def test_las_zonas_son_siempre_las_del_id_actual(
     run: ImpulseRun, zones: ZonesRun, tmp_path: Path
 ) -> None:
+    """El selector de ID manda sobre las líneas, no sobre las zonas.
+
+    UL y OB son los del ID vigente y sólo los suyos: en cuanto se constituye un
+    ID nuevo, las zonas del anterior desaparecen del gráfico. Enseñar «todos»
+    los ID no devuelve las zonas muertas.
+    """
     resultado = _draw(run, tmp_path, zones=zones)
 
     def puntos(label: str) -> int:
@@ -1319,7 +1325,8 @@ def test_el_filtro_de_id_visibles_recorta_tambien_las_zonas(
             if trace["name"].startswith("Zona ")
         )
 
-    assert puntos("zonas-ids-current") < puntos("zonas-ids-pair") < puntos("zonas-ids-all")
+    assert puntos("zonas-ids-current") > 0
+    assert puntos("zonas-ids-current") == puntos("zonas-ids-pair") == puntos("zonas-ids-all")
 
 
 def test_las_notas_declaran_que_las_zonas_no_rompen_nada(

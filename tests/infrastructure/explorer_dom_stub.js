@@ -260,7 +260,8 @@ elements['layer-zones-ob'].fire('change', { target: { checked: false } });
 steps.push(snapshot('zonas-apagadas'));
 elements['layer-zones-ul'].fire('change', { target: { checked: true } });
 elements['layer-zones-ob'].fire('change', { target: { checked: true } });
-// El filtro de ID visibles también recorta las zonas.
+// El filtro de ID visibles NO toca las zonas: UL y OB son siempre los del ID
+// actual, así que los tres pasos tienen que salir iguales.
 const visiblesZonas = elements['visible-buttons'].children;
 visiblesZonas.forEach(function (button) {
   button.fire('click');

@@ -277,6 +277,12 @@
    * `null` significa "sin filtro". */
   function visibleIds(timeframe, edges) {
     if (state.visible === "all") { return null; }
+    return lastIds(timeframe, edges, state.visible === "pair" ? 2 : 1);
+  }
+
+  /* Los `count` últimos ID constituidos en o antes del borde derecho. Vacío si
+   * a esa hora todavía no se había constituido ninguno. */
+  function lastIds(timeframe, edges, count) {
     var list = impulsesOf(timeframe).list;
     var until = knownUntil(timeframe, edges);
     var last = -1;
@@ -286,10 +292,17 @@
     }
     if (last < 0) { return {}; }
     var keep = {};
-    keep[list[last].id] = true;
-    if (state.visible === "pair" && last > 0) { keep[list[last - 1].id] = true; }
+    for (var j = 0; j < count && last - j >= 0; j++) { keep[list[last - j].id] = true; }
     return keep;
   }
+
+  /* Las zonas van SIEMPRE con el ID actual y sólo con él, mande lo que mande el
+   * selector B.2. En cuanto se constituye un ID nuevo, el UL y el OB del
+   * anterior desaparecen del gráfico: son las zonas vivas —las que el motor
+   * mira para la rotura de la fase 2.1— y arrastrar las de los ID muertos
+   * llenaba la pantalla de rectángulos que ya no deciden nada. Los ID viejos
+   * siguen en el payload y en los CSV; aquí sólo se elige qué se pinta. */
+  function zoneIds(timeframe, edges) { return lastIds(timeframe, edges, 1); }
 
   function keeps(allowed, id) { return allowed === null || allowed[id] === true; }
 
@@ -662,7 +675,7 @@
     overlays().forEach(function (timeframe, position) {
       if (!isVisible(timeframe)) { return; }
       var own = position === 0;
-      var allowed = visibleIds(timeframe, edges);
+      var allowed = zoneIds(timeframe, edges);
       var buckets = {};
 
       zonesOf(timeframe).forEach(function (zone) {
@@ -769,7 +782,7 @@
 
     overlays().forEach(function (timeframe) {
       if (!isVisible(timeframe)) { return; }
-      var allowed = visibleIds(timeframe, edges);
+      var allowed = zoneIds(timeframe, edges);
       candidatesOf(timeframe).forEach(function (item) {
         if (item.x1 < edges.lo || item.xd > edges.hi) { return; }
         if (pending(item.x0, timeframe, edges)) { return; }
@@ -805,7 +818,7 @@
 
     overlays().forEach(function (timeframe) {
       if (!isVisible(timeframe)) { return; }
-      var allowed = visibleIds(timeframe, edges);
+      var allowed = zoneIds(timeframe, edges);
       zonesOf(timeframe).forEach(function (zone) {
         if (zone.k !== "OB" || zone.xc === null || zone.xc === undefined) { return; }
         if (zone.xc < edges.lo || zone.xc > edges.hi) { return; }
@@ -1256,13 +1269,14 @@
         "impulsos que en este modo no existen";
     } else if (zonesAvailable() && (state.zonesUl || state.zonesOb)) {
       var conZona = overlays().filter(isVisible).reduce(function (total, timeframe) {
-        var allowed = visibleIds(timeframe, edges);
+        var allowed = zoneIds(timeframe, edges);
         return total + zonesOf(timeframe).filter(function (zone) {
           return wantsZone(zone.k) && zone.x1 >= edges.lo && zone.xd <= edges.hi &&
             keeps(allowed, zone.id);
         }).length;
       }, 0);
       text += " · zonas dibujadas: " + conZona.toLocaleString("es-ES") +
+        " (sólo las del ID actual: al constituirse uno nuevo, las del anterior se van)" +
         (DATA.meta.breakByZone
           ? " (fase 2.1: éstas SÍ deciden la rotura)"
           : " (fase 2.0: sólo se dibujan, no rompen nada)");

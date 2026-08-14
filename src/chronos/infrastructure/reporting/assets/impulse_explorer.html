@@ -123,10 +123,12 @@ encuadre automático. También con doble clic sobre el gráfico.">Ajustar</butto
         <label class="toggle"><input type="checkbox" id="layer-mid"> Nivel 50 %</label>
         <span id="zone-layers" style="display:flex; gap:16px; flex-wrap:wrap;">
           <label class="toggle" title="Fase 2.0: el tramo de mecha del extremo del ID.
-Nunca cubre el cuerpo. Se estira una vela si la siguiente llega más lejos.">
+Nunca cubre el cuerpo. Se estira una vela si la siguiente llega más lejos.
+Sólo se dibuja la del ID actual, mande lo que mande el selector de ID.">
             <input type="checkbox" id="layer-zones-ul" checked> Zonas UL</label>
           <label class="toggle" title="Fase 2.0: la vela del ancla entera, mechas incluidas.
-Punteada mientras no la confirma una vela del color del impulso.">
+Punteada mientras no la confirma una vela del color del impulso.
+Sólo se dibuja la del ID actual, mande lo que mande el selector de ID.">
             <input type="checkbox" id="layer-zones-ob" checked> OB</label>
         </span>
         <span id="break-layers" style="display:flex; gap:16px; flex-wrap:wrap;">
@@ -213,6 +215,8 @@ temporalidad inferior. El motor no la ve hasta que cierra.">
     <span>★ vela que confirma el OB</span>
     <span>contorno atenuado a la izquierda de una zona = la vela ya la definía pero
       la zona todavía no existía (el ID aún no se había constituido)</span>
+    <span>UL y OB son siempre los del ID ACTUAL: en cuanto se constituye un ID nuevo,
+      las zonas del anterior desaparecen del gráfico (siguen en los CSV)</span>
     <span>✕ grueso = extremo fijado por una vela del color contrario al impulso (R-36),
       sobre la vela que lo fijó</span>
     <span>vela hueca a la derecha = vela en formación durante el replay: el motor

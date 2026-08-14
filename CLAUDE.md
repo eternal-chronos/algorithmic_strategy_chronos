@@ -62,6 +62,23 @@ Validar al entrar a `application/`, no en cada función.
 - Test de no-look-ahead: señal en `t` con datos truncados == con histórico completo.
 - `SimulatedBroker` modela comisiones y slippage.
 
+## Auditoría visual
+
+Toda funcionalidad nueva de la estrategia se ve en el HTML antes de darse por
+terminada. No hay entrega sin dibujo.
+
+- Cada fase tiene su explorador en `now/<fase>/`. Al agregar o cambiar una regla,
+  actualiza el HTML de esa fase y **regenera el fichero** con el comando de la
+  fase (`chronos structure <comando>`), no lo edites a mano: el HTML de `now/` es
+  salida generada, la fuente son los assets de
+  `src/chronos/infrastructure/reporting/assets/`.
+- Lo nuevo tiene que distinguirse: capa propia o marca propia, entrada en la
+  leyenda y texto de estado que diga qué se está viendo y qué no.
+- El HTML es DIBUJO. Filtrar, resaltar u ocultar no calcula nada: lo que se pinta
+  viene ya calculado del motor.
+- Todo lo que se dibuja se prueba: paso en `tests/infrastructure/explorer_dom_stub.js`
+  y test en `tests/infrastructure/test_impulse_explorer.py`.
+
 ## Estilo
 
 Type hints en firmas públicas. Parámetros de estrategia en dataclass congelado,
