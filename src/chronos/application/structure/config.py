@@ -14,6 +14,7 @@ from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import time
 
+from chronos.application.entries.config import EntriesConfig
 from chronos.domain.errors import DomainError
 from chronos.domain.structure.enums import (
     AnchorMode,
@@ -346,6 +347,11 @@ class ImpulseConfig:
     rules: ImpulseRulesConfig = field(default_factory=ImpulseRulesConfig)
     #: Fase 2.0. Apagadas por defecto: encenderlas no puede mover ni un impulso.
     zones: ZonesConfig = field(default_factory=ZonesConfig)
+    #: Fase 3.0. Apagada por defecto: con las señales apagadas la corrida
+    #: reproduce la línea base de la fase 2.1 exacta, y hay un test que lo fija.
+    #: Queda **fuera** de `fingerprint()` por la misma razón que las zonas: la
+    #: cascada lee la estructura y no puede mover ni un impulso.
+    entries: EntriesConfig = field(default_factory=EntriesConfig)
     timezone_audit: TimezoneAuditConfig = field(default_factory=TimezoneAuditConfig)
     reporting: StructureReportingConfig = field(default_factory=StructureReportingConfig)
 

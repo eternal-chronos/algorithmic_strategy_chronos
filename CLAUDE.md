@@ -79,6 +79,25 @@ terminada. No hay entrega sin dibujo.
 - Todo lo que se dibuja se prueba: paso en `tests/infrastructure/explorer_dom_stub.js`
   y test en `tests/infrastructure/test_impulse_explorer.py`.
 
+## Cómo trabajar (disciplina del asistente)
+
+Haz lo pedido y nada más. Menos ceremonia, menos comandos, menos ruido.
+
+- **Consola, la mínima.** Nada de exploraciones, comprobaciones de curiosidad ni
+  comandos "por si acaso". Para entender el código, lee ficheros; no lances
+  procesos. Si hace falta correr algo, que sea lo estrictamente necesario y una
+  sola vez.
+- **Tests: los que hagan falta, y funcionando.** Si el cambio necesita test,
+  escríbelo y córrelo hasta que pase. Si no lo necesita, no lo inventes. Correr
+  el fichero de tests afectado basta; la suite entera sólo si el cambio la toca.
+- **Nada de navegador.** No abrir Chrome, no automatizarlo, no "verlo en vivo".
+  La auditoría visual del HTML la hace el propietario; tu prueba es el stub del
+  DOM (`tests/infrastructure/explorer_dom_stub.js`).
+- **Regenerar `now/` sólo cuando se pida** o cuando el cambio deba entregarse
+  dibujado. Es un comando largo: avisa de que hace falta en vez de lanzarlo por
+  tu cuenta.
+- No expliques de más ni repitas lo hecho: qué cambió, dónde, y qué queda.
+
 ## Estilo
 
 Type hints en firmas públicas. Parámetros de estrategia en dataclass congelado,

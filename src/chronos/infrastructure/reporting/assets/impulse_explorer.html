@@ -137,6 +137,38 @@ y con la nueva no. El segmento va del cierre a la línea que cruzó; el círculo
 marca el cierre. Un ID que se salva por el lado a favor extiende ahí su extremo.">
             <input type="checkbox" id="layer-avoided" checked> Roturas evitadas</label>
         </span>
+        <span id="entry-layers" style="display:flex; gap:16px; flex-wrap:wrap;">
+          <label class="toggle" title="Fase 3.0: cada operación con su recorrido completo.
+Estrella = alcanzó el objetivo, aspa = saltó el stop. El trazo punteado va del contacto
+con la zona de H4 a la entrada y de ahí a la salida; las dos líneas discontinuas son el
+stop y el objetivo de 3,3 R. Se dibujan sobre las CUATRO temporalidades: una operación
+es un hecho en el tiempo y en el precio, no una propiedad de un gráfico.">
+            <input type="checkbox" id="layer-trades" checked> Operaciones</label>
+          <label class="toggle" title="Fase 3.0: las señales que NO llegaron a operación y el
+guardarraíl en que murieron. Sin ellas el explorador enseñaría sólo lo que sobrevivió,
+que es la mitad de la historia y justo la mitad que no permite juzgar un embudo.">
+            <input type="checkbox" id="layer-discarded" checked> Señales descartadas</label>
+          <label class="toggle" title="Fase 3.0 (§2): los rechazos marcados según las TRES
+definiciones candidatas, distinguibles entre sí. NINGUNA está adoptada. El símbolo dice
+cuántas coinciden: triángulo = una, rombo = dos, cuadrado = las tres. Apagada de salida
+porque son muchos y taparían el resto hasta que hagan falta.">
+            <input type="checkbox" id="layer-rejections"> Rechazos (R1 / R2 / R3)</label>
+          <label class="toggle" title="Fase 3.0, sólo durante el replay: la señal MIENTRAS está
+viva, del contacto con la zona de H4 hasta que entra o muere. Círculo azul = contacto,
+rombo azul = ya confirmó en H1. El globo no dice en qué acabará: es el tramo en el que
+tú decidirías, y es lo que el replay viene a comparar.">
+            <input type="checkbox" id="layer-signals" checked> Señal en curso (replay)</label>
+          <label class="toggle" title="Fase 3.0: deja a la vista sólo lo que sigue VIVO
+—operaciones abiertas y señales en observación— y la marca de lo ÚLTIMO que pasó, que
+desaparece en cuanto entra o cierra otra. Es un filtro de dibujo: no cambia la detección
+ni los informes, y el estado dice cuántas marcas esconde.">
+            <input type="checkbox" id="layer-recent"> Sólo lo reciente</label>
+          <label class="toggle" title="Fase 3.0, sólo durante el replay: arranca en blanco.
+Nada de lo que la cascada ya tenía en marcha en la fecha elegida se dibuja —ni la
+operación abierta en ese momento ni ninguna anterior—: sólo se buscan entradas hacia
+delante, desde el minuto en el que empieza el replay.">
+            <input type="checkbox" id="layer-fresh"> Sólo desde el arranque</label>
+        </span>
         <label class="toggle"><input type="checkbox" id="layer-wrong" checked>
           Extremo de color contrario (R-36)</label>
       </div>
@@ -163,6 +195,9 @@ sólo se dibuja lo que el motor ya sabía a esa hora">
         <label class="toggle" title="Arma la vela en curso con las velas de la
 temporalidad inferior. El motor no la ve hasta que cierra.">
           <input type="checkbox" id="replay-forming" checked> Vela en formación</label>
+        <label class="toggle" title="Detiene la reproducción en el paso en que una operación
+se abre y en el que se cierra. El estado dice cuál y qué pasó.">
+          <input type="checkbox" id="replay-halt"> Parar en eventos</label>
         <label class="toggle">Velocidad
           <select id="replay-speed" aria-label="Velocidad del replay">
             <option value="1500">Lenta</option>
@@ -219,8 +254,41 @@ temporalidad inferior. El motor no la ve hasta que cierra.">
       las zonas del anterior desaparecen del gráfico (siguen en los CSV)</span>
     <span>✕ grueso = extremo fijado por una vela del color contrario al impulso (R-36),
       sobre la vela que lo fijó</span>
+    <span>★ operación que alcanzó el OBJETIVO (fase 3.0) · ✕ operación en la que
+      saltó el STOP; el marcador va sobre el precio de entrada</span>
+    <span>trazo punteado gris = recorrido de la operación: del contacto con la zona
+      de H4 a la entrada, y de la entrada a la salida. Mientras sigue abierta en el
+      replay llega hasta el reloj y al precio de ahora</span>
+    <span><i style="background:#d03b3b"></i>stop de la operación ·
+      <i style="background:#2a78d6"></i>objetivo fijo de 3,3 R, los dos desde la
+      entrada hasta la salida</span>
+    <span><i style="background:#eda100"></i>◆ operación ABIERTA durante el replay:
+      ya entró y todavía no ha salido. El globo da la decisión entera y el flotante
+      al precio de ahora, nunca el desenlace: la estrella o el aspa aparecen en la
+      vela en que el precio toca el objetivo o el stop, ni un minuto antes</span>
+    <span><i style="background:#2a78d6"></i>○ señal EN CURSO (sólo replay): el precio
+      tocó la zona de H4 y la observación sigue viva · ◇ del mismo color = ya
+      confirmó en H1. Todavía no hay entrada y el globo no dice si la habrá</span>
+    <span>○ hueco = señal DESCARTADA, sobre el borde interior de su zona: el globo
+      dice en qué guardarraíl murió</span>
+    <span>△ ▽ ◇ □ = rechazo marcado por 1, 2 o 3 de las definiciones candidatas
+      (R1, R2, R3). NINGUNA está adoptada: la confirmación usa la unión de las tres
+      y el globo dice cuáles marcan y cuáles no</span>
+    <span>«Sólo desde el arranque» empieza el replay en blanco: lo que la fase 3 ya
+      tenía en marcha en esa fecha —la operación abierta y todas las anteriores— no se
+      dibuja, y sólo se buscan entradas hacia delante</span>
+    <span>«Sólo lo reciente» deja lo que sigue vivo y la marca de lo último que pasó:
+      al entrar o cerrar otra operación, la anterior desaparece del dibujo (sigue en
+      los CSV y en los informes). Con los rechazos encendidos, quedan los de las
+      señales todavía vivas</span>
+    <span>las capas de la fase 3.0 se dibujan sobre las CUATRO temporalidades: una
+      operación es un hecho en el tiempo y en el precio, no una propiedad de un
+      gráfico</span>
     <span>vela hueca a la derecha = vela en formación durante el replay: el motor
       todavía no la ha visto cerrar</span>
+    <span>arrastrando sobre el EJE DE PRECIOS se comprime o se estira la vertical, y
+      sobre el EJE DE FECHAS se abre o se cierra el gráfico de lado (más o menos velas
+      a la vista, sin mover la última). «Ajustar» devuelve el encuadre automático</span>
     <span>el zoom hecho a mano (rueda o arrastre) se conserva paso a paso durante el
       replay: la ventana sólo se desplaza para seguir a la última vela. «Ajustar»
       o doble clic devuelven el encuadre automático</span>

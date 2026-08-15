@@ -30,6 +30,8 @@ from typing import Any
 import pandas as pd
 import plotly.offline as pyo
 
+from chronos.application.entries.cascade import CascadeRun
+from chronos.application.entries.execution import ExecutionRun
 from chronos.application.structure.detect_impulses import ImpulseRun, TimeframeAnalysis
 from chronos.application.structure.lateralization import (
     LateralizationStudy,
@@ -87,10 +89,14 @@ def render_explorer(
     lateralization: LateralizationStudy | None = None,
     variants: Sequence[ModeVariant] = (),
     zones: ZonesRun | None = None,
+    cascade: CascadeRun | None = None,
+    execution: ExecutionRun | None = None,
 ) -> str:
     """Devuelve el HTML completo del explorador."""
     generated_at = generated_at or SystemClock().now()
-    payload = build_payload(run, max_bars, lateralization, variants, zones)
+    payload = build_payload(
+        run, max_bars, lateralization, variants, zones, cascade, execution
+    )
     # El JSON viaja dentro de un <script>: escapar `</` evita que un texto
     # cualquiera pueda cerrar la etiqueta antes de tiempo.
     data = json.dumps(payload, separators=(",", ":"), ensure_ascii=False, default=str).replace(
@@ -117,6 +123,8 @@ def build_payload(
     lateralization: LateralizationStudy | None = None,
     variants: Sequence[ModeVariant] = (),
     zones: ZonesRun | None = None,
+    cascade: CascadeRun | None = None,
+    execution: ExecutionRun | None = None,
 ) -> dict[str, Any]:
     """Serializa la corrida a la estructura que consume el explorador.
 
@@ -162,6 +170,12 @@ def build_payload(
             "limbo": LIMBO_FILL,
             "ink": theme.INK_PRIMARY,
             "muted": theme.INK_MUTED,
+            #: Fase 3.0 en replay: la operación abierta y la señal todavía en
+            #: observación. Van en dos colores propios porque son estados que
+            #: NO se pueden confundir con un desenlace: el verde y el rojo están
+            #: reservados a lo que ya se sabe cómo acabó.
+            "pending": theme.SERIES[3],
+            "signal": theme.SERIES[0],
             "grid": theme.GRIDLINE,
             "surface": theme.SURFACE,
             "font": theme.FONT_FAMILY,
@@ -181,6 +195,12 @@ def build_payload(
         #: Lo mismo para la capa de roturas evitadas de la fase 2.1: con la regla
         #: apagada no hay ni una y la casilla no se enseña.
         "hasAvoided": any(analysis.avoided for analysis in run.analyses.values()),
+        #: Fase 3.0. Las operaciones, las señales descartadas y los rechazos de
+        #: las tres definiciones. Van **fuera** de `impulses` a propósito: una
+        #: operación es un hecho en el tiempo y en el precio, así que se dibuja
+        #: igual sobre las cuatro temporalidades, que es lo que el §10 pide.
+        "entries": _entries_payload(cascade, execution),
+        "hasEntries": bool(cascade is not None and cascade.enabled),
         "modes": [_mode_summary(variant) for variant in variants],
         # El modo activo ya viaja en `impulses` y repetirlo aquí costaba 4,5 MB
         # de fichero. El explorador lo lee de `impulses` por identidad del modo,
@@ -191,6 +211,116 @@ def build_payload(
             for variant in variants
             if variant.mode != run.config.rules.leg_start_mode.value
         },
+    }
+
+
+def _entries_payload(
+    cascade: CascadeRun | None, execution: ExecutionRun | None
+) -> dict[str, Any]:
+    """Fase 3.0 (§10): cada operación navegable, con todo lo que la explica.
+
+    Tres capas y no una: las **operaciones**, las señales **descartadas** con el
+    guardarraíl que las mató, y los **rechazos** marcados según las tres
+    definiciones y distinguibles entre sí. La tercera va aparte porque el §2 no
+    ha adoptado ninguna definición: verlas mezcladas sería justo lo que impide
+    elegir.
+
+    Cada operación viaja con sus hitos —contacto, rotura, retesteo, confirmación,
+    entrada y salida— para que el globo cuente la historia entera sin abrir el
+    CSV, y con los tres precios que la deciden: entrada, stop y objetivo.
+    """
+    empty: dict[str, Any] = {"trades": [], "discarded": [], "rejections": []}
+    if cascade is None or not cascade.enabled:
+        return empty
+
+    trades = execution.trades if execution is not None else ()
+    dead = (*cascade.discarded, *(execution.discarded if execution is not None else ()))
+    return {
+        "trades": [_trade_record(trade) for trade in trades],
+        "discarded": [_discarded_record(item) for item in dead],
+        "rejections": [
+            record
+            for signal in cascade.signals
+            if (record := _rejection_record(signal)) is not None
+        ],
+    }
+
+
+def _trade_record(trade: Any) -> dict[str, Any]:
+    observation = trade.signal.observation
+    return {
+        "id": observation.id_num,
+        "d": observation.direction.value,
+        "z": observation.zone.value,
+        "oc": observation.outcome.value,
+        "dc": observation.daily.value,
+        "tf": trade.entry_timeframe.value,
+        "sz": trade.stop_zone.value,
+        "cf": trade.signal.confirmation.kind.value,
+        "xc": _minute(pd.Timestamp(observation.ts_contact)),
+        "xk": (
+            None if observation.ts_break is None else _minute(pd.Timestamp(observation.ts_break))
+        ),
+        "xr": (
+            None
+            if observation.ts_retest is None
+            else _minute(pd.Timestamp(observation.ts_retest))
+        ),
+        "xf": _minute(pd.Timestamp(trade.signal.confirmation.timestamp)),
+        "xe": _minute(pd.Timestamp(trade.ts_entry)),
+        "xx": None if trade.ts_exit is None else _minute(pd.Timestamp(trade.ts_exit)),
+        "pe": round(trade.entry_price, DECIMALS),
+        "ps": round(trade.stop_price, DECIMALS),
+        "pt": round(trade.target_price, DECIMALS),
+        "zi": round(observation.zone_inner, DECIMALS),
+        "zo": round(observation.zone_outer, DECIMALS),
+        "out": trade.outcome.value,
+        "win": trade.outcome.is_win,
+        "gr": round(trade.gross_r, 3),
+        "nr": round(trade.net_r, 3),
+        "ru": round(trade.risk_usd, DECIMALS),
+    }
+
+
+def _discarded_record(item: Any) -> dict[str, Any]:
+    observation = item.observation
+    return {
+        "id": observation.id_num,
+        "d": observation.direction.value,
+        "z": observation.zone.value,
+        "dc": observation.daily.value,
+        "rail": item.guard_rail.value,
+        "xc": _minute(pd.Timestamp(observation.ts_contact)),
+        "x": _minute(pd.Timestamp(item.timestamp)),
+        "zi": round(observation.zone_inner, DECIMALS),
+        "zo": round(observation.zone_outer, DECIMALS),
+        "cf": None if item.confirmation is None else item.confirmation.kind.value,
+        #: Cuándo confirmó, no sólo con qué: durante el replay la señal se dibuja
+        #: mientras está viva y la confirmación tiene que aparecer en su minuto,
+        #: no en el del contacto ni en el de la muerte.
+        "xf": (
+            None
+            if item.confirmation is None
+            else _minute(pd.Timestamp(item.confirmation.timestamp))
+        ),
+    }
+
+
+def _rejection_record(signal: Any) -> dict[str, Any] | None:
+    """Un rechazo con **las tres definiciones marcadas por separado** (§2 y §10).
+
+    Sólo salen los que confirmaron: son los únicos que la cascada llegó a
+    evaluar, porque en cuanto una vela confirma la búsqueda se para. El informe
+    da los recuentos y el solape de las tres sobre toda la población.
+    """
+    if not signal.rejection_marks:
+        return None
+    return {
+        "x": _minute(pd.Timestamp(signal.confirmation.timestamp)),
+        "y": round(signal.observation.zone_inner, DECIMALS),
+        "id": signal.observation.id_num,
+        "d": signal.direction.value,
+        "m": dict(signal.rejection_marks),
     }
 
 

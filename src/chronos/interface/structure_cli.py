@@ -18,6 +18,17 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from chronos.application.entries import evidence as entry_evidence
+from chronos.application.entries import metrics as entry_metrics
+from chronos.application.entries.cascade import CascadeRun, build_cascade
+from chronos.application.entries.config import EntriesConfig
+from chronos.application.entries.execution import (
+    ExecutionRun,
+    M1Executor,
+    atr_series,
+    discarded_table,
+    trades_table,
+)
 from chronos.application.structure import (
     baseline_comparison,
     break_comparison,
@@ -31,7 +42,9 @@ from chronos.application.structure.baseline_comparison import (
 )
 from chronos.application.structure.config import (
     DAILY,
+    H1,
     H4,
+    M15,
     AggregationConfig,
     ChartsConfig,
     ImpulseConfig,
@@ -51,11 +64,18 @@ from chronos.application.structure.session_audit import (
 from chronos.application.structure.statistics import summarize
 from chronos.application.structure.timezone_audit import TimezoneAudit, audit_timezone
 from chronos.application.structure.zones import ZonesRun, detect_zones
+from chronos.domain.entries.enums import EntryTimeframe
 from chronos.domain.errors import DomainError
+from chronos.domain.instrument import InstrumentSpec
 from chronos.domain.structure.enums import AnchorMode, LegStartMode, OverlapPriority
 from chronos.infrastructure.config.loader import ConfigError, load_impulse_config
 from chronos.infrastructure.reporting.break_captures import write_break_captures
 from chronos.infrastructure.reporting.break_report import render_break_report
+from chronos.infrastructure.reporting.entry_captures import write_entry_captures
+from chronos.infrastructure.reporting.entry_report import (
+    render_archetype_index,
+    render_entry_report,
+)
 from chronos.infrastructure.reporting.impulse_captures import (
     CaptureRequest,
     id_card_figure,
@@ -688,6 +708,302 @@ def _print_break_summary(
     console.print(
         f"[dim]hash antes {comparison.baseline_hash} · después {comparison.zoned_hash} · "
         f"otro orden {comparison.alternative_hash}[/dim]"
+    )
+
+
+@structure_app.command("entradas")
+def entries_command(
+    config: Annotated[Path, typer.Option("--config", "-c")] = DEFAULT_CONFIG,
+    output: Annotated[Path, typer.Option("--salida", "-o")] = Path("now/fase30"),
+    captures: Annotated[bool, typer.Option("--capturas/--sin-capturas")] = True,
+    explorer: Annotated[bool, typer.Option("--explorador/--sin-explorador")] = True,
+    assume_bid: Annotated[
+        bool,
+        typer.Option(
+            "--asumir-bid-en-los-dos-lados",
+            help=(
+                "⚠️ §4. Correr SIN fichero de ask, usando el bid para largos y cortos. "
+                "La asunción se declara en portada del informe, en el explorador y en "
+                "esta salida. No fabrica ninguna serie de ask. El YAML sigue trayendo "
+                "`allow_missing_ask: false`: esto autoriza UNA corrida, no el proyecto."
+            ),
+        ),
+    ] = False,
+    skip_tz_audit: Annotated[bool, typer.Option("--skip-tz-audit")] = False,
+) -> None:
+    """Fase 3.0: la cascada de entrada y la primera medición de resultados.
+
+    H4 es el motor, el Diario es contexto, H1 confirma y M15 afina. Se monta
+    **sobre** la fase 2.1: el comando enciende `break_by_zone` y las zonas para
+    su propia corrida, porque con la rotura por línea las zonas no deciden nada y
+    la cascada estaría leyendo otra historia.
+
+    Antes de nada comprueba que con las señales apagadas sale la línea base de la
+    fase 2.1 exacta. Si no sale, **para y avisa**: eso sería un bug de esta fase
+    y no un resultado de la anterior.
+
+    ⚠️ **No hay fichero de ask.** El §4 pide longs al ask y shorts al bid, y sólo
+    está descargado el M1 del lado bid. Sin `entries.allow_missing_ask: true` el
+    comando se detiene aquí. Con la autorización puesta se corre sobre el bid y
+    la asunción se declara en portada.
+
+    No recomienda parámetros, no ajusta nada para mejorar un resultado y no
+    interpreta si la estrategia es buena o mala.
+    """
+    with _handled():
+        run_config = load_impulse_config(config)
+        if not run_config.enabled:
+            console.print(
+                "[yellow]El módulo de impulso dominante está desactivado "
+                "(`enabled: false`). Sin estructura no hay cascada.[/yellow]"
+            )
+            return
+
+        entries = run_config.entries
+        if not entries.enabled:
+            console.print(
+                "[dim]Señales encendidas para esta corrida (el YAML las trae "
+                "apagadas). El apagado se comprueba igualmente en la regresión.[/dim]"
+            )
+            entries = replace(entries, enabled=True)
+
+        if assume_bid:
+            entries = replace(entries, allow_missing_ask=True)
+
+        history = load_history(run_config.data, run_config.structure_side)
+        if not history.has_ask and not entries.allow_missing_ask:
+            console.print(_MISSING_ASK)
+            raise typer.Exit(code=1)
+        if not history.has_ask:
+            console.print(
+                "\n[bold yellow]AVISO (§4):[/bold yellow] se corre SIN fichero de ask, "
+                "usando el bid para largos y cortos.\nEstá autorizado explícitamente y "
+                "se declara en portada del informe y en el explorador,\npero los "
+                "desenlaces de las operaciones cuyo stop u objetivo quedan a menos de "
+                "una\nhorquilla del precio NO son fiables."
+            )
+
+        audit = _audit_or_stop(run_config, history, skip_tz_audit)
+        series, skipped = _aggregate_available(history, run_config)
+        aggregated = {tf: item.frame for tf, item in series.items()}
+        notes = [item.description for item in series.values()] + skipped
+        provenance = f"{history.provenance} · lado efectivo: {history.side}"
+
+        # La fase 3 se monta sobre la 2.1, así que la corrida es la de la 2.1.
+        phase21 = replace(
+            run_config,
+            rules=replace(run_config.rules, break_by_zone=True),
+            zones=ZonesConfig(enabled=True),
+        )
+        console.print("[dim]Estructura de la fase 2.1 (rotura por zona)...[/dim]")
+        # Se le pasan TODOS los gráficos del reparto, no sólo los que llevan
+        # detector: M15 no aporta impulso propio pero es la temporalidad en la
+        # que se afinan las entradas, y sin sus velas el explorador de esta fase
+        # no puede ofrecer su pestaña. El detector sigue corriendo sólo en
+        # `charts.detected`, así que esto no mueve ni un ID.
+        structure = DetectDominantImpulses(phase21).execute(
+            aggregated,
+            audit=audit,
+            provenance=provenance,
+            aggregation_notes=notes,
+        )
+        zones = detect_zones(structure)
+        ok, note = _print_entries_regression(structure, zones)
+        if not ok:
+            raise typer.Exit(code=1)
+
+        console.print("[dim]Cascada de entrada...[/dim]")
+        cascade = build_cascade(structure, zones, aggregated.get(M15), entries)
+        console.print("[dim]Ejecución sobre M1...[/dim]")
+        executor = M1Executor(
+            history.frame,
+            InstrumentSpec(symbol=run_config.symbol),
+            entries,
+            has_ask=history.has_ask,
+            atr_by_timeframe={
+                EntryTimeframe.H1: atr_series(aggregated[H1], run_config.rules.atr_period),
+                **(
+                    {EntryTimeframe.M15: atr_series(aggregated[M15], run_config.rules.atr_period)}
+                    if M15 in aggregated
+                    else {}
+                ),
+            },
+        )
+        execution = executor.execute(cascade)
+        trades = trades_table(execution.trades)
+        _print_entries_summary(cascade, execution, trades)
+
+        output.mkdir(parents=True, exist_ok=True)
+        report = output / "reporte_entradas.txt"
+        report.write_text(
+            render_entry_report(
+                structure,
+                cascade,
+                execution,
+                trades,
+                provenance=provenance,
+                regression_ok=ok,
+                regression_note=note,
+            ),
+            encoding="utf-8",
+        )
+        evidence = entry_evidence.collect(phase21, aggregated, entries)
+        (output / "evidencia_entradas.txt").write_text(
+            render_evidence(evidence, entry_evidence.TITLE), encoding="utf-8"
+        )
+        if not evidence.ok:
+            console.print(
+                "\n[bold red]La evidencia de la fase 3.0 NO pasa.[/bold red] "
+                f"Revisa {output / 'evidencia_entradas.txt'}."
+            )
+        trades.to_csv(output / "operaciones.csv", index=False)
+        discarded_table((*cascade.discarded, *execution.discarded)).to_csv(
+            output / "descartadas.csv", index=False
+        )
+        console.print(f"\nInforme: [bold]{report}[/bold]")
+        console.print(f"Evidencia: [bold]{output / 'evidencia_entradas.txt'}[/bold]")
+        console.print(f"Operaciones: [bold]{output / 'operaciones.csv'}[/bold]")
+
+        if explorer:
+            page = output / "explorador_entradas.html"
+            page.write_text(
+                render_explorer(
+                    structure,
+                    run_config.reporting.max_explorer_bars,
+                    lateralization=measure(structure),
+                    zones=zones,
+                    cascade=cascade,
+                    execution=execution,
+                ),
+                encoding="utf-8",
+            )
+            console.print(f"Explorador: [bold]{page}[/bold]")
+
+        if captures:
+            console.print("[dim]Capturas (Kaleido abre un navegador por imagen)...[/dim]")
+            written = write_entry_captures(structure, zones, cascade, execution, output)
+            console.print(f"  [dim]{len(written)} capturas en {output}[/dim]")
+        # El índice cuenta las imágenes que HAY en la carpeta, no las que esta
+        # corrida acaba de escribir: con `--sin-capturas` se regenera el informe
+        # sobre las que ya estaban, y decir "0 capturas" sería mentir.
+        present = sorted(path.name for path in output.glob("*.png"))
+        (output / "LEEME.txt").write_text(
+            render_archetype_index(cascade, execution, present),
+            encoding="utf-8",
+        )
+        console.print(f"Índice: [bold]{output / 'LEEME.txt'}[/bold]")
+        console.print(
+            "\n[bold yellow]Antes de mirar los resultados, revisa los stops[/bold yellow] "
+            "(sección 1 del informe). Si ves primero qué operaciones ganaron, tu "
+            "juicio sobre dónde va el stop queda contaminado."
+        )
+
+
+#: §4 — el aviso que sale cuando falta el fichero de ask y nadie lo ha autorizado.
+_MISSING_ASK = (
+    "\n[bold red]PARADA (§4).[/bold red] No hay fichero de ask en el proyecto.\n"
+    "El §4 pide longs al ask y shorts al bid, con el stop de un long disparado por\n"
+    "el bid y el de un short por el ask. Con un solo lado del precio eso no se puede\n"
+    "hacer, y las dos salidas fáciles están prohibidas: ni se simula un ask que no\n"
+    "existe, ni se usa el bid para los dos lados en silencio.\n\n"
+    "Dos formas de seguir:\n"
+    "  1. Descargar el ask:  [bold]chronos data dukascopy -g m1 --lado ask[/bold]\n"
+    "     y apuntarlo en `data.ask_path`.\n"
+    "  2. Autorizar la asunción a sabiendas, con `entries.allow_missing_ask: true`.\n"
+    "     Entonces se corre sobre el bid y eso se declara en portada del informe,\n"
+    "     en el explorador y aquí mismo. Los desenlaces de las operaciones cuyo\n"
+    "     stop u objetivo quedan a menos de una horquilla del precio NO son fiables."
+)
+
+
+def _print_entries_regression(
+    structure: ImpulseRun, zones: ZonesRun
+) -> tuple[bool, str]:
+    """§0: con las señales apagadas tiene que salir la línea base de la fase 2.1."""
+    off = build_cascade(structure, zones, None, EntriesConfig(enabled=False))
+    detected = {tf: len(a.impulses) for tf, a in structure.analyses.items()}
+    published = {tf: len(a.published) for tf, a in structure.analyses.items()}
+    expected_detected = {
+        tf: entry_evidence.PHASE21_DETECTED[tf]
+        for tf in detected
+        if tf in entry_evidence.PHASE21_DETECTED
+    }
+    expected_published = {
+        tf: entry_evidence.PHASE21_PUBLISHED[tf]
+        for tf in published
+        if tf in entry_evidence.PHASE21_PUBLISHED
+    }
+    ok = (
+        structure.config_hash == entry_evidence.PHASE21_HASH
+        and detected == expected_detected
+        and published == expected_published
+        and off.emits_nothing
+    )
+
+    table = Table(box=None, pad_edge=False)
+    table.add_column("Concepto", style="dim")
+    table.add_column("Esperado")
+    table.add_column("Obtenido")
+    table.add_column("", justify="left")
+    for label, expected, obtained in (
+        ("config_hash", entry_evidence.PHASE21_HASH, structure.config_hash),
+        ("detectados", _counts(expected_detected), _counts(detected)),
+        ("publicados", _counts(expected_published), _counts(published)),
+        ("señales apagadas", "no emite nada", "no emite nada" if off.emits_nothing else "EMITE"),
+    ):
+        same = expected == obtained
+        table.add_row(
+            label,
+            expected,
+            obtained,
+            "[green]igual[/green]" if same else "[bold red]DISTINTO[/bold red]",
+        )
+    console.print("\n[bold]Regresión con las señales apagadas:[/bold]")
+    console.print(table)
+    note = (
+        f"hash {structure.config_hash} · detectados {_counts(detected)} · "
+        f"publicados {_counts(published)} · con `entries.enabled: false` no se emite nada"
+    )
+    if not ok:
+        console.print(
+            "\n[bold red]PARADA.[/bold red] La fase 3 ha movido la línea base de la "
+            "fase 2.1. Eso es un bug de esta fase, no un resultado de la anterior."
+        )
+    return ok, note
+
+
+def _print_entries_summary(
+    cascade: CascadeRun, execution: ExecutionRun, trades: pd.DataFrame
+) -> None:
+    funnel = Table(box=None, pad_edge=False)
+    funnel.add_column("Paso del embudo", style="dim")
+    funnel.add_column("n", justify="right")
+    for step, value in cascade.funnel.items():
+        funnel.add_row(step, f"{value:,}")
+    funnel.add_row("se_ejecutan", f"{len(execution.trades):,}")
+    console.print("\n[bold]Embudo de señales:[/bold]")
+    console.print(funnel)
+
+    if trades.empty:
+        console.print("[yellow]Ninguna señal llegó a operación.[/yellow]")
+        return
+    table = Table(box=None, pad_edge=False)
+    for column in ("Configuración", "n", "Aciertos", "Bruto R", "Neto R", "Coste R"):
+        table.add_column(column, justify="left" if column == "Configuración" else "right")
+    for row in entry_metrics.configurations(execution).to_dict("records"):
+        table.add_row(
+            str(row["poblacion"]),
+            f"{int(row['n']):,}",
+            f"{row['win_rate']:.1%}",
+            f"{row['expectativa_bruta_r']:+.3f}",
+            f"{row['expectativa_neta_r']:+.3f}",
+            f"{row['coste_medio_r']:.3f}",
+        )
+    console.print("\n[bold]Resultado por configuración (entrada / stop):[/bold]")
+    console.print(table)
+    console.print(
+        "[dim]Todo en R, bruto y neto. Los costes van marcados VERIFICAR: no están "
+        "calibrados contra Pepperstone Razor.[/dim]"
     )
 
 

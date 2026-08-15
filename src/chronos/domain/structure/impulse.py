@@ -15,6 +15,25 @@ from chronos.domain.structure.enums import (
 from chronos.domain.structure.errors import StructureError
 
 
+@dataclass(frozen=True, slots=True)
+class ExtremeExtension:
+    """Una vez que el extremo de un ID vigente se estiró (fase 2.1, §3.2).
+
+    Sólo se **registra**: ninguna regla del módulo 1 ni de la 2.1 lee esta lista,
+    y el detector se comporta exactamente igual con ella dentro que sin ella. Lo
+    que habilita es la fase 3: el UL de un ID se mueve cada vez que el extremo se
+    extiende, así que preguntarle a `ImpulseZones` por el UL —que es el último—
+    en un instante anterior a la última extensión sería mirar al futuro. Con esta
+    traza el UL vigente en cada barra se reconstruye sin volver a ejecutar el
+    detector y sin adivinar qué velas lo movieron.
+    """
+
+    index: int
+    timestamp: datetime
+    price: float
+    bar_direction: BodyDirection
+
+
 @dataclass(slots=True)
 class DominantImpulse:
     """Un rango con dirección, vivo desde su constitución hasta su rotura.
@@ -80,9 +99,20 @@ class DominantImpulse:
     #: El extremo con el que nació, antes de cualquier extensión. Se guarda para
     #: poder medir cuánto se movió sin reconstruirlo desde los eventos.
     extreme_at_constitution: float = field(default=float("nan"), init=False)
+    #: La vela que fijaba el extremo al nacer el ID. Sin ella, reconstruir el UL
+    #: vigente antes de la primera extensión obligaría a buscar qué cuerpo
+    #: coincide con `extreme_at_constitution`, que con empates no tiene respuesta
+    #: única. Mismo criterio que `index_extreme` en la fase 1: se guarda, no se
+    #: re-deriva.
+    index_extreme_at_constitution: int = field(default=-1, init=False)
+    #: Traza de esas extensiones, en orden. Material de auditoría: no la lee
+    #: ninguna regla de detección y no cambia ni un impulso. La fase 3 la usa
+    #: para saber qué UL estaba vigente en cada barra sin mirar al futuro.
+    extension_trail: list[ExtremeExtension] = field(default_factory=list, init=False)
 
     def __post_init__(self) -> None:
         self.extreme_at_constitution = self.extreme
+        self.index_extreme_at_constitution = self.index_extreme
 
     def close(
         self,
@@ -146,6 +176,14 @@ class DominantImpulse:
         self.ts_extreme = timestamp
         self.extreme_bar_direction = bar_direction
         self.extreme_extensions += 1
+        self.extension_trail.append(
+            ExtremeExtension(
+                index=index,
+                timestamp=timestamp,
+                price=price,
+                bar_direction=bar_direction,
+            )
+        )
 
     @property
     def is_open(self) -> bool:

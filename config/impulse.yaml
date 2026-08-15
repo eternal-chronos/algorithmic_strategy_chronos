@@ -212,6 +212,99 @@ rules:
 zones:
   enabled: false
 
+# FASE 3.0 — ENTRADAS. La cascada de entrada y la PRIMERA medición de resultados
+# del proyecto. Todo lo anterior era estructura.
+#
+#   Diario  contexto OPCIONAL. Si el precio toca una zona (OB o UL) de su ID
+#           diario vigente, queda contexto activo en esa dirección. NO es señal:
+#           confirma y permite alargar, pero nunca dispara. En conflicto con H4,
+#           MANDA H4 y el conflicto se registra en la señal.
+#   H4      el motor. El precio toca una zona del ID vigente y la zona queda en
+#           observación, con dos desenlaces posibles:
+#             RESPETO             -> reacciona sin romperla; se opera a favor del
+#                                    ID de H4
+#             ROTURA Y RETESTEO   -> la rompe y vuelve a testearla; se opera a
+#                                    favor de la rotura. SÓLO el UL: en el OB la
+#                                    rotura invalida siempre.
+#   H1      confirma: ID de H1 en la dirección, OB de H1 en la dirección, o un
+#           rechazo (§2, tres definiciones, NINGUNA adoptada).
+#   M15     afina: OB suelto, que no exige ID de M15.
+#
+# Con `false` no se emite ni una señal y la corrida reproduce la línea base de la
+# fase 2.1 exacta: hash 801951b9cc26, D 239 / H4 1.214 / H1 4.148 detectados y
+# 233 / 1.211 / 4.141 publicados. Hay un test que lo fija.
+#
+# La fase 3 se monta SOBRE la fase 2.1: `chronos structure entradas` enciende
+# `break_by_zone` y las zonas para su propia corrida. Con la rotura por línea las
+# zonas no deciden nada y la cascada estaría leyendo otra historia, así que
+# construirla sobre ella falla con un error explícito.
+entries:
+  enabled: false
+
+  # PENDIENTE (§2). Percentil de `R2_mecha_dominante`. LOS TRES DE LA REJILLA SE
+  # CALCULAN SIEMPRE y el informe los desglosa; éste es sólo el que encabeza los
+  # resúmenes. No se ha elegido optimizando y no se recomienda ninguno.
+  rejection_percentile: 75
+  rejection_grid: [60, 75, 90]
+
+  # PENDIENTE. Barras de H4 que se espera un retesteo tras romper el UL.
+  # `0` = hasta que se constituya el ID de H4 siguiente, que es la frontera que
+  # la máquina de estados ya tenía escrita y no un número nuevo. El §1.2 no la
+  # acota; la rejilla de abajo es para que el propietario la recorra mirando
+  # gráficos.
+  #
+  # La ventana se cuenta SIEMPRE desde la vela SIGUIENTE a la que rompió: la
+  # vela de la rotura tiene que cerrar primero y el retesteo lo valida otra vela
+  # de la temporalidad del ID, posterior. Un toque de la zona en una temporalidad
+  # menor dentro de esa misma vela no vale, y la regla es igual en Diario, H4 y
+  # H1. Sin ella la vela que atraviesa la zona entera —que pasa por ella
+  # obligatoriamente— se retestearía a sí misma y ninguna rotura moriría nunca.
+  retest_window_h4: 0
+  retest_grid: [6, 12, 24]
+
+  # PENDIENTE. Barras de M15 que se busca el OB suelto tras confirmar en H1.
+  # `0` = mientras la observación siga viva. El §1.4 tampoco la acota.
+  m15_search_bars: 0
+
+  # Sizing de investigación CONTINUO, sin lote mínimo, para que la población de
+  # señales no dependa del camino del equity (§4). No mueve ninguna métrica en R:
+  # todos los costes escalan con el lotaje y el lotaje con el riesgo, así que el
+  # coste en R es invariante. Sólo fija la columna de lotes.
+  risk_per_trade_usd: 1000.0
+
+  # ⚠️ §4. NO HAY FICHERO DE ASK EN EL PROYECTO: sólo está descargado el M1 del
+  # lado bid. El §4 pide longs al ask y shorts al bid, con el stop de un long
+  # disparado por el bid y el de un short por el ask, y eso no se puede hacer con
+  # un solo lado.
+  #
+  # Con `false` el comando SE DETIENE Y AVISA. Con `true` se corre usando el bid
+  # para los DOS lados, y esa asunción se declara en portada del informe, en la
+  # salida de la CLI y en el explorador. En ningún caso se fabrica una serie de
+  # ask inventada.
+  #
+  # Ponlo a `true` sólo mientras no exista `data/processed/XAUUSD_M1_ask.parquet`
+  # y sabiendo lo que implica: los desenlaces de las operaciones cuyo stop u
+  # objetivo quedan a menos de una horquilla del precio no son fiables.
+  allow_missing_ask: false
+
+  # ⚠️ TODO MARCADO **VERIFICAR**. Ninguno de estos cuatro números está calibrado
+  # contra Pepperstone Razor. Se aplican siempre —un backtest sin horquilla,
+  # comisión y swap no dice nada sobre XAUUSD— pero el neto que sale NO es el
+  # neto de una cuenta real hasta que se comprueben.
+  costs:
+    # Horquilla en puntos (ticks). Se cobra como coste de ida y vuelta. Sin
+    # fichero de ask no se sabe CUÁNDO se abrió, sólo cuánto cuesta de media.
+    spread_points: 20.0
+    # Deslizamiento en puntos, siempre en contra, en entrada y en salida.
+    slippage_points: 1.0
+    # Comisión por lote y por lado, en divisa de la cuenta.
+    commission_per_lot_per_side: 3.0
+    # Swap en puntos por lote y noche. Negativo = coste.
+    swap_long_points: -0.9
+    swap_short_points: 0.2
+    # Día con swap triple (0 = lunes).
+    triple_swap_weekday: 2
+
 # Verificación empírica de zona horaria (§1.1). OBLIGATORIA antes de calcular
 # nada: un offset horario equivocado no da error, da impulsos distintos a los
 # que el propietario ve en su pantalla.

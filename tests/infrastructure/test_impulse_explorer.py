@@ -23,6 +23,9 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from chronos.application.entries.cascade import CascadeRun, build_cascade
+from chronos.application.entries.config import EntriesConfig
+from chronos.application.entries.execution import ExecutionRun, M1Executor
 from chronos.application.structure.config import (
     DAILY,
     H1,
@@ -266,6 +269,8 @@ def _draw(
     tmp_path: Path,
     variants: Sequence[ModeVariant] = (),
     zones: ZonesRun | None = None,
+    cascade: CascadeRun | None = None,
+    execution: ExecutionRun | None = None,
 ) -> dict:
     node = shutil.which("node")
     if node is None:
@@ -275,7 +280,12 @@ def _draw(
     payload_path.write_text(
         json.dumps(
             build_payload(
-                run, lateralization=measure(run), variants=variants, zones=zones
+                run,
+                lateralization=measure(run),
+                variants=variants,
+                zones=zones,
+                cascade=cascade,
+                execution=execution,
             ),
             default=str,
         ),
@@ -1392,10 +1402,17 @@ def test_el_modo_activo_no_se_duplica_en_el_payload(
 
 @pytest.fixture
 def zoned_run(run: ImpulseRun) -> ImpulseRun:
-    """Las mismas velas con la rotura por zona, que es la que trae la capa."""
-    series = {timeframe: analysis.bars for timeframe, analysis in run.analyses.items()}
+    """Las mismas velas con la rotura por zona, que es la que trae la capa.
+
+    Van los **cuatro** gráficos del reparto y no sólo los tres que llevan
+    detector: M15 no aporta impulso propio pero es donde se afinan las entradas
+    de la fase 3, y con la fixture recortada a las temporalidades detectadas ni
+    la entrada de M15 ni su pestaña del explorador llegaban a probarse.
+    """
     tuned = replace(run.config, rules=replace(run.config.rules, break_by_zone=True))
-    return DetectDominantImpulses(tuned).execute(series, provenance="fixture sintética")
+    return DetectDominantImpulses(tuned).execute(
+        dict(run.chart_bars), provenance="fixture sintética"
+    )
 
 
 def test_sin_la_regla_nueva_el_payload_no_declara_la_capa(run: ImpulseRun) -> None:
@@ -1457,3 +1474,514 @@ def test_sin_la_regla_nueva_no_hay_nada_que_dibujar(
 
     assert encendida == apagada
     assert not any(nombre.startswith("ROTURA EVITADA") for nombre in encendida)
+
+
+# --- Fase 3.0 (§10): la cascada sobre las cuatro temporalidades --------------
+
+
+@pytest.fixture
+def cascade_run(zoned_run: ImpulseRun) -> tuple[CascadeRun, ExecutionRun]:
+    """La cascada de la fase 3 sobre la fixture sintética, ya ejecutada."""
+    from chronos.domain.instrument import InstrumentSpec
+    from tests.conftest import make_m1_history
+
+    zones = detect_zones(
+        zoned_run, replace(zoned_run.config, zones=ZonesConfig(enabled=True))
+    )
+    entries = EntriesConfig(enabled=True, allow_missing_ask=True)
+    cascade = build_cascade(zoned_run, zones, zoned_run.chart_bars.get(M15), entries)
+    execution = M1Executor(
+        make_m1_history(weeks=16),
+        InstrumentSpec(symbol="XAUUSD"),
+        entries,
+        has_ask=False,
+    ).execute(cascade)
+    return cascade, execution
+
+
+def test_sin_cascada_el_payload_no_declara_las_capas(run: ImpulseRun) -> None:
+    """Tres casillas que no pueden dibujar nada sólo hacen dudar."""
+    payload = build_payload(run)
+
+    assert payload["hasEntries"] is False
+    assert payload["entries"] == {"trades": [], "discarded": [], "rejections": []}
+
+
+def test_cada_operacion_viaja_con_su_historia_entera(
+    zoned_run: ImpulseRun, cascade_run: tuple[CascadeRun, ExecutionRun]
+) -> None:
+    """§10 — contacto, observación, confirmación, entrada, stop, objetivo y desenlace."""
+    cascade, execution = cascade_run
+    payload = build_payload(zoned_run, cascade=cascade, execution=execution)
+
+    assert payload["hasEntries"] is True
+    trades = payload["entries"]["trades"]
+    assert len(trades) == len(execution.trades)
+    for record in trades:
+        for field in ("xc", "xf", "xe", "pe", "ps", "pt", "out", "gr", "nr", "z", "oc", "dc"):
+            assert field in record
+        # Los hitos van en orden: no se puede confirmar antes de tocar ni entrar
+        # antes de confirmar.
+        assert record["xc"] <= record["xf"] <= record["xe"]
+
+
+def test_las_senales_descartadas_viajan_con_su_guardarrail(
+    zoned_run: ImpulseRun, cascade_run: tuple[CascadeRun, ExecutionRun]
+) -> None:
+    cascade, execution = cascade_run
+    payload = build_payload(zoned_run, cascade=cascade, execution=execution)
+    discarded = payload["entries"]["discarded"]
+
+    assert len(discarded) == len(cascade.discarded) + len(execution.discarded)
+    assert all(record["rail"] for record in discarded)
+
+
+def test_los_rechazos_llevan_las_tres_definiciones_por_separado(
+    zoned_run: ImpulseRun, cascade_run: tuple[CascadeRun, ExecutionRun]
+) -> None:
+    """§2 — ninguna adoptada, así que ninguna se dibuja como *la* definición."""
+    cascade, execution = cascade_run
+    payload = build_payload(zoned_run, cascade=cascade, execution=execution)
+
+    for record in payload["entries"]["rejections"]:
+        assert "R1_mecha_en_zona_cierre_fuera" in record["m"]
+        assert "R3_cierre_en_extremo" in record["m"]
+        assert any(key.startswith("R2_mecha_dominante_p") for key in record["m"])
+
+
+def test_las_capas_de_la_fase_3_se_dibujan_y_se_apagan(
+    zoned_run: ImpulseRun,
+    cascade_run: tuple[CascadeRun, ExecutionRun],
+    tmp_path: Path,
+) -> None:
+    cascade, execution = cascade_run
+    if not execution.trades:
+        pytest.skip("la fixture sintética no produjo ninguna operación")
+    resultado = _draw(zoned_run, tmp_path, cascade=cascade, execution=execution)
+
+    encendidas = _trace_names(_step(resultado, "entradas-por-defecto"))
+    apagadas = _trace_names(_step(resultado, "entradas-apagadas"))
+
+    assert any(nombre in ("GANADORA", "PERDEDORA") for nombre in encendidas), encendidas
+    assert not any(nombre in ("GANADORA", "PERDEDORA") for nombre in apagadas)
+    assert "FASE 3" in _step(resultado, "entradas-por-defecto")["notes"]
+
+
+def test_el_explorador_de_la_fase_3_ofrece_m15(
+    zoned_run: ImpulseRun, cascade_run: tuple[CascadeRun, ExecutionRun]
+) -> None:
+    """M15 es donde se afinan las entradas: sin su pestaña no se pueden auditar.
+
+    No lleva impulso propio —es temporalidad de ejecución— y sobre ella se dibuja
+    el de H1, igual que en las fases 2.0 y 2.1.
+    """
+    cascade, execution = cascade_run
+    payload = build_payload(zoned_run, cascade=cascade, execution=execution)
+
+    assert payload["charts"] == [DAILY, H4, H1, M15]
+    assert payload["layout"][M15] == [H1]
+    assert M15 in payload["bars"]
+    assert M15 in payload["spans"]
+    assert M15 not in payload["impulses"]
+
+
+def test_las_capas_de_la_fase_3_se_dibujan_tambien_sobre_m15(
+    zoned_run: ImpulseRun,
+    cascade_run: tuple[CascadeRun, ExecutionRun],
+    tmp_path: Path,
+) -> None:
+    """Una operación es un hecho en el tiempo y en el precio, no de un gráfico."""
+    cascade, execution = cascade_run
+    if not execution.trades:
+        pytest.skip("la fixture sintética no produjo ninguna operación")
+    resultado = _draw(zoned_run, tmp_path, cascade=cascade, execution=execution)
+
+    nombres = _trace_names(_step(resultado, "entradas-" + M15))
+    assert any(nombre in ("GANADORA", "PERDEDORA") for nombre in nombres), nombres
+    # Y el impulso que se ve sobre M15 sigue siendo el de H1, que es el único.
+    assert _step(resultado, "grafico-" + M15)["layerLabels"] == ["ID H1 (principal)"]
+
+
+def test_la_entrada_afinada_en_m15_llega_a_medirse(
+    cascade_run: tuple[CascadeRun, ExecutionRun],
+) -> None:
+    """§1.4 — las dos variantes se implementan y se miden por separado.
+
+    Con la fixture recortada a las temporalidades detectadas la cascada corría
+    sin velas de M15 y la variante afinada se declaraba ausente, así que esta
+    mitad del §1.4 no se probaba en ningún sitio.
+    """
+    cascade, _ = cascade_run
+
+    assert cascade.funnel["entrada_localizada_m15"] > 0
+    assert not any("No hay velas de M15" in nota for nota in cascade.notes)
+
+
+def test_las_operaciones_se_dibujan_en_todas_las_temporalidades(
+    zoned_run: ImpulseRun,
+    cascade_run: tuple[CascadeRun, ExecutionRun],
+    tmp_path: Path,
+) -> None:
+    """Una operación es un hecho en el tiempo y en el precio, no una propiedad
+    de un gráfico: el §10 pide verla sobre todas las que el explorador ofrezca.
+
+    Es lo que distingue esta capa de las de la fase 2.1: las roturas evitadas son
+    del impulso principal de cada gráfico y desaparecen al cambiar de pestaña;
+    una operación no puede desaparecer, porque ocurrió.
+    """
+    cascade, execution = cascade_run
+    if not execution.trades:
+        pytest.skip("la fixture sintética no produjo ninguna operación")
+    resultado = _draw(zoned_run, tmp_path, cascade=cascade, execution=execution)
+
+    graficos = [
+        step
+        for step in resultado["steps"]
+        if step["label"] == "entradas-" + str(step["chart"])
+    ]
+    assert len(graficos) == len(resultado["chartTabs"])
+    for step in graficos:
+        nombres = _trace_names(step)
+        assert any(
+            nombre in ("GANADORA", "PERDEDORA") for nombre in nombres
+        ), f"{step['label']}: {nombres}"
+
+
+def test_cada_descartada_dice_cuando_confirmo_y_no_solo_con_que(
+    zoned_run: ImpulseRun, cascade_run: tuple[CascadeRun, ExecutionRun]
+) -> None:
+    """Sin el minuto no se puede dibujar la confirmación en su vela: durante el
+    replay la señal se pinta mientras vive y cada hito va en su instante."""
+    cascade, execution = cascade_run
+    payload = build_payload(zoned_run, cascade=cascade, execution=execution)
+
+    for record in payload["entries"]["discarded"]:
+        assert ("xf" in record) and ((record["cf"] is None) == (record["xf"] is None))
+        if record["xf"] is not None:
+            assert record["xc"] <= record["xf"] <= record["x"]
+
+
+def test_los_rechazos_nacen_apagados_y_se_pueden_encender(
+    zoned_run: ImpulseRun,
+    cascade_run: tuple[CascadeRun, ExecutionRun],
+    tmp_path: Path,
+) -> None:
+    cascade, execution = cascade_run
+    if not cascade.signals:
+        pytest.skip("la fixture sintética no produjo ninguna señal")
+    resultado = _draw(zoned_run, tmp_path, cascade=cascade, execution=execution)
+
+    apagados = _trace_names(_step(resultado, "entradas-por-defecto"))
+    encendidos = _trace_names(_step(resultado, "entradas-con-rechazos"))
+
+    assert not any(nombre.startswith("Rechazo") for nombre in apagados)
+    assert any(nombre.startswith("Rechazo") for nombre in encendidos), encendidos
+
+
+# --- Fase 3.0 · el replay como PRUEBA, no como respuesta ---------------------
+#
+# El replay reproduce la historia paso a paso; con la fase 3 dentro, lo que
+# decide si sirve para probar la estrategia es que no adelante el final: la
+# operación se coloca en la vela en que el motor entra, y cómo acabó sólo se
+# dibuja cuando el reloj llega a la salida. Ver la estrella o el aspa en el
+# instante de entrar convertía el replay en una respuesta.
+
+DESENLACES = ("GANADORA", "PERDEDORA")
+
+
+def _iso(minute: int) -> str:
+    return (EPOCH + pd.Timedelta(minutes=minute)).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _marcas(step: dict, name: str) -> list[str]:
+    """Los instantes marcados por una capa en ese paso."""
+    return [
+        x
+        for trace in step["plot"]["traces"]
+        if trace["name"] == name
+        for x in (trace["xs"] or [])
+    ]
+
+
+def _globo(step: dict, name: str, x: str | None = None) -> str | None:
+    """El texto de la marca de `name` en `x`, o el primero si no se pide una."""
+    for trace in step["plot"]["traces"]:
+        if trace["name"] != name or not trace["captions"]:
+            continue
+        if x is None:
+            return trace["captions"][0]
+        marcas = trace["xs"] or []
+        if x in marcas:
+            return trace["captions"][marcas.index(x)]
+    return None
+
+
+def _paso_de_operacion(resultado: dict, label: str) -> dict:
+    pasos = [step for step in resultado["steps"] if step["label"] == label]
+    if not pasos:
+        pytest.skip("la fixture sintética no produjo una operación que cruzar en el replay")
+    return pasos[0]
+
+
+def _trade_del_replay(resultado: dict) -> dict:
+    trade = resultado.get("tradeDelReplay")
+    if trade is None:
+        pytest.skip("la fixture sintética no produjo una operación que cruzar en el replay")
+    return trade
+
+
+def test_en_el_replay_la_operacion_se_abre_a_su_hora_y_sin_desenlace(
+    zoned_run: ImpulseRun,
+    cascade_run: tuple[CascadeRun, ExecutionRun],
+    tmp_path: Path,
+) -> None:
+    cascade, execution = cascade_run
+    resultado = _draw(zoned_run, tmp_path, cascade=cascade, execution=execution)
+    entrada = _iso(_trade_del_replay(resultado)["xe"])
+
+    antes = _paso_de_operacion(resultado, "op-antes-de-entrar")
+    abierta = _paso_de_operacion(resultado, "op-abierta")
+    cerrada = _paso_de_operacion(resultado, "op-cerrada")
+
+    def desenlace(step: dict) -> bool:
+        return any(entrada in _marcas(step, nombre) for nombre in DESENLACES)
+
+    # Antes de la entrada la operación no existe: ni marcador ni desenlace.
+    assert entrada not in _marcas(antes, "OPERACIÓN ABIERTA")
+    assert not desenlace(antes)
+    # Al llegar su vela se coloca la entrada, y sigue sin saberse cómo acaba.
+    assert entrada in _marcas(abierta, "OPERACIÓN ABIERTA"), _trace_names(abierta)
+    assert not desenlace(abierta), "el desenlace no puede dibujarse al entrar"
+    # Y sólo cuando el reloj llega a la salida aparece la estrella o el aspa.
+    assert entrada not in _marcas(cerrada, "OPERACIÓN ABIERTA")
+    assert desenlace(cerrada), _trace_names(cerrada)
+
+
+def test_el_globo_de_una_operacion_abierta_calla_el_desenlace(
+    zoned_run: ImpulseRun,
+    cascade_run: tuple[CascadeRun, ExecutionRun],
+    tmp_path: Path,
+) -> None:
+    """Esconderlo en el gráfico y contarlo en el globo no escondería nada."""
+    cascade, execution = cascade_run
+    resultado = _draw(zoned_run, tmp_path, cascade=cascade, execution=execution)
+    entrada = _iso(_trade_del_replay(resultado)["xe"])
+    globo = _globo(
+        _paso_de_operacion(resultado, "op-abierta"), "OPERACIÓN ABIERTA", entrada
+    )
+
+    assert globo is not None
+    assert "desenlace: aún no se sabe" in globo
+    assert "sale " not in globo
+    assert " R · neto " not in globo
+    # Lo que sí cuenta: la decisión entera y cuánto va al precio de ese momento.
+    assert "ENTRA" in globo and "stop" in globo and "objetivo" in globo
+    assert "flotante" in globo
+
+
+def test_el_estado_no_cuenta_como_ganada_una_operacion_todavia_abierta(
+    zoned_run: ImpulseRun,
+    cascade_run: tuple[CascadeRun, ExecutionRun],
+    tmp_path: Path,
+) -> None:
+    cascade, execution = cascade_run
+    resultado = _draw(zoned_run, tmp_path, cascade=cascade, execution=execution)
+    notas = _paso_de_operacion(resultado, "op-abierta")["notes"]
+
+    assert "operaciones abiertas" in notas
+    assert "el desenlace de una operación no se dibuja hasta que el reloj llega" in notas
+    marca = re.search(r"\((\d+) al objetivo de las (\d+) ya cerradas\)", notas)
+    assert marca is not None, notas
+    assert int(marca.group(1)) <= int(marca.group(2))
+
+
+def test_la_senal_en_curso_se_dibuja_solo_mientras_vive(
+    zoned_run: ImpulseRun,
+    cascade_run: tuple[CascadeRun, ExecutionRun],
+    tmp_path: Path,
+) -> None:
+    """La capa es el tramo entre el contacto y el desenlace de la señal: fuera
+    del replay no hay presente y no puede haber nada «en curso»."""
+    cascade, execution = cascade_run
+    resultado = _draw(zoned_run, tmp_path, cascade=cascade, execution=execution)
+
+    apagada = _trace_names(_paso_de_operacion(resultado, "op-sin-senales"))
+    fuera = _trace_names(_paso_de_operacion(resultado, "op-fuera-del-replay"))
+
+    assert "SEÑAL EN CURSO" not in apagada, apagada
+    assert "SEÑAL EN CURSO" not in fuera, fuera
+    # Y su globo no puede adelantar en qué acaba la señal.
+    for label in ("op-antes-de-entrar", "op-abierta"):
+        globo = _globo(_paso_de_operacion(resultado, label), "SEÑAL EN CURSO")
+        if globo is not None:
+            assert "aún no hay entrada" in globo
+            assert "guardarraíl:" not in globo
+
+
+def test_parar_en_eventos_detiene_la_reproduccion_en_la_entrada(
+    zoned_run: ImpulseRun,
+    cascade_run: tuple[CascadeRun, ExecutionRun],
+    tmp_path: Path,
+) -> None:
+    """Con ▶ puesto, una entrada se ve y se pierde en el mismo segundo."""
+    cascade, execution = cascade_run
+    resultado = _draw(zoned_run, tmp_path, cascade=cascade, execution=execution)
+
+    reproduciendo = _paso_de_operacion(resultado, "halt-reproduciendo")
+    parado = _paso_de_operacion(resultado, "halt-en-la-entrada")
+
+    assert reproduciendo["replayPlay"] == "⏸"
+    assert parado["replayPlay"] == "▶"
+    assert "EN ESTE PASO: ENTRA la operación" in parado["notes"], parado["notes"]
+
+
+# --- Fase 3.0 · «sólo lo reciente» -------------------------------------------
+#
+# Con años de historia a la vista el gráfico se llena de marcas y deja de poder
+# leerse. El filtro deja lo que sigue VIVO y la marca de lo ÚLTIMO que pasó, que
+# desaparece en cuanto entra o cierra otra. Es dibujo: no toca la detección ni
+# los informes, y el estado dice cuántas marcas esconde.
+
+
+def _permitidas_por_reciente(payload: dict, seen: int) -> set[str]:
+    """Lo que el filtro puede dejar dibujado a esa hora, calculado aparte."""
+    trades = payload["entries"]["trades"]
+    discarded = payload["entries"]["discarded"]
+    hitos = [item["xe"] for item in trades if item["xe"] <= seen]
+    hitos += [item["xx"] for item in trades if item["xx"] is not None and item["xx"] <= seen]
+    hitos += [item["x"] for item in discarded if item["x"] <= seen]
+    ultimo = max(hitos)
+    vivas = {
+        item["xe"]
+        for item in trades
+        if item["xe"] <= seen and not (item["xx"] is not None and item["xx"] <= seen)
+    }
+    ultima_cerrada = {item["xe"] for item in trades if item["xx"] == ultimo}
+    descartada = {item["x"] for item in discarded if item["x"] == ultimo}
+    return {_iso(x) for x in vivas | ultima_cerrada | descartada}
+
+
+def _marcas_de_la_fase_3(step: dict) -> list[str]:
+    return [
+        x
+        for nombre in ("OPERACIÓN ABIERTA", "GANADORA", "PERDEDORA", "Señal descartada")
+        for x in _marcas(step, nombre)
+    ]
+
+
+def test_solo_lo_reciente_deja_lo_vivo_y_lo_ultimo_que_paso(
+    zoned_run: ImpulseRun,
+    cascade_run: tuple[CascadeRun, ExecutionRun],
+    tmp_path: Path,
+) -> None:
+    cascade, execution = cascade_run
+    payload = build_payload(zoned_run, cascade=cascade, execution=execution)
+    resultado = _draw(zoned_run, tmp_path, cascade=cascade, execution=execution)
+
+    filtrado = _paso_de_operacion(resultado, "reciente-en-el-replay")
+    entero = _paso_de_operacion(resultado, "reciente-apagado-en-el-replay")
+    permitidas = _permitidas_por_reciente(payload, _fine_clock(filtrado))
+
+    dibujadas = _marcas_de_la_fase_3(filtrado)
+    assert dibujadas, "el filtro no puede dejar el gráfico sin nada que mirar"
+    assert set(dibujadas) <= permitidas, sorted(set(dibujadas) - permitidas)
+    # Y el mismo instante sin filtro enseña al menos lo mismo: esconde, no cambia.
+    assert set(dibujadas) <= set(_marcas_de_la_fase_3(entero))
+    assert "sólo lo reciente" in filtrado["notes"]
+    assert "las demás siguen en los datos y en los informes" in filtrado["notes"]
+    # El resumen sigue contando lo que hubo en la ventana, no lo que se dibuja.
+    assert re.search(r"FASE 3: [\d.,]+ operaciones a la vista", filtrado["notes"])
+
+
+def test_solo_lo_reciente_tambien_manda_fuera_del_replay(
+    zoned_run: ImpulseRun,
+    cascade_run: tuple[CascadeRun, ExecutionRun],
+    tmp_path: Path,
+) -> None:
+    """Fuera del replay «reciente» se mide contra el borde de la ventana. Es
+    donde más se nota: con el periodo completo hay años de marcas."""
+    cascade, execution = cascade_run
+    resultado = _draw(zoned_run, tmp_path, cascade=cascade, execution=execution)
+
+    apagado = _marcas_de_la_fase_3(_paso_de_operacion(resultado, "reciente-fuera-apagado"))
+    encendido = _marcas_de_la_fase_3(
+        _paso_de_operacion(resultado, "reciente-fuera-encendido")
+    )
+
+    assert len(apagado) > 1, "sin muchas marcas este paso no comprueba nada"
+    assert 0 < len(encendido) < len(apagado)
+    assert set(encendido) <= set(apagado)
+
+
+# --- G.3 · escalar arrastrando sobre los ejes --------------------------------
+#
+# Como en cualquier gráfico de trading: apretar sobre los precios y arrastrar
+# comprime o estira la vertical; apretar sobre las fechas abre o cierra el
+# gráfico de lado. Plotly, sobre el eje, hace pan y no escala, así que el gesto
+# es propio y aquí se comprueba que escala de verdad y que el encuadre aguanta.
+
+
+def test_arrastrar_sobre_los_ejes_escala_el_grafico(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    resultado = _draw(run, tmp_path)
+    antes = _step(resultado, "ejes-antes-de-escalar")["plot"]
+    precios = _step(resultado, "eje-precios-arrastrado")["lastRelayout"]
+    fechas = _step(resultado, "eje-fechas-arrastrado")["lastRelayout"]
+
+    base_y = [float(v) for v in antes["yRange"]]
+    nuevo_y = [float(v) for v in precios["yaxis.range"]]
+    assert precios["yaxis.autorange"] is False
+    # Hacia abajo se ve MÁS rango —las velas se hacen pequeñas— y el centro
+    # se queda donde estaba: el gesto escala, no desplaza.
+    assert nuevo_y[1] - nuevo_y[0] > base_y[1] - base_y[0]
+    assert sum(nuevo_y) / 2 == pytest.approx(sum(base_y) / 2, abs=1e-6)
+
+    base_x = [_minute(v) for v in antes["xRange"]]
+    nuevo_x = [_minute(v) for v in fechas["xaxis.range"]]
+    # Hacia la izquierda entran más velas por el mismo sitio, y la última no se
+    # mueve: el borde derecho es el presente.
+    assert nuevo_x[1] - nuevo_x[0] > base_x[1] - base_x[0]
+    assert nuevo_x[1] == base_x[1]
+
+
+def test_la_escala_tomada_en_los_ejes_sobrevive_al_redibujo(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    """Si no se guardara, encender una capa devolvería el gráfico a su sitio."""
+    resultado = _draw(run, tmp_path)
+    fechas = _step(resultado, "eje-fechas-arrastrado")["lastRelayout"]
+    precios = _step(resultado, "eje-precios-arrastrado")["lastRelayout"]
+    despues = _step(resultado, "ejes-tras-redibujar")["plot"]
+
+    assert [_minute(v) for v in despues["xRange"]] == [
+        _minute(v) for v in fechas["xaxis.range"]
+    ]
+    assert [float(v) for v in despues["yRange"]] == pytest.approx(
+        [float(v) for v in precios["yaxis.range"]]
+    )
+
+
+def test_solo_desde_el_arranque_ignora_lo_que_ya_estaba_en_marcha(
+    zoned_run: ImpulseRun,
+    cascade_run: tuple[CascadeRun, ExecutionRun],
+    tmp_path: Path,
+) -> None:
+    """Empezar el replay en una fecha y ver ya puesta la operación de ese
+    momento es empezar con la respuesta delante. Con el filtro, el replay
+    arranca en blanco y sólo busca entradas hacia delante."""
+    cascade, execution = cascade_run
+    resultado = _draw(zoned_run, tmp_path, cascade=cascade, execution=execution)
+
+    arranque = _fine_clock(_paso_de_operacion(resultado, "op-arranque"))
+    filtrado = _paso_de_operacion(resultado, "op-solo-desde-el-arranque")
+    entero = _paso_de_operacion(resultado, "reciente-apagado-en-el-replay")
+
+    dibujadas = _marcas_de_la_fase_3(filtrado)
+    assert dibujadas, "la operación seguida entró después del arranque"
+    assert all(_minute(marca) >= arranque for marca in dibujadas), dibujadas
+    assert set(dibujadas) <= set(_marcas_de_la_fase_3(entero))
+    assert "SÓLO DESDE EL ARRANQUE" in filtrado["notes"]
+    # Y sin el filtro, en ese mismo instante, sí hay marcas anteriores: si no,
+    # el paso no estaría comprobando nada.
+    assert any(_minute(marca) < arranque for marca in _marcas_de_la_fase_3(entero))

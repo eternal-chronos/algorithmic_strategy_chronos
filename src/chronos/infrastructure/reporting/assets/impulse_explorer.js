@@ -77,6 +77,27 @@
      * regla nueva, así que la capa nace encendida cuando la corrida trae alguna.
      * Con `break_by_zone: false` no hay ninguna y la casilla ni se enseña. */
     avoided: true,
+    /* Fase 3.0. Las tres capas de la cascada. Las operaciones y las descartadas
+     * nacen encendidas —son lo que se viene a auditar— y los rechazos apagados:
+     * son muchos y taparían el resto hasta que hagan falta. Sin cascada en la
+     * corrida, las tres casillas ni se enseñan. */
+    trades: true,
+    discardedSignals: true,
+    rejections: false,
+    /* La señal mientras está viva, sólo durante el replay: del contacto con la
+     * zona hasta que entra o muere. Nace encendida porque es el tramo en el que
+     * el propietario decidiría, que es lo que el replay viene a comparar. */
+    signals: true,
+    /* «Sólo lo reciente»: filtro de dibujo sobre las cuatro capas de la fase 3.
+     * Nace apagado —el explorador enseña de salida todo lo que la corrida
+     * produjo— y el estado dice cuánto esconde cuando se enciende. */
+    recent: false,
+    /* «Sólo desde el arranque»: en el replay, ignorar todo lo que la fase 3 ya
+     * había hecho antes de la fecha elegida. Con esto el replay empieza en
+     * blanco y sólo busca entradas hacia delante, que es la única forma de
+     * probar la estrategia sin ver primero lo que ya estaba puesto. */
+    fresh: false,
+    since: null,       // minuto en el que arrancó el replay
     blind: false,      // auditoría ciega en curso (F.1)
     revealed: false,
     seed: null,
@@ -97,6 +118,10 @@
     at: 0,
     forming: true,     // armar la vela en curso con la temporalidad inferior
     playing: false,
+    /* Parar en cuanto una operación se abre o se cierra (G.1). Apagada de
+     * salida: es una interrupción, y quien la quiere la enciende. */
+    halt: false,
+    event: null,       // lo que cruzó el último paso, para anunciarlo
     speed: 700,        // milisegundos entre pasos
     window: 180,       // velas a la vista durante el replay
     resume: null,      // periodo al que se vuelve al salir del replay
@@ -1034,6 +1059,448 @@
     ];
   }
 
+  /* --- Fase 3.0: la cascada de entrada (§10) --------------------------------
+   *
+   * Tres capas, y van fuera de `impulses` a propósito: una operación es un hecho
+   * en el TIEMPO y en el PRECIO, no una propiedad de una temporalidad, así que se
+   * dibuja igual sobre las cuatro. Eso es exactamente lo que pide el §10 —cada
+   * operación navegable sobre las cuatro temporalidades— y es la razón de que
+   * estas funciones no llamen a `primary()` ni a `isVisible()`.
+   *
+   * Lo que sí se respeta es el replay: una operación no puede aparecer antes de
+   * que el motor la haya decidido, y —lo que de verdad decide si el explorador
+   * sirve para probar la estrategia— TAMPOCO puede enseñar cómo acabó antes de
+   * que el reloj llegue a la salida. Mientras está abierta se dibuja en su color
+   * propio, con su stop y su objetivo, y el globo dice cuánto va ganando o
+   * perdiendo al precio de ese momento; el desenlace aparece en la vela en que
+   * ocurre, ni un minuto antes. Ver la estrella o el aspa en el instante de
+   * entrar convertía el replay en una respuesta y no en una prueba. */
+
+  function hasEntries() { return DATA.hasEntries === true; }
+
+  function entries() { return DATA.entries || { trades: [], discarded: [], rejections: [] }; }
+
+  /* Hasta qué minuto se ha visto el mercado, para la fase 3. Fuera del replay es
+   * el borde de la ventana y no cambia nada; dentro es el RELOJ FINO (`state.at`)
+   * y no el cierre de la última vela del gráfico: los hitos de la cascada son
+   * instantes —la entrada es el open de una M1 concreta— y con la vela en
+   * formación armada el mercado ya ha pasado por ellos. Usar el cierre de la
+   * vela del gráfico retrasaría una entrada hasta un día entero en el diario. */
+  function seenUntil(edges) {
+    return state.replay ? state.at : edges.hi;
+  }
+
+  /* «Sólo desde el arranque»: el hito tiene que haber ocurrido después de la
+   * fecha en la que empezó el replay. Cada capa se dibuja en SU hito —la
+   * operación en la entrada, la descartada en su muerte, la señal en el
+   * contacto—, así que este único filtro deja fuera exactamente lo que ya
+   * estaba en marcha: ni la operación abierta al arrancar, ni las anteriores. */
+  function afterStart(x) {
+    return !state.fresh || !state.replay || state.since === null || x >= state.since;
+  }
+
+  /* Un hito de la fase 3 que está en la ventana y que el reloj ya ha alcanzado. */
+  function known(x, edges) {
+    return x >= edges.lo && x <= seenUntil(edges) && afterStart(x);
+  }
+
+  /* ¿Se sabe ya cómo acabó? Sólo cuando el reloj ha llegado a la salida. Fuera
+   * del replay `seenUntil` es el borde de la ventana, así que una operación
+   * cerrada se ve cerrada; las que el histórico dejó abiertas (`xx` nulo) no lo
+   * están en ningún caso, que es lo que dice su propio desenlace. */
+  function settled(item, edges) {
+    return item.xx !== null && item.xx !== undefined && item.xx <= seenUntil(edges);
+  }
+
+  /* El último precio visto: el cierre de la vela en formación si la hay, y si no
+   * el de la última vela cerrada. Sólo se usa durante el replay, para dibujar el
+   * recorrido de una operación abierta hasta el presente y para decir cuánto va.
+   * No es un cálculo del motor ni una regla: es el precio que está en pantalla. */
+  function lastPrice() {
+    var half = formingCandle();
+    return half ? half.c : bars().c[state.cursor];
+  }
+
+  /* Cuánto va, en R, una operación todavía abierta. Aritmética de presentación
+   * sobre el precio que ya se ve —(precio − entrada) / 1R, con el signo del
+   * lado—, no una decisión: el motor no publica un flotante por minuto y pedirle
+   * uno haría el fichero inmanejable. El lado se lee del stop, que en una compra
+   * está por debajo de la entrada. */
+  function floatingR(item) {
+    var risk = Math.abs(item.pe - item.ps);
+    if (!risk) { return null; }
+    var move = lastPrice() - item.pe;
+    return (item.ps < item.pe ? move : -move) / risk;
+  }
+
+  /* --- «Sólo lo reciente»: un filtro de DIBUJO, no de cálculo ---------------
+   *
+   * Con años de historia a la vista el gráfico se llena de marcas y deja de
+   * poder leerse. Este filtro deja **lo que sigue vivo y lo último que pasó**:
+   * las operaciones abiertas, las señales en observación, y la marca del último
+   * hito ocurrido —el cierre de una operación o la muerte de una señal—, que
+   * desaparece en cuanto pasa cualquier otra cosa. Así una operación se puede
+   * mirar entera al cerrar sin que la anterior siga estorbando.
+   *
+   * Como el filtro de ID visibles (B.2): no toca la detección ni los informes,
+   * y el texto de estado dice cuántas marcas se están escondiendo. */
+  function lastEventAt(edges) {
+    var seen = seenUntil(edges);
+    var last = null;
+    function mark(x) {
+      if (x !== null && x !== undefined && x <= seen && afterStart(x) &&
+        (last === null || x > last)) {
+        last = x;
+      }
+    }
+    entries().trades.forEach(function (item) {
+      // Una operación que «sólo desde el arranque» deja fuera no cuenta ni por
+      // su cierre: si contara, taparía a las que sí se están dibujando.
+      if (!afterStart(item.xe)) { return; }
+      mark(item.xe);
+      mark(item.xx);
+    });
+    entries().discarded.forEach(function (item) { mark(item.x); });
+    return last;
+  }
+
+  /* Una operación pasa el filtro si sigue abierta —está viva— o si su cierre es
+   * justo el último hito ocurrido. */
+  function recentTrade(item, edges, last) {
+    if (!state.recent) { return true; }
+    return !settled(item, edges) || item.xx === last;
+  }
+
+  function tradeTraces(range) {
+    if (blindfolded() || !state.trades || !hasEntries()) { return []; }
+    var edges = window_(range);
+    var last = state.recent ? lastEventAt(edges) : null;
+    var items = entries().trades.filter(function (item) {
+      return known(item.xe, edges) && recentTrade(item, edges, last);
+    });
+    if (!items.length) { return []; }
+
+    var done = items.filter(function (item) { return settled(item, edges); });
+    var open = items.filter(function (item) { return !settled(item, edges); });
+
+    /* El recorrido de la operación en un solo trazo con separadores nulos: del
+     * contacto a la entrada y de la entrada a la salida. Una traza por operación
+     * multiplicaría por cien las trazas de una ventana larga. La abierta se
+     * arrastra hasta el reloj y al precio de ahora: es lo que está pasando, no
+     * un desenlace. */
+    var px = [];
+    var py = [];
+    items.forEach(function (item) {
+      px.push(iso(item.xc), iso(item.xe), null);
+      py.push(item.zi, item.pe, null);
+    });
+    done.forEach(function (item) {
+      px.push(iso(item.xe), iso(item.xx), null);
+      py.push(item.pe, item.win ? item.pt : item.ps, null);
+    });
+    if (state.replay) {
+      open.forEach(function (item) {
+        px.push(iso(item.xe), iso(seenUntil(edges)), null);
+        py.push(item.pe, lastPrice(), null);
+      });
+    }
+
+    var winners = done.filter(function (item) { return item.win; });
+    var losers = done.filter(function (item) { return !item.win; });
+
+    return [
+      {
+        type: "scatter", mode: "lines", name: "Recorrido de la operación",
+        x: px, y: py, hoverinfo: "skip", showlegend: false,
+        line: { color: COLORS.muted, width: 1.4, dash: "dot" }
+      }
+    ].concat(
+      tradeMarkers(winners, "GANADORA", "star", COLORS.bullish, true),
+      tradeMarkers(losers, "PERDEDORA", "x", COLORS.bearish, true),
+      tradeMarkers(open, "OPERACIÓN ABIERTA", "diamond", COLORS.pending, false),
+      stopAndTarget(items, edges)
+    );
+  }
+
+  function tradeMarkers(items, name, symbol, colour, resolved) {
+    if (!items.length) { return []; }
+    return [{
+      type: "scatter", mode: "markers", name: name,
+      x: items.map(function (item) { return iso(item.xe); }),
+      y: items.map(function (item) { return item.pe; }),
+      text: items.map(function (item) { return tradeCaption(item, resolved); }),
+      hoverinfo: "text", hoverlabel: { align: "left" },
+      marker: {
+        symbol: symbol, size: 13, color: colour,
+        line: { color: COLORS.surface, width: 1 }
+      }
+    }];
+  }
+
+  /* El globo de una operación abierta cuenta la DECISIÓN entera —hitos, entrada,
+   * stop, objetivo y 1R— y calla el desenlace: eso es exactamente lo que se
+   * sabía al entrar, y es lo único con lo que se puede juzgar si la entrada
+   * estaba bien tomada. */
+  function tradeCaption(item, resolved) {
+    var lines = [
+      "<b>" + (resolved ? item.out.toUpperCase() : "OPERACIÓN ABIERTA") + "</b> · " + item.d +
+        " · entrada en " + item.tf + ", stop en " + item.sz,
+      "ID " + item.id + " de H4 · zona " + item.z + " · " + item.oc,
+      "contexto diario: " + item.dc,
+      "contacto " + stamp(item.xc)
+    ];
+    if (item.xk !== null && item.xk !== undefined) {
+      lines.push("rompe la zona " + stamp(item.xk));
+    }
+    if (item.xr !== null && item.xr !== undefined) {
+      lines.push("retesteo " + stamp(item.xr));
+    }
+    lines.push("confirma en H1 " + stamp(item.xf) + " (" + item.cf + ")");
+    lines.push("ENTRA " + stamp(item.xe) + " al open de M1 en " + price(item.pe));
+    lines.push("stop " + price(item.ps) + " · objetivo " + price(item.pt) +
+      " · 1R = " + price(item.ru) + " USD");
+    if (resolved) {
+      lines.push("sale " + stamp(item.xx));
+      lines.push("bruto " + item.gr.toFixed(2) + " R · neto " + item.nr.toFixed(2) + " R");
+      return lines.join("<br>");
+    }
+    var running = state.replay ? floatingR(item) : null;
+    if (running !== null) {
+      lines.push("flotante " + (running >= 0 ? "+" : "") + running.toFixed(2) +
+        " R al precio de ahora (" + price(lastPrice()) + ")");
+    }
+    lines.push("<i>desenlace: aún no se sabe</i>");
+    return lines.join("<br>");
+  }
+
+  /* El stop y el objetivo de cada operación, del momento de entrar al de salir.
+   * Se dibujan porque el §10 pide poder ver dónde estaban, y porque la nota del
+   * propietario dice que los stops se revisan ANTES que los resultados. Mientras
+   * la operación sigue abierta se estiran hasta el reloj: es lo que hay puesto
+   * en el mercado en ese momento. */
+  function stopAndTarget(items, edges) {
+    var sx = [];
+    var sy = [];
+    var tx = [];
+    var ty = [];
+    var limit = seenUntil(edges);
+    items.forEach(function (item) {
+      var end = settled(item, edges) ? item.xx : limit;
+      sx.push(iso(item.xe), iso(end), null);
+      sy.push(item.ps, item.ps, null);
+      tx.push(iso(item.xe), iso(end), null);
+      ty.push(item.pt, item.pt, null);
+    });
+    return [
+      {
+        type: "scatter", mode: "lines", name: "Stop", x: sx, y: sy,
+        hoverinfo: "skip", showlegend: false,
+        line: { color: COLORS.bearish, width: 1.2, dash: "dash" }
+      },
+      {
+        type: "scatter", mode: "lines", name: "Objetivo (3,3 R)", x: tx, y: ty,
+        hoverinfo: "skip", showlegend: false,
+        line: { color: COLORS.bullish, width: 1.2, dash: "dash" }
+      }
+    ];
+  }
+
+  /* Las señales DESCARTADAS y en qué guardarraíl murieron (§10). Sin esta capa el
+   * explorador enseñaría sólo lo que sobrevivió, que es la mitad de la historia y
+   * justo la mitad que no permite juzgar un embudo. */
+  function discardedTraces(range) {
+    if (blindfolded() || !state.discardedSignals || !hasEntries()) { return []; }
+    var edges = window_(range);
+    // Una señal descartada ya está muerta: lo único «reciente» que puede ser es
+    // haber sido lo último que pasó.
+    var last = state.recent ? lastEventAt(edges) : null;
+    var items = entries().discarded.filter(function (item) {
+      return known(item.x, edges) && (!state.recent || item.x === last);
+    });
+    if (!items.length) { return []; }
+    return [{
+      type: "scatter", mode: "markers", name: "Señal descartada",
+      x: items.map(function (item) { return iso(item.x); }),
+      y: items.map(function (item) { return item.zi; }),
+      text: items.map(function (item) {
+        return "<b>SEÑAL DESCARTADA</b> · " + item.d +
+          "<br>guardarraíl: <b>" + item.rail + "</b>" +
+          "<br>ID " + item.id + " de H4 · zona " + item.z +
+          " [" + price(item.zi) + ", " + price(item.zo) + "]" +
+          "<br>contacto " + stamp(item.xc) +
+          "<br>muere " + stamp(item.x) +
+          "<br>contexto diario: " + item.dc +
+          (item.cf ? "<br>había confirmado por " + item.cf : "<br>no llegó a confirmar en H1");
+      }),
+      hoverinfo: "text", hoverlabel: { align: "left" },
+      marker: {
+        symbol: "circle-open", size: 11, color: COLORS.muted,
+        line: { color: COLORS.muted, width: 1.6 }
+      }
+    }];
+  }
+
+  /* Los rechazos, marcados según las TRES definiciones y distinguibles entre sí
+   * (§2 y §10). Ninguna está adoptada, así que ninguna se dibuja como "la"
+   * definición: cada marcador dice cuáles la marcaron y el símbolo cambia con
+   * cuántas coinciden. Verlas mezcladas sería justo lo que impide elegir. */
+  function rejectionTraces(range) {
+    if (blindfolded() || !state.rejections || !hasEntries()) { return []; }
+    var edges = window_(range);
+    // Con el filtro puesto quedan los rechazos de las señales que siguen vivas:
+    // son los que todavía pueden acabar en algo, y los únicos que se están
+    // mirando cuando se pide ver sólo lo reciente.
+    var alive = state.recent ? liveSignals(edges) : null;
+    var items = entries().rejections.filter(function (item) {
+      return known(item.x, edges) && (!alive || alive.some(function (signal) {
+        return signal.id === item.id && item.x >= signal.xc;
+      }));
+    });
+    if (!items.length) { return []; }
+    return [{
+      type: "scatter", mode: "markers", name: "Rechazo (R1 / R2 / R3)",
+      x: items.map(function (item) { return iso(item.x); }),
+      y: items.map(function (item) { return item.y; }),
+      text: items.map(function (item) {
+        var marked = Object.keys(item.m).filter(function (key) { return item.m[key]; });
+        var missing = Object.keys(item.m).filter(function (key) { return !item.m[key]; });
+        return "<b>RECHAZO en H1</b> · " + item.d + "<br>" + stamp(item.x) +
+          "<br>ID " + item.id + " de H4" +
+          "<br>marcan: " + (marked.length ? marked.join(", ") : "ninguna") +
+          "<br>no marcan: " + (missing.length ? missing.join(", ") : "ninguna") +
+          "<br><i>ninguna definición está adoptada: la confirmación usa la unión</i>";
+      }),
+      hoverinfo: "text", hoverlabel: { align: "left" },
+      marker: {
+        symbol: items.map(rejectionSymbol),
+        size: 10, color: COLORS.ink, opacity: 0.75,
+        line: { color: COLORS.surface, width: 1 }
+      }
+    }];
+  }
+
+  /* --- Fase 3.0 en replay: la señal mientras está VIVA ----------------------
+   *
+   * Una observación de H4 existe desde que el precio toca la zona hasta que
+   * entra o muere. Ese tramo no se dibujaba en ninguna parte: el explorador
+   * enseñaba el final —operación o descarte— y nunca el proceso. En un replay
+   * eso es justo lo que hace falta ver, porque es el rato en el que el
+   * propietario decidiría, y es cuando se puede comparar lo que haría él con lo
+   * que hace el motor.
+   *
+   * Sólo tiene sentido con un presente, así que sólo se dibuja en replay: fuera
+   * de él ninguna señal está "en curso" y la capa sería el contacto de todas a
+   * la vez encima del gráfico.
+   *
+   * Se arma con lo que ya viaja en el payload —los mismos hitos de cada
+   * operación y de cada descarte, cada uno en su minuto—: aquí no se calcula
+   * ninguna observación nueva. Y el globo calla el futuro: mientras vive, una
+   * señal no sabe si acabará en operación o en qué guardarraíl morirá. */
+  function liveSignals(edges) {
+    if (!hasEntries()) { return []; }
+    var seen = seenUntil(edges);
+    var live = [];
+    entries().trades.forEach(function (item) {
+      live.push({ id: item.id, d: item.d, z: item.z, y: item.zi, xc: item.xc, xf: item.xf, end: item.xe });
+    });
+    entries().discarded.forEach(function (item) {
+      live.push({ id: item.id, d: item.d, z: item.z, y: item.zi, xc: item.xc, xf: item.xf, end: item.x });
+    });
+    return live.filter(function (item) {
+      return known(item.xc, edges) && seen < item.end;
+    });
+  }
+
+  function signalTraces(range) {
+    if (blindfolded() || !state.signals || !state.replay || !hasEntries()) { return []; }
+    var edges = window_(range);
+    var items = liveSignals(edges);
+    if (!items.length) { return []; }
+    var seen = seenUntil(edges);
+
+    // Una línea del contacto al reloj, al borde interior de la zona: es el hilo
+    // que permite seguir una señal que lleva días en observación.
+    var lx = [];
+    var ly = [];
+    items.forEach(function (item) {
+      lx.push(iso(item.xc), iso(seen), null);
+      ly.push(item.y, item.y, null);
+    });
+    var confirmed = items.filter(function (item) {
+      return item.xf !== null && item.xf !== undefined && item.xf <= seen;
+    });
+
+    return [
+      {
+        type: "scatter", mode: "lines", name: "Señal en observación",
+        x: lx, y: ly, hoverinfo: "skip", showlegend: false,
+        line: { color: COLORS.signal, width: 1.2, dash: "dot" }
+      },
+      {
+        type: "scatter", mode: "markers", name: "SEÑAL EN CURSO",
+        x: items.map(function (item) { return iso(item.xc); }),
+        y: items.map(function (item) { return item.y; }),
+        text: items.map(function (item) { return signalCaption(item, seen); }),
+        hoverinfo: "text", hoverlabel: { align: "left" },
+        marker: {
+          symbol: "circle-open", size: 12, color: COLORS.signal,
+          line: { color: COLORS.signal, width: 2 }
+        }
+      }
+    ].concat(confirmed.length ? [{
+      type: "scatter", mode: "markers", name: "CONFIRMA EN H1",
+      x: confirmed.map(function (item) { return iso(item.xf); }),
+      y: confirmed.map(function (item) { return item.y; }),
+      text: confirmed.map(function (item) {
+        return "<b>CONFIRMA EN H1</b> · " + item.d + "<br>ID " + item.id +
+          " de H4 · zona " + item.z + "<br>" + stamp(item.xf) +
+          "<br><i>la entrada se coloca cuando el precio llega a la zona de entrada</i>";
+      }),
+      hoverinfo: "text", hoverlabel: { align: "left" },
+      marker: {
+        symbol: "diamond-open", size: 12, color: COLORS.signal,
+        line: { color: COLORS.signal, width: 2 }
+      }
+    }] : []);
+  }
+
+  function signalCaption(item, seen) {
+    return "<b>SEÑAL EN CURSO</b> · " + item.d +
+      "<br>ID " + item.id + " de H4 · zona " + item.z +
+      "<br>contacto " + stamp(item.xc) +
+      (item.xf !== null && item.xf !== undefined && item.xf <= seen
+        ? "<br>ya confirmó en H1 " + stamp(item.xf)
+        : "<br>todavía sin confirmación en H1") +
+      "<br><i>aún no hay entrada: puede acabar en operación o morir en un guardarraíl</i>";
+  }
+
+  /* Los hitos de la fase 3 que cruzó el último paso del replay: lo que acaba de
+   * pasar, para poder anunciarlo en el estado y —si el propietario lo pide— para
+   * parar ahí. Sin esto, con ▶ puesto una entrada se ve y se pierde en el mismo
+   * segundo, que es la forma más fácil de no auditar nada. */
+  function crossedEvents(from, to) {
+    if (!hasEntries() || to <= from) { return null; }
+    var hits = [];
+    entries().trades.forEach(function (item, index) {
+      var name = "nº " + (index + 1) + " (" + item.d + ", ID " + item.id + " de H4)";
+      if (item.xe > from && item.xe <= to) { hits.push("ENTRA la operación " + name); }
+      if (item.xx !== null && item.xx !== undefined && item.xx > from && item.xx <= to) {
+        hits.push("CIERRA la operación " + name + ": " + item.out.toUpperCase());
+      }
+    });
+    return hits.length ? hits.join(" · ") : null;
+  }
+
+  /* Un símbolo por número de definiciones que coinciden: triángulo cuando marca
+   * una sola, diamante cuando marcan dos y cuadrado cuando marcan todas. Es la
+   * forma de ver el solape del §2 sobre las velas y no sólo en una tabla. */
+  function rejectionSymbol(item) {
+    var count = Object.keys(item.m).filter(function (key) { return item.m[key]; }).length;
+    if (count <= 1) { return "triangle-up-open"; }
+    if (count === 2) { return "diamond-open"; }
+    return "square-open";
+  }
+
   /* El sombreado es el del impulso principal: dos capas de limbo superpuestas
    * no se leen, y el limbo que importa al auditar un gráfico es el suyo. */
   function limboShapes(range) {
@@ -1098,6 +1565,106 @@
     draw();
   }
 
+  /* --- Escalar arrastrando sobre los ejes (G.3) -----------------------------
+   *
+   * Como en cualquier gráfico de trading: se aprieta sobre los PRECIOS y se
+   * arrastra para comprimir o estirar la vertical, y se aprieta sobre las
+   * FECHAS para abrir o cerrar el gráfico de lado. Plotly, sobre el eje, hace
+   * pan y no escala, así que el gesto se implementa aquí: se lee el rango
+   * vigente, se multiplica por un factor y se le devuelve con `relayout`. El
+   * `plotly_relayout` que eso emite lo recoge `captureZoom`, de modo que el
+   * encuadre así tomado aguanta los pasos del replay igual que el de la rueda.
+   *
+   * Sigue sin calcularse nada del motor: esto es encuadre, como el zoom. */
+  var MARGIN = { l: 66, r: 18, t: 16, b: 44 };
+
+  var axisDrag = null;
+
+  /* Sobre qué eje cae el punto: la banda de la izquierda es la de los precios y
+   * la de abajo la de las fechas. Fuera de las dos, no es este gesto. */
+  function axisAt(box, x, y) {
+    if (x - box.left < MARGIN.l) { return "y"; }
+    if (box.top + box.height - y < MARGIN.b) { return "x"; }
+    return null;
+  }
+
+  /* El rango que se está viendo. Manda el encuadre manual si lo hay; si no, se
+   * lee del gráfico ya resuelto por Plotly. Sin ninguno de los dos no hay nada
+   * que escalar y el gesto se deja pasar. */
+  function currentRange(key) {
+    if (state.zoom[key]) { return state.zoom[key].slice(); }
+    var chart = document.getElementById("chart");
+    var full = chart && (chart._fullLayout || chart.layout);
+    var axis = full && full[key === "x" ? "xaxis" : "yaxis"];
+    if (!axis || !axis.range) { return null; }
+    var lo = key === "x" ? toMinute(axis.range[0]) : Number(axis.range[0]);
+    var hi = key === "x" ? toMinute(axis.range[1]) : Number(axis.range[1]);
+    if (lo === null || hi === null || isNaN(lo) || isNaN(hi) || hi <= lo) { return null; }
+    return [lo, hi];
+  }
+
+  /* El rango multiplicado por `factor` alrededor de `anchor`: 0,5 es el centro y
+   * 1 el extremo alto. */
+  function scaledRange(pair, factor, anchor) {
+    var width = pair[1] - pair[0];
+    var pivot = pair[0] + width * anchor;
+    var next = width * factor;
+    return [pivot - next * anchor, pivot + next * (1 - anchor)];
+  }
+
+  function startAxisDrag(event) {
+    var chart = document.getElementById("chart");
+    if (!chart || typeof chart.getBoundingClientRect !== "function") { return; }
+    var box = chart.getBoundingClientRect();
+    var key = axisAt(box, event.clientX, event.clientY);
+    if (!key) { return; }
+    var pair = currentRange(key);
+    if (!pair) { return; }
+    axisDrag = { key: key, from: key === "y" ? event.clientY : event.clientX, base: pair };
+    // En captura y cortando la propagación: si el evento llegara a las capas de
+    // arrastre de Plotly, su pan y esta escala pelearían por el mismo gesto.
+    if (event.preventDefault) { event.preventDefault(); }
+    if (event.stopPropagation) { event.stopPropagation(); }
+  }
+
+  /* 150 px de arrastre duplican o parten en dos lo que se ve. El eje de precios
+   * escala alrededor del centro; el de fechas ancla en el borde derecho, que es
+   * donde está la última vela: abrir y cerrar el gráfico de lado no puede mover
+   * el presente de sitio. */
+  function moveAxisDrag(event) {
+    if (!axisDrag) { return; }
+    var delta = axisDrag.key === "y"
+      ? event.clientY - axisDrag.from
+      : axisDrag.from - event.clientX;
+    var pair = scaledRange(
+      axisDrag.base, Math.exp(delta / 150), axisDrag.key === "y" ? 0.5 : 1
+    );
+    applyAxisRange(axisDrag.key, pair);
+    if (event.preventDefault) { event.preventDefault(); }
+  }
+
+  function applyAxisRange(key, pair) {
+    var chart = document.getElementById("chart");
+    if (!chart || typeof Plotly === "undefined" || !Plotly.relayout) { return; }
+    var name = key === "x" ? "xaxis" : "yaxis";
+    var update = {};
+    update[name + ".range"] = key === "x"
+      ? [iso(Math.round(pair[0])), iso(Math.round(pair[1]))]
+      : pair;
+    update[name + ".autorange"] = false;
+    Plotly.relayout(chart, update);
+  }
+
+  function endAxisDrag() { axisDrag = null; }
+
+  function bindAxisScaling() {
+    var chart = document.getElementById("chart");
+    if (!chart || !chart.addEventListener || !document.addEventListener) { return; }
+    chart.addEventListener("mousedown", startAxisDrag, true);
+    document.addEventListener("mousemove", moveAxisDrag);
+    document.addEventListener("mouseup", endAxisDrag);
+  }
+
   /* Cambiar de tramo de historia —preset, fechas, ventana ciega, arrancar o
    * salir del replay— es pedir otro sitio, no otro zoom: ahí el encuadre manual
    * estorba. Alternar capas o dar un paso del replay no lo tocan. */
@@ -1156,7 +1723,7 @@
     var x = xRange(range);
     return {
       height: 720,
-      margin: { l: 66, r: 18, t: 16, b: 44 },
+      margin: MARGIN,
       paper_bgcolor: COLORS.surface,
       plot_bgcolor: COLORS.surface,
       font: { family: COLORS.font, size: 12, color: COLORS.ink },
@@ -1199,7 +1766,13 @@
       .concat(avoidedTraces(range))
       .concat(confirmationTraces(range))
       .concat(contactTraces(range))
-      .concat(wrongExtremeTraces(range));
+      .concat(wrongExtremeTraces(range))
+      // Fase 3.0 encima de todo: la operación es lo que se viene a auditar y
+      // taparla con una línea de contexto sería enterrar el asunto.
+      .concat(discardedTraces(range))
+      .concat(rejectionTraces(range))
+      .concat(signalTraces(range))
+      .concat(tradeTraces(range));
 
     Plotly.react("chart", traces, layout(range), {
       responsive: true, scrollZoom: true, displaylogo: false,
@@ -1288,6 +1861,58 @@
       }).length;
       text += " · roturas evitadas a la vista: " + evitadas.toLocaleString("es-ES") +
         " (velas que con la regla antigua habrían matado el ID)";
+    }
+    if (hasEntries()) {
+      var alcance = entries();
+      var operaciones = alcance.trades.filter(function (item) {
+        return known(item.xe, edges);
+      });
+      // Las ganadas se cuentan sólo entre las que YA cerraron: en replay, contar
+      // el desenlace de una operación abierta sería enseñarlo en el texto justo
+      // después de haberlo escondido en el gráfico.
+      var cerradas = operaciones.filter(function (item) { return settled(item, edges); });
+      var ganadas = cerradas.filter(function (item) { return item.win; }).length;
+      var muertas = alcance.discarded.filter(function (item) {
+        return known(item.x, edges);
+      }).length;
+      text += " · FASE 3: " + operaciones.length.toLocaleString("es-ES") +
+        " operaciones a la vista (" + ganadas.toLocaleString("es-ES") + " al objetivo de las " +
+        cerradas.length.toLocaleString("es-ES") + " ya cerradas)" +
+        " y " + muertas.toLocaleString("es-ES") + " señales descartadas" +
+        (state.trades ? "" : " (capa de operaciones APAGADA)") +
+        (state.discardedSignals ? "" : " (capa de descartadas APAGADA)") +
+        (state.rejections ? "" : " · rechazos ocultos: enciéndelos para ver qué definición marca cada uno");
+      // Los recuentos de arriba son los de la VENTANA, no los de lo que el
+      // filtro deja pasar: «sólo lo reciente» esconde marcas, no cambia lo que
+      // hubo. Por eso dice de cuántas esconde y no cambia el resumen.
+      if (state.recent) {
+        var ultimo = lastEventAt(edges);
+        var dibujadas = operaciones.filter(function (item) {
+          return recentTrade(item, edges, ultimo);
+        }).length + alcance.discarded.filter(function (item) {
+          return known(item.x, edges) && item.x === ultimo;
+        }).length;
+        text += " · filtro «sólo lo reciente»: se dibuja lo que sigue vivo y lo " +
+          "último que pasó — " + dibujadas.toLocaleString("es-ES") + " marcas de " +
+          (operaciones.length + muertas).toLocaleString("es-ES") +
+          "; las demás siguen en los datos y en los informes";
+      }
+      if (state.replay && state.fresh && state.since !== null) {
+        text += " · SÓLO DESDE EL ARRANQUE (" + iso(state.since).slice(0, 16) +
+          " UTC): lo que la fase 3 ya tenía en marcha —la operación abierta al " +
+          "empezar y todas las anteriores— no se dibuja; sólo se buscan entradas " +
+          "hacia delante";
+      }
+      if (state.replay) {
+        var abiertas = operaciones.length - cerradas.length;
+        text += " · EN VIVO: " + liveSignals(edges).length.toLocaleString("es-ES") +
+          " señales en observación y " + abiertas.toLocaleString("es-ES") +
+          " operaciones abiertas; el desenlace de una operación no se dibuja hasta " +
+          "que el reloj llega a su salida" +
+          (state.signals ? "" : " (capa de señales en curso APAGADA)");
+        if (state.event) { text += " · EN ESTE PASO: " + state.event; }
+        if (state.halt) { text += " · parada automática en cada apertura y cierre"; }
+      }
     }
     var info = modeInfo(state.mode);
     if (info) {
@@ -1389,6 +2014,10 @@
     state.cursor = index;
     state.sub = 0;
     state.at = now_();
+    state.event = null;
+    // El minuto en el que empieza la prueba: lo que la fase 3 hizo antes de él
+    // es historia y «sólo desde el arranque» lo deja fuera.
+    state.since = state.at;
     draw();
   }
 
@@ -1402,6 +2031,8 @@
     state.preset = state.resume.preset;
     state.resume = null;
     state.sub = 0;
+    state.event = null;
+    state.since = null;
   }
 
   function exitReplay() {
@@ -1436,9 +2067,15 @@
   }
 
   /* Un paso: o se forma un trozo más de la vela en curso, o la vela cierra y el
-   * motor reacciona. Nunca las dos cosas a la vez. Devuelve si se movió algo. */
+   * motor reacciona. Nunca las dos cosas a la vez. Devuelve si se movió algo.
+   *
+   * Al final del paso se mira qué hitos de la fase 3 quedaron dentro del tramo
+   * de reloj recorrido. Es lectura del payload, no cálculo: los minutos de la
+   * entrada y de la salida vienen dados. Con «Parar en eventos» encendida, el
+   * paso que abre o cierra una operación detiene la reproducción ahí. */
   function stepReplay(direction) {
     var t = bars().t;
+    var before = state.at;
     if (direction > 0) {
       if (state.sub < subSteps()) { state.sub += 1; }
       else if (state.cursor + 1 < t.length) { state.cursor += 1; state.sub = 0; }
@@ -1452,6 +2089,8 @@
       return false;
     }
     state.at = clock();
+    state.event = crossedEvents(before, state.at);
+    if (state.event && state.halt) { pauseReplay(); }
     draw();
     return true;
   }
@@ -1543,6 +2182,16 @@
     if (!group || hasAvoided()) { return; }
     if (group.style) { group.style.display = "none"; }
     state.avoided = false;
+  }
+
+  /* Fase 3.0, mismo criterio: sin cascada en la corrida no hay ni una operación,
+   * y tres casillas que no pueden dibujar nada sólo hacen dudar. */
+  function buildEntryLayers() {
+    var group = document.getElementById("entry-layers");
+    if (!group || hasEntries()) { return; }
+    if (group.style) { group.style.display = "none"; }
+    state.trades = state.discardedSignals = state.rejections = state.signals = false;
+    state.recent = state.fresh = false;
   }
 
   function buildVisibleButtons() {
@@ -1665,6 +2314,21 @@
     if (hasAvoided()) {
       document.getElementById("layer-avoided").checked = state.avoided;
     }
+    if (hasEntries()) {
+      document.getElementById("layer-trades").checked = state.trades;
+      document.getElementById("layer-discarded").checked = state.discardedSignals;
+      document.getElementById("layer-rejections").checked = state.rejections;
+      document.getElementById("layer-recent").checked = state.recent;
+      var signals = document.getElementById("layer-signals");
+      signals.checked = state.signals;
+      // Sin presente no hay señal "en curso": fuera del replay la casilla se
+      // apaga en vez de ofrecer una capa que no puede dibujar nada.
+      signals.disabled = !state.replay;
+      // Y sin replay no hay arranque desde el que contar.
+      var fresh = document.getElementById("layer-fresh");
+      fresh.checked = state.fresh;
+      fresh.disabled = !state.replay;
+    }
 
     seedInput().value = state.seed === null ? "" : String(state.seed);
     document.getElementById("blind-reveal").disabled = !blindfolded();
@@ -1692,6 +2356,7 @@
       state.replay ? "Reiniciar" : "Empezar";
     document.getElementById("replay-play").textContent = state.playing ? "⏸" : "▶";
     document.getElementById("replay-forming").checked = state.forming;
+    document.getElementById("replay-halt").checked = state.halt;
     document.getElementById("replay-window").value = String(state.window);
     ["from", "to", "prev", "next"].forEach(function (id) {
       document.getElementById(id).disabled = state.replay;
@@ -1727,7 +2392,13 @@
       ["layer-wrong", "wrong"],
       ["layer-zones-ul", "zonesUl"],
       ["layer-zones-ob", "zonesOb"],
-      ["layer-avoided", "avoided"]
+      ["layer-avoided", "avoided"],
+      ["layer-trades", "trades"],
+      ["layer-discarded", "discardedSignals"],
+      ["layer-rejections", "rejections"],
+      ["layer-signals", "signals"],
+      ["layer-recent", "recent"],
+      ["layer-fresh", "fresh"]
     ].forEach(function (pair) {
       document.getElementById(pair[0]).addEventListener("change", function (event) {
         state[pair[1]] = event.target.checked;
@@ -1766,6 +2437,10 @@
       // Sin vela en formación el reloj vuelve al último cierre: es lo que se está
       // enseñando, y el reloj no puede prometer más de lo que se ve.
       if (!state.forming) { state.sub = 0; state.at = now_(); }
+      draw();
+    });
+    document.getElementById("replay-halt").addEventListener("change", function (event) {
+      state.halt = event.target.checked;
       draw();
     });
     document.getElementById("replay-speed").addEventListener("change", function (event) {
@@ -1815,9 +2490,11 @@
   buildModeButtons();
   buildZoneLayers();
   buildBreakLayers();
+  buildEntryLayers();
   buildVisibleButtons();
   buildPresetButtons();
   buildImpulseLayers();
   bindControls();
+  bindAxisScaling();
   draw();
 })();

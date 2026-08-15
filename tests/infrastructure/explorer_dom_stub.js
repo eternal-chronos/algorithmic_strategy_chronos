@@ -38,6 +38,8 @@ function makeElement(id) {
     },
     // Los eventos de Plotly se enganchan al div con `on`, no con addEventListener.
     on(type, handler) { this.addEventListener(type, handler); },
+    // El gesto de escalar sobre los ejes necesita saber dónde está el gráfico.
+    getBoundingClientRect() { return { left: 0, top: 0, width: 1200, height: 720 }; },
     setAttribute(name, value) { this.attributes[name] = value; },
     getAttribute(name) { return this.attributes[name] ?? null; },
     appendChild(child) { this.children.push(child); return child; },
@@ -58,10 +60,12 @@ function declare(id) {
  'prev', 'next',
  'from', 'to', 'layer-limbo', 'layer-marks', 'layer-contacts', 'layer-mid', 'layer-wrong',
  'zone-layers', 'layer-zones-ul', 'layer-zones-ob',
+ 'entry-layers', 'layer-trades', 'layer-discarded', 'layer-rejections', 'layer-signals',
+ 'layer-recent', 'layer-fresh',
  'break-layers', 'layer-avoided',
  'blind-seed', 'blind-start', 'blind-reveal', 'blind-exit',
  'replay-group', 'replay-date', 'replay-start', 'replay-back', 'replay-step',
- 'replay-play', 'replay-exit', 'replay-forming', 'replay-speed', 'replay-window',
+ 'replay-play', 'replay-exit', 'replay-forming', 'replay-halt', 'replay-speed', 'replay-window',
  'notes', 'explorer-data'].forEach(declare);
 
 elements['explorer-data'].textContent = fs.readFileSync(payloadPath, 'utf8');
@@ -96,6 +100,10 @@ global.document = {
   },
 };
 
+function fireDocument(type, event) {
+  (documentListeners[type] || []).forEach(function (handler) { handler(event); });
+}
+
 function pressKey(key, focusedTag) {
   global.document.activeElement = focusedTag ? { tagName: focusedTag } : null;
   (documentListeners['keydown'] || []).forEach(function (handler) {
@@ -120,7 +128,16 @@ function furthest(traces, layout) {
   return points.length ? points.sort()[points.length - 1] : null;
 }
 
+const relayoutCalls = [];
+
 global.Plotly = {
+  // Lo que el gesto de escalar sobre los ejes le pide a Plotly. Se reemite como
+  // `plotly_relayout`, que es lo que hace Plotly de verdad: así el recorrido
+  // comprueba también que el encuadre queda guardado.
+  relayout(target, update) {
+    relayoutCalls.push(update);
+    elements['chart'].fire('plotly_relayout', update);
+  },
   react(target, traces, layout) {
     plotCalls.push({
       maxEngineX: furthest(traces, layout),
@@ -135,6 +152,15 @@ global.Plotly = {
           // confirmar, sólo con el contorno. La diferencia se comprueba aquí.
           fill: trace.fill || null,
           fillcolor: trace.fillcolor || null,
+          // Fase 3.0 en replay: el globo de una operación abierta no puede decir
+          // cómo acabó, así que el texto también se comprueba.
+          captions: trace.text && trace.text.length <= 200 ? trace.text.slice() : null,
+          // Las marcas de la fase 3 son pocas y hay que poder preguntar por UNA
+          // operación: si no, «hay una ganadora dibujada» no distingue entre la
+          // que se está siguiendo y otra que cerró hace tres días.
+          xs: trace.mode === 'markers' && (trace.x || []).length <= 200
+            ? trace.x.slice()
+            : null,
         };
       }),
       bars: (traces[0] && traces[0].x && traces[0].x.length) || 0,
@@ -165,6 +191,7 @@ function snapshot(label) {
     replayDate: elements['replay-date'].value,
     zoomFree: elements['zoom-reset'].disabled === true,
     replayPlay: elements['replay-play'].textContent,
+    lastRelayout: relayoutCalls[relayoutCalls.length - 1] || null,
     replayLocked: elements['from'].disabled === true && elements['next'].disabled === true,
     visibleMode: (elements['visible-buttons'].children.filter(function (button) {
       return button.getAttribute('aria-pressed') === 'true';
@@ -290,6 +317,29 @@ capaPrincipal.fire('change', { target: { checked: false } });
 visiblesZonas.filter(function (button) { return button.dataset.visible === 'pair'; })
   .forEach(function (button) { button.fire('click'); });
 tabs[0].fire('click');
+presets[presets.length - 1].fire('click');
+
+// Fase 3.0 (§10): las tres capas de la cascada, encendidas y apagadas por
+// separado y sobre TODAS las temporalidades. Una operación es un hecho en el
+// tiempo y en el precio, no una propiedad de un gráfico, así que tiene que
+// dibujarse igual en las cuatro: si alguna pestaña dejara de enseñarlas, el
+// recorrido de abajo lo delata.
+presets[0].fire('click');
+tabs.forEach(function (tab) {
+  tab.fire('click');
+  steps.push(snapshot('entradas-' + tab.dataset.tf));
+});
+tabs[0].fire('click');
+steps.push(snapshot('entradas-por-defecto'));
+elements['layer-rejections'].fire('change', { target: { checked: true } });
+steps.push(snapshot('entradas-con-rechazos'));
+elements['layer-discarded'].fire('change', { target: { checked: false } });
+steps.push(snapshot('entradas-sin-descartadas'));
+elements['layer-trades'].fire('change', { target: { checked: false } });
+steps.push(snapshot('entradas-apagadas'));
+elements['layer-trades'].fire('change', { target: { checked: true } });
+elements['layer-discarded'].fire('change', { target: { checked: true } });
+elements['layer-rejections'].fire('change', { target: { checked: false } });
 presets[presets.length - 1].fire('click');
 
 // Auditoría ciega (F.1): sortear con semilla, revelar, repetir y salir.
@@ -427,6 +477,113 @@ steps.push(snapshot('reloj-fino-de-vuelta'));
 elements['replay-exit'].fire('click');
 h4.fire('click');
 
+// Fase 3.0 en replay: una operación entera, paso a paso. Es la prueba de que el
+// explorador sirve para probar la estrategia y no para leer la respuesta: antes
+// de la entrada no puede haber ni marcador ni desenlace; entre la entrada y la
+// salida la operación está abierta y el desenlace sigue sin dibujarse; y sólo
+// cuando el reloj llega a la salida aparecen la estrella o el aspa.
+function replayClock() {
+  const marca = /reloj (\d{4}-\d{2}-\d{2} \d{2}:\d{2}) UTC/.exec(elements['notes'].textContent);
+  return marca ? Math.round(Date.parse(marca[1].replace(' ', 'T') + ':00Z') / 60000) : null;
+}
+
+function avanzarHasta(minuto, tope) {
+  let dados = 0;
+  while (dados < tope) {
+    const reloj = replayClock();
+    if (reloj === null || reloj >= minuto) { return dados; }
+    elements['replay-step'].fire('click');
+    dados += 1;
+    // Fin del histórico: el paso no mueve el reloj y seguir sería un bucle.
+    if (replayClock() === reloj) { return dados; }
+  }
+  return dados;
+}
+
+const operaciones = (payload.entries && payload.entries.trades) || [];
+// Una misma señal produce hasta tres operaciones —entrada en H1, y entrada en
+// M15 con stop de M15 o de H1— y las dos de M15 entran en el MISMO minuto con
+// salidas distintas. Sus marcadores caen en la misma x, así que preguntar por
+// esa x no distingue una de otra: se sigue una entrada que no comparta minuto
+// con ninguna otra.
+const minutosDeEntrada = {};
+operaciones.forEach(function (item) {
+  minutosDeEntrada[item.xe] = (minutosDeEntrada[item.xe] || 0) + 1;
+});
+// La más corta de las que duran al menos una vela del gráfico: así hay un paso
+// con la operación abierta y el recorrido no se eterniza.
+const conSalida = operaciones
+  .filter(function (item) { return item.xx !== null && item.xx !== undefined; })
+  .filter(function (item) { return item.xx - item.xe > payload.spans[h4.dataset.tf]; })
+  .filter(function (item) { return minutosDeEntrada[item.xe] === 1; })
+  .sort(function (a, b) { return (a.xx - a.xe) - (b.xx - b.xe); });
+
+const operacion = conSalida.length ? conSalida[0] : null;
+
+if (operacion) {
+  h4.fire('click');
+  elements['replay-date'].value = new Date(operacion.xe * 60000).toISOString().slice(0, 10);
+  elements['replay-start'].fire('click');
+  // El reloj de este paso es el arranque: lo que «sólo desde el arranque» toma
+  // como frontera.
+  steps.push(snapshot('op-arranque'));
+  // Sin vela en formación cada paso es una vela entera: llegar cuesta menos
+  // pasos y el reloj es el cierre, que es lo que la comprobación mide.
+  elements['replay-forming'].fire('change', { target: { checked: false } });
+  avanzarHasta(operacion.xe, 400);
+  // Un paso atrás: el reloj queda antes de la entrada y la operación no existe.
+  elements['replay-back'].fire('click');
+  steps.push(snapshot('op-antes-de-entrar'));
+  elements['replay-step'].fire('click');
+  steps.push(snapshot('op-abierta'));
+  avanzarHasta(operacion.xx, 3000);
+  steps.push(snapshot('op-cerrada'));
+  // La capa de señales en curso se apaga y se enciende como cualquier otra.
+  elements['layer-signals'].fire('change', { target: { checked: false } });
+  steps.push(snapshot('op-sin-senales'));
+  elements['layer-signals'].fire('change', { target: { checked: true } });
+
+  // «Sólo lo reciente»: en el mismo instante, con el filtro puesto y sin él. Lo
+  // que queda es lo vivo y lo último que pasó; el resto sigue en los datos.
+  elements['layer-recent'].fire('change', { target: { checked: true } });
+  steps.push(snapshot('reciente-en-el-replay'));
+  elements['layer-recent'].fire('change', { target: { checked: false } });
+  steps.push(snapshot('reciente-apagado-en-el-replay'));
+
+  // «Sólo desde el arranque»: en el mismo instante, nada de lo que la fase 3
+  // tenía ya en marcha en la fecha elegida puede quedar dibujado.
+  elements['layer-fresh'].fire('change', { target: { checked: true } });
+  steps.push(snapshot('op-solo-desde-el-arranque'));
+  elements['layer-fresh'].fire('change', { target: { checked: false } });
+  elements['replay-exit'].fire('click');
+  steps.push(snapshot('op-fuera-del-replay'));
+
+  // Y fuera del replay manda igual, medido contra el borde de la ventana. Con
+  // el periodo completo hay años de marcas: es donde de verdad se nota.
+  presets[0].fire('click');
+  steps.push(snapshot('reciente-fuera-apagado'));
+  elements['layer-recent'].fire('change', { target: { checked: true } });
+  steps.push(snapshot('reciente-fuera-encendido'));
+  elements['layer-recent'].fire('change', { target: { checked: false } });
+  presets[presets.length - 1].fire('click');
+
+  // «Parar en eventos»: con la reproducción en marcha, el paso que abre la
+  // operación la detiene. El temporizador se queda sin efecto porque `playing`
+  // pasa a falso, que es justo lo que se comprueba.
+  elements['replay-date'].value = new Date(operacion.xe * 60000).toISOString().slice(0, 10);
+  elements['replay-start'].fire('click');
+  elements['replay-forming'].fire('change', { target: { checked: false } });
+  elements['replay-halt'].fire('change', { target: { checked: true } });
+  avanzarHasta(operacion.xe, 400);
+  elements['replay-back'].fire('click');
+  elements['replay-play'].fire('click');
+  steps.push(snapshot('halt-reproduciendo'));
+  avanzarHasta(operacion.xe, 400);
+  steps.push(snapshot('halt-en-la-entrada'));
+  elements['replay-halt'].fire('change', { target: { checked: false } });
+  elements['replay-exit'].fire('click');
+}
+
 // G.2 — el encuadre hecho a mano tiene que sobrevivir a los pasos: el zoom no se
 // rehace en cada dibujo y la ventana sólo se desplaza para seguir al presente.
 function minuteOf(text) {
@@ -474,6 +631,46 @@ elements['zoom-reset'].fire('click');
 steps.push(snapshot('replay-zoom-suelto'));
 elements['replay-exit'].fire('click');
 
+// G.3 — escalar arrastrando sobre los ejes, como en cualquier gráfico de
+// trading. La banda de la izquierda son los precios; la de abajo, las fechas.
+function arrastrarEje(desde, hasta) {
+  elements['chart'].fire('mousedown', {
+    clientX: desde[0], clientY: desde[1],
+    preventDefault() {}, stopPropagation() {},
+  });
+  fireDocument('mousemove', {
+    clientX: hasta[0], clientY: hasta[1], preventDefault() {},
+  });
+  fireDocument('mouseup', {});
+}
+
+// Con un encuadre ya tomado a mano el rango de partida es conocido, así que lo
+// que cambia el gesto se puede medir.
+zoomTo([presente - 100 * spanChart, presente], precios);
+// Un redibujo para que ese encuadre quede en la figura: `zoomTo` sólo lo
+// guarda, porque el gráfico ya está pintado como el usuario acaba de dejarlo.
+elements['layer-mid'].fire('change', { target: { checked: true } });
+elements['layer-mid'].fire('change', { target: { checked: false } });
+steps.push(snapshot('ejes-antes-de-escalar'));
+// Sobre los precios y hacia abajo: se ve más rango, las velas se hacen pequeñas.
+arrastrarEje([30, 300], [30, 450]);
+steps.push(snapshot('eje-precios-arrastrado'));
+// Sobre las fechas y hacia la izquierda: entran más velas por el mismo sitio.
+arrastrarEje([600, 700], [450, 700]);
+steps.push(snapshot('eje-fechas-arrastrado'));
+// Y el encuadre así tomado sobrevive al siguiente dibujo, como el de la rueda.
+elements['layer-mid'].fire('change', { target: { checked: true } });
+steps.push(snapshot('ejes-tras-redibujar'));
+elements['layer-mid'].fire('change', { target: { checked: false } });
+// Un arrastre en mitad del gráfico no es este gesto y no toca la escala.
+const escalados = relayoutCalls.length;
+arrastrarEje([600, 300], [500, 400]);
+steps.push(snapshot('centro-no-escala'));
+if (relayoutCalls.length !== escalados) {
+  throw new Error('arrastrar en el centro del gráfico no puede escalar los ejes');
+}
+elements['zoom-reset'].fire('click');
+
 // Fuera del replay el encuadre manual también manda: encender una capa no puede
 // devolver el gráfico a su sitio.
 zoomTo([presente - 50 * spanChart, presente], precios);
@@ -493,5 +690,8 @@ console.log(JSON.stringify({
   modeLabels: elements['mode-buttons'].children.map(function (b) { return b.textContent; }),
   modeTitles: elements['mode-buttons'].children.map(function (b) { return b.title; }),
   totalPlots: plotCalls.length,
+  // La operación que el recorrido de la fase 3 sigue paso a paso, para poder
+  // preguntar por ella y no por «alguna».
+  tradeDelReplay: operacion,
   steps: steps,
 }));
