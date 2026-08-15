@@ -64,7 +64,7 @@ class DailyTouch:
 
 @dataclass(frozen=True, slots=True)
 class Confirmation:
-    """Lo que confirmó en H1 (§1.3), con la vela cerrada que lo produjo."""
+    """Lo que confirmó en H1, con la vela cerrada que lo produjo."""
 
     kind: ConfirmationKind
     index: int
@@ -74,6 +74,20 @@ class Confirmation:
     #: Definiciones de rechazo que marcaron esa vela. Vacío si no fue un rechazo.
     #: Las tres se registran siempre: **ninguna está adoptada** (§2).
     rejections: tuple[RejectionKind, ...] = ()
+    #: Fase 3.1 — **todas** las vías que estaban disponibles en esa vela, no sólo
+    #: la que se tomó. En la 3.0 la cascada cortaba al confirmar y esa información
+    #: se perdía: sin ella no se puede decir cuántas veces coincidieron las dos
+    #: vías ni si el orden de prioridad cambia algo, y hubo que reconstruirlo a
+    #: mano después. Incluye siempre a `kind`.
+    available: tuple[ConfirmationKind, ...] = ()
+
+    @property
+    def both_available(self) -> bool:
+        """Las dos vías de la 3.1 cayeron en la misma vela."""
+        return (
+            ConfirmationKind.TURTLE_SOUP in self.available
+            and ConfirmationKind.OB_H1 in self.available
+        )
 
 
 @dataclass(frozen=True, slots=True)

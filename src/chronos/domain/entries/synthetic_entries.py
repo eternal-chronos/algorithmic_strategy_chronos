@@ -96,6 +96,72 @@ M15_LOOSE_UP: tuple[Candle, ...] = (
     (1999.50, 2004.00, 1999.00, 2003.50),  # m3 verde · 2004 > 2003: CONFIRMA el OB suelto
 )
 
+# --- Fase 3.1, vía 1: el turtle soup de H1 -----------------------------------
+#
+# Cuatro series de dos o tres velas de H1. Todas arrancan con la misma primera
+# vela —mecha inferior hasta 1995— para que lo único que cambie entre los casos
+# sea la SEGUNDA, que es la que decide. El extremo a rechazar es siempre 1995.
+
+#: Caso 1. Turtle soup limpio: la segunda baja a 1994,50 —alcanza el extremo de
+#: la mecha de la primera— y cierra en 1999, por encima de él. **Confirma.**
+H1_TURTLE_CLEAN_UP: tuple[Candle, ...] = (
+    (2000.00, 2001.00, 1995.00, 2000.50),  # t0 verde · mecha inferior hasta 1995
+    (2000.50, 2001.00, 1994.50, 1999.00),  # t1 rojo  · llega a 1995 y cierra encima
+)
+
+#: Caso 2. La segunda **supera** el extremo con el cierre: 1994 queda por debajo
+#: de 1995. Eso no es un rechazo, es una rotura. **No confirma.**
+H1_TURTLE_BREAKS_UP: tuple[Candle, ...] = (
+    (2000.00, 2001.00, 1995.00, 2000.50),
+    (2000.50, 2001.00, 1993.00, 1994.00),  # t1 · cierra POR DEBAJO de 1995
+)
+
+#: Caso 3. La segunda **no llega**: su mínimo se queda en 1996. **No confirma.**
+H1_TURTLE_SHORT_UP: tuple[Candle, ...] = (
+    (2000.00, 2001.00, 1995.00, 2000.50),
+    (2000.50, 2002.00, 1996.00, 2001.00),  # t1 · 1996 > 1995: no lo alcanza
+)
+
+#: Caso 4. Las dos velas **no son consecutivas**: entre la que deja la mecha y la
+#: que baja a buscarla hay una tercera, y esa tercera no tiene mecha inferior. El
+#: patrón se evalúa sobre t1 y t2, no sobre t0 y t2. **No confirma.**
+H1_TURTLE_GAPPED_UP: tuple[Candle, ...] = (
+    (2000.00, 2001.00, 1995.00, 2000.50),  # t0 · deja la mecha hasta 1995
+    (2000.50, 2003.00, 2000.50, 2002.50),  # t1 · en medio, y SIN mecha inferior
+    (2002.50, 2003.00, 1994.00, 2001.00),  # t2 · baja a 1994, pero la mecha es de t0
+)
+
+#: El mismo caso 1 con la primera vela **sin mecha superior**: cierra en su
+#: máximo. Existe para comprobar que el patrón mira la mecha del lado que toca y
+#: no la que tenga más cerca: en alcista confirma igual que el caso 1, y en
+#: bajista no hay ni extremo que rechazar.
+#:
+#: Hace falta como serie aparte porque una misma pareja de velas PUEDE ser turtle
+#: soup en las dos direcciones a la vez —si la primera deja mecha por arriba y
+#: por abajo y la segunda va a buscar las dos—, y eso no es un fallo: es lo que
+#: la definición dice. Sin una serie de un solo lado, la comprobación de que cada
+#: dirección mira su mecha no se podría escribir.
+H1_TURTLE_ONE_SIDED_UP: tuple[Candle, ...] = (
+    (2000.00, 2000.50, 1995.00, 2000.50),  # t0 · cierra en su máximo: sin mecha arriba
+    (2000.50, 2001.00, 1994.50, 1999.00),  # t1 · llega a 1995 y cierra encima
+)
+H1_TURTLE_ONE_SIDED_DOWN: tuple[Candle, ...] = mirror(
+    H1_TURTLE_ONE_SIDED_UP, MIRROR_CENTRE
+)
+
+#: Caso 10, la versión bajista. No se escribe a mano: es el espejo.
+H1_TURTLE_CLEAN_DOWN: tuple[Candle, ...] = mirror(H1_TURTLE_CLEAN_UP, MIRROR_CENTRE)
+H1_TURTLE_BREAKS_DOWN: tuple[Candle, ...] = mirror(H1_TURTLE_BREAKS_UP, MIRROR_CENTRE)
+H1_TURTLE_SHORT_DOWN: tuple[Candle, ...] = mirror(H1_TURTLE_SHORT_UP, MIRROR_CENTRE)
+H1_TURTLE_GAPPED_DOWN: tuple[Candle, ...] = mirror(H1_TURTLE_GAPPED_UP, MIRROR_CENTRE)
+
+#: El extremo que la segunda vela tiene que alcanzar y no superar, en las series
+#: alcistas y en sus espejos. Va aquí para que el esperado del test no lo
+#: recalcule: si el espejo se moviera, el test tiene que fallar.
+TURTLE_EXTREME_UP = 1995.00
+TURTLE_EXTREME_DOWN = 2 * MIRROR_CENTRE - TURTLE_EXTREME_UP
+
+
 #: Las mismas historias del revés (§8.10). No se escriben a mano a propósito.
 H4_RETEST_DOWN: tuple[Candle, ...] = mirror(H4_RETEST_UP, MIRROR_CENTRE)
 H4_NO_RETEST_DOWN: tuple[Candle, ...] = mirror(H4_NO_RETEST_UP, MIRROR_CENTRE)
@@ -223,6 +289,16 @@ def explode_all(candles: tuple[Candle, ...], parts: int) -> tuple[Candle, ...]:
 
 
 __all__ = [
+    "H1_TURTLE_BREAKS_DOWN",
+    "H1_TURTLE_BREAKS_UP",
+    "H1_TURTLE_CLEAN_DOWN",
+    "H1_TURTLE_CLEAN_UP",
+    "H1_TURTLE_GAPPED_DOWN",
+    "H1_TURTLE_GAPPED_UP",
+    "H1_TURTLE_ONE_SIDED_DOWN",
+    "H1_TURTLE_ONE_SIDED_UP",
+    "H1_TURTLE_SHORT_DOWN",
+    "H1_TURTLE_SHORT_UP",
     "H4_NO_RETEST_DOWN",
     "H4_NO_RETEST_UP",
     "H4_ORDER_BLOCK_BROKEN_DOWN",
@@ -244,6 +320,8 @@ __all__ = [
     "M15_LOOSE_DOWN",
     "M15_LOOSE_UP",
     "SYNTHETIC_ENTRY_START",
+    "TURTLE_EXTREME_DOWN",
+    "TURTLE_EXTREME_UP",
     "explode",
     "explode_all",
 ]

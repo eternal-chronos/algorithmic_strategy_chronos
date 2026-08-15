@@ -271,6 +271,7 @@ def _draw(
     zones: ZonesRun | None = None,
     cascade: CascadeRun | None = None,
     execution: ExecutionRun | None = None,
+    lost: Sequence[object] = (),
 ) -> dict:
     node = shutil.which("node")
     if node is None:
@@ -286,6 +287,7 @@ def _draw(
                 zones=zones,
                 cascade=cascade,
                 execution=execution,
+                lost=lost,
             ),
             default=str,
         ),
@@ -1504,7 +1506,14 @@ def test_sin_cascada_el_payload_no_declara_las_capas(run: ImpulseRun) -> None:
     payload = build_payload(run)
 
     assert payload["hasEntries"] is False
-    assert payload["entries"] == {"trades": [], "discarded": [], "rejections": []}
+    assert payload["entries"] == {
+        "trades": [],
+        "discarded": [],
+        "rejections": [],
+        "turtle": [],
+        "lost": [],
+    }
+    assert payload["confirm"] is None
 
 
 def test_cada_operacion_viaja_con_su_historia_entera(
@@ -1676,6 +1685,121 @@ def test_los_rechazos_nacen_apagados_y_se_pueden_encender(
 
     assert not any(nombre.startswith("Rechazo") for nombre in apagados)
     assert any(nombre.startswith("Rechazo") for nombre in encendidos), encendidos
+
+
+# --- Fase 3.1: el turtle soup y lo que la 3.0 tomaba y la 3.1 descarta -------
+
+
+@pytest.fixture
+def lost_run(zoned_run: ImpulseRun) -> tuple[CascadeRun, ExecutionRun, tuple]:
+    """Las dos corridas sobre la fixture sintética, con lo que la 3.1 pierde."""
+    from chronos.application.entries.comparison import lost_confirmations
+    from chronos.domain.entries.enums import ConfirmMode
+    from chronos.domain.instrument import InstrumentSpec
+    from tests.conftest import make_m1_history
+
+    zones = detect_zones(
+        zoned_run, replace(zoned_run.config, zones=ZonesConfig(enabled=True))
+    )
+    entries = EntriesConfig(enabled=True, allow_missing_ask=True)
+    m15 = zoned_run.chart_bars.get(M15)
+    cascade = build_cascade(zoned_run, zones, m15, entries)
+    v30 = build_cascade(
+        zoned_run, zones, m15, replace(entries, confirm_mode=ConfirmMode.V30_TRES_VIAS)
+    )
+    execution = M1Executor(
+        make_m1_history(weeks=16),
+        InstrumentSpec(symbol="XAUUSD"),
+        entries,
+        has_ask=False,
+    ).execute(cascade)
+    return cascade, execution, lost_confirmations(v30, cascade)
+
+
+def test_el_payload_declara_el_modo_y_el_censo_de_turtle_soup(
+    zoned_run: ImpulseRun, cascade_run: tuple[CascadeRun, ExecutionRun]
+) -> None:
+    """Sin el censo, la capa daría a entender que el patrón sólo ocurre en zona."""
+    cascade, execution = cascade_run
+    payload = build_payload(zoned_run, cascade=cascade, execution=execution)
+
+    assert payload["confirm"]["mode"] == "v31_dos_vias"
+    assert payload["confirm"]["priority"] == "turtle_primero"
+    assert set(payload["confirm"]["census"]) == {"alcista", "bajista"}
+    assert sum(payload["confirm"]["census"].values()) >= len(payload["entries"]["turtle"])
+
+
+def test_cada_turtle_soup_viaja_con_su_motivo_y_su_extremo(
+    zoned_run: ImpulseRun, cascade_run: tuple[CascadeRun, ExecutionRun]
+) -> None:
+    """Se dibujan CONFIRMEN O NO, así que cada marca tiene que decir qué le pasó."""
+    cascade, execution = cascade_run
+    payload = build_payload(zoned_run, cascade=cascade, execution=execution)
+
+    assert len(payload["entries"]["turtle"]) == len(cascade.turtle_soups)
+    for record in payload["entries"]["turtle"]:
+        assert record["r"] in ("confirma", "gana_el_ob", "fuera_de_zona")
+        assert record["d"] in ("alcista", "bajista")
+        assert isinstance(record["y"], float)
+
+
+def test_lo_que_la_30_tomaba_viaja_con_la_via_de_antes(
+    zoned_run: ImpulseRun, lost_run: tuple[CascadeRun, ExecutionRun, tuple]
+) -> None:
+    """Es lo primero que el propietario quiere auditar: por dónde entraba antes."""
+    cascade, execution, lost = lost_run
+    if not lost:
+        pytest.skip("la fixture sintética no pierde ninguna confirmación")
+    payload = build_payload(
+        zoned_run, cascade=cascade, execution=execution, lost=lost
+    )
+
+    assert len(payload["entries"]["lost"]) == len(lost)
+    for record in payload["entries"]["lost"]:
+        assert record["v30"] in ("id_h1", "ob_h1", "rechazo")
+        # La marca va donde la 3.0 CONFIRMABA, nunca antes del contacto.
+        assert record["xc"] <= record["x"]
+
+
+def test_las_dos_capas_de_la_31_nacen_encendidas_y_se_apagan(
+    zoned_run: ImpulseRun,
+    lost_run: tuple[CascadeRun, ExecutionRun, tuple],
+    tmp_path: Path,
+) -> None:
+    """Son lo que esta fase cambia: si no se dibujaran de salida, no se auditarían."""
+    cascade, execution, lost = lost_run
+    if not cascade.turtle_soups or not lost:
+        pytest.skip("la fixture sintética no produjo turtle soup ni pérdidas")
+    resultado = _draw(
+        zoned_run, tmp_path, cascade=cascade, execution=execution, lost=lost
+    )
+
+    encendidas = _trace_names(_step(resultado, "entradas-por-defecto"))
+    sin_turtle = _trace_names(_step(resultado, "sin-turtle"))
+    sin_nada = _trace_names(_step(resultado, "sin-turtle-ni-perdidas"))
+
+    assert any(nombre.startswith("Turtle soup") for nombre in encendidas), encendidas
+    assert any("3.1 no" in nombre for nombre in encendidas), encendidas
+    assert not any(nombre.startswith("Turtle soup") for nombre in sin_turtle)
+    assert any("3.1 no" in nombre for nombre in sin_turtle)
+    assert not any("3.1 no" in nombre for nombre in sin_nada)
+
+
+def test_el_estado_dice_que_esta_ensenando_la_fase_31(
+    zoned_run: ImpulseRun,
+    lost_run: tuple[CascadeRun, ExecutionRun, tuple],
+    tmp_path: Path,
+) -> None:
+    """Una capa nueva sin texto de estado deja al propietario adivinando."""
+    cascade, execution, lost = lost_run
+    resultado = _draw(
+        zoned_run, tmp_path, cascade=cascade, execution=execution, lost=lost
+    )
+    notas = _step(resultado, "entradas-por-defecto")["notes"]
+
+    assert "FASE 3.1" in notas
+    assert "turtle soup" in notas
+    assert "TODA la serie de H1" in notas
 
 
 # --- Fase 3.0 · el replay como PRUEBA, no como respuesta ---------------------

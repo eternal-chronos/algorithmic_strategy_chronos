@@ -379,6 +379,12 @@ def trades_table(trades: Sequence[Trade]) -> pd.DataFrame:
             "desenlace_zona": trade.outcome_kind.value,
             "contexto_diario": trade.daily.value,
             "confirmacion": trade.signal.confirmation.kind.value,
+            #: Fase 3.1 — **todas** las vías disponibles en la vela que confirmó,
+            #: no sólo la que se tomó. Es lo que permite contar coincidencias y
+            #: medir si `CONFIRM_PRIORITY` cambia algo sin recorrer H1 otra vez.
+            "vias_disponibles": "|".join(
+                kind.value for kind in trade.signal.confirmation.available
+            ),
             "entrada_en": trade.entry_timeframe.value,
             "stop_en": trade.stop_zone.value,
             "ts_contacto": observation.ts_contact,

@@ -84,6 +84,12 @@
     trades: true,
     discardedSignals: true,
     rejections: false,
+    /* Fase 3.1. El turtle soup —la vía 1— dibujado CONFIRME O NO, y las señales
+     * que la 3.0 tomaba y la 3.1 descarta. Las dos nacen encendidas: son
+     * exactamente lo que esta fase cambia, y son lo primero que hay que
+     * auditar. Sin cascada en la corrida, las casillas ni se enseñan. */
+    turtle: true,
+    lost: true,
     /* La señal mientras está viva, sólo durante el replay: del contacto con la
      * zona hasta que entra o muere. Nace encendida porque es el tramo en el que
      * el propietario decidiría, que es lo que el replay viene a comparar. */
@@ -1078,7 +1084,14 @@
 
   function hasEntries() { return DATA.hasEntries === true; }
 
-  function entries() { return DATA.entries || { trades: [], discarded: [], rejections: [] }; }
+  function entries() {
+    return DATA.entries ||
+      { trades: [], discarded: [], rejections: [], turtle: [], lost: [] };
+  }
+
+  /* Fase 3.1: qué vías corrieron y cuántos turtle soup hay en toda la serie. El
+   * explorador lo enseña en el estado; no lo calcula. */
+  function confirm() { return DATA.confirm || null; }
 
   /* Hasta qué minuto se ha visto el mercado, para la fase 3. Fuera del replay es
    * el borde de la ventana y no cambia nada; dentro es el RELOJ FINO (`state.at`)
@@ -1375,6 +1388,86 @@
         symbol: items.map(rejectionSymbol),
         size: 10, color: COLORS.ink, opacity: 0.75,
         line: { color: COLORS.surface, width: 1 }
+      }
+    }];
+  }
+
+  /* Fase 3.1, vía 1: los TURTLE SOUP que la cascada miró, CONFIRMEN O NO. El
+   * símbolo dice qué le pasó a cada uno —relleno si confirmó, hueco si no— y el
+   * globo dice por qué. Dibujarlos sólo cuando confirman escondería justo la
+   * mitad que permite juzgar la regla: los que aparecieron y no sirvieron.
+   *
+   * Se dibujan sobre el extremo de la mecha de la primera vela, que es el nivel
+   * que la segunda va a buscar y no consigue superar con el cierre. */
+  function turtleTraces(range) {
+    if (blindfolded() || !state.turtle || !hasEntries()) { return []; }
+    var edges = window_(range);
+    var items = entries().turtle.filter(function (item) {
+      return known(item.x, edges);
+    });
+    if (!items.length) { return []; }
+    return [{
+      type: "scatter", mode: "markers", name: "Turtle soup (vía 1)",
+      x: items.map(function (item) { return iso(item.x); }),
+      y: items.map(function (item) { return item.y; }),
+      text: items.map(function (item) {
+        return "<b>TURTLE SOUP</b> · " + item.d + "<br>" + stamp(item.x) +
+          "<br>extremo rechazado: " + price(item.y) +
+          "<br>ID " + item.id + " de H4 · zona " + item.z +
+          "<br><b>" + turtleCaption(item.r) + "</b>";
+      }),
+      hoverinfo: "text", hoverlabel: { align: "left" },
+      marker: {
+        symbol: items.map(function (item) {
+          return item.r === "confirma" ? "star-triangle-up" : "star-triangle-up-open";
+        }),
+        size: 11,
+        color: items.map(function (item) {
+          return item.d === "alcista" ? COLORS.bullish : COLORS.bearish;
+        }),
+        line: { color: COLORS.surface, width: 1 }
+      }
+    }];
+  }
+
+  function turtleCaption(reason) {
+    if (reason === "confirma") { return "confirmó la entrada"; }
+    if (reason === "gana_el_ob") {
+      return "las dos vías a la vez: CONFIRM_PRIORITY dio el OB";
+    }
+    return "no confirmó: el precio ya no estaba dentro de la zona de H4";
+  }
+
+  /* Fase 3.1: las señales que la 3.0 TOMABA y la 3.1 DESCARTA, con la vía por la
+   * que confirmaban antes. Es lo primero que el propietario quiere auditar: sin
+   * esta capa, el cambio de la fase se vería sólo como un número más pequeño en
+   * el embudo y no como velas concretas sobre el gráfico.
+   *
+   * Van en el minuto en que la 3.0 CONFIRMABA, que es donde la fase anterior
+   * habría entrado, y no en el del contacto ni en el de la muerte. */
+  function lostTraces(range) {
+    if (blindfolded() || !state.lost || !hasEntries()) { return []; }
+    var edges = window_(range);
+    var items = entries().lost.filter(function (item) { return known(item.x, edges); });
+    if (!items.length) { return []; }
+    return [{
+      type: "scatter", mode: "markers", name: "La 3.0 entraba aquí · la 3.1 no",
+      x: items.map(function (item) { return iso(item.x); }),
+      y: items.map(function (item) { return item.y; }),
+      text: items.map(function (item) {
+        return "<b>CONFIRMABA EN LA 3.0 · YA NO</b> · " + item.d +
+          "<br>vía de la 3.0: <b>" + item.v30 + "</b>" +
+          "<br>confirmaba " + stamp(item.x) +
+          "<br>ID " + item.id + " de H4 · zona " + item.z +
+          " [" + price(item.zi) + ", " + price(item.zo) + "]" +
+          "<br>desenlace de la zona: " + item.oc +
+          "<br>contacto " + stamp(item.xc) +
+          (item.rail ? "<br>ahora muere en: " + item.rail : "<br>ahora sigue viva");
+      }),
+      hoverinfo: "text", hoverlabel: { align: "left" },
+      marker: {
+        symbol: "x-thin", size: 11, color: COLORS.muted,
+        line: { color: COLORS.muted, width: 2 }
       }
     }];
   }
@@ -1771,6 +1864,8 @@
       // taparla con una línea de contexto sería enterrar el asunto.
       .concat(discardedTraces(range))
       .concat(rejectionTraces(range))
+      .concat(lostTraces(range))
+      .concat(turtleTraces(range))
       .concat(signalTraces(range))
       .concat(tradeTraces(range));
 
@@ -1882,6 +1977,28 @@
         (state.trades ? "" : " (capa de operaciones APAGADA)") +
         (state.discardedSignals ? "" : " (capa de descartadas APAGADA)") +
         (state.rejections ? "" : " · rechazos ocultos: enciéndelos para ver qué definición marca cada uno");
+      // Fase 3.1: lo que esta fase cambia se dice aquí, con nombre y recuento.
+      // Un explorador que enseñara las capas nuevas sin decir qué son deja al
+      // propietario adivinando qué está mirando.
+      var patrones = alcance.turtle.filter(function (item) {
+        return known(item.x, edges);
+      });
+      var confirmados = patrones.filter(function (item) { return item.r === "confirma"; });
+      var perdidas = alcance.lost.filter(function (item) { return known(item.x, edges); });
+      var censo = confirm() && confirm().census ? confirm().census : {};
+      var total = Object.keys(censo).reduce(function (suma, clave) {
+        return suma + censo[clave];
+      }, 0);
+      text += " · FASE 3.1 (" + (confirm() ? confirm().mode : "?") + ", orden " +
+        (confirm() ? confirm().priority : "?") + "): " +
+        patrones.length.toLocaleString("es-ES") + " turtle soup mirados a la vista (" +
+        confirmados.length.toLocaleString("es-ES") + " confirmaron)" +
+        (state.turtle ? "" : " (capa de turtle soup APAGADA)") +
+        " · " + perdidas.length.toLocaleString("es-ES") +
+        " señales que la 3.0 tomaba y la 3.1 descarta" +
+        (state.lost ? "" : " (capa APAGADA)") +
+        " · el patrón aparece " + total.toLocaleString("es-ES") +
+        " veces en TODA la serie de H1: aquí sólo se dibujan los que la cascada miró";
       // Los recuentos de arriba son los de la VENTANA, no los de lo que el
       // filtro deja pasar: «sólo lo reciente» esconde marcas, no cambia lo que
       // hubo. Por eso dice de cuántas esconde y no cambia el resumen.
@@ -2184,13 +2301,14 @@
     state.avoided = false;
   }
 
-  /* Fase 3.0, mismo criterio: sin cascada en la corrida no hay ni una operación,
-   * y tres casillas que no pueden dibujar nada sólo hacen dudar. */
+  /* Fase 3.0 y 3.1, mismo criterio: sin cascada en la corrida no hay ni una
+   * operación, y unas casillas que no pueden dibujar nada sólo hacen dudar. */
   function buildEntryLayers() {
     var group = document.getElementById("entry-layers");
     if (!group || hasEntries()) { return; }
     if (group.style) { group.style.display = "none"; }
     state.trades = state.discardedSignals = state.rejections = state.signals = false;
+    state.turtle = state.lost = false;
     state.recent = state.fresh = false;
   }
 
@@ -2318,6 +2436,8 @@
       document.getElementById("layer-trades").checked = state.trades;
       document.getElementById("layer-discarded").checked = state.discardedSignals;
       document.getElementById("layer-rejections").checked = state.rejections;
+      document.getElementById("layer-turtle").checked = state.turtle;
+      document.getElementById("layer-lost").checked = state.lost;
       document.getElementById("layer-recent").checked = state.recent;
       var signals = document.getElementById("layer-signals");
       signals.checked = state.signals;
@@ -2396,6 +2516,8 @@
       ["layer-trades", "trades"],
       ["layer-discarded", "discardedSignals"],
       ["layer-rejections", "rejections"],
+      ["layer-turtle", "turtle"],
+      ["layer-lost", "lost"],
       ["layer-signals", "signals"],
       ["layer-recent", "recent"],
       ["layer-fresh", "fresh"]

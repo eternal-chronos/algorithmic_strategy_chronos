@@ -1,7 +1,15 @@
-"""Caso de uso: la cascada de entrada de la fase 3.0 (§1).
+"""Caso de uso: la cascada de entrada (§1), con las vías de H1 de la fase 3.1.
 
     H4 es el motor. El día a día se busca ahí. El Diario es contexto: confirma y
     permite alargar, pero **nunca dispara**. H1 confirma. M15 afina.
+
+**H1 confirma por DOS vías y sólo dos** (fase 3.1): un *turtle soup* de dos velas
+consecutivas, o un ID de H1 en la dirección con su OB ya formado **al que el
+precio llega**. El ID de H1 por sí solo dejó de confirmar, y las tres
+definiciones de rechazo dejaron de ser vías: se siguen calculando y guardando en
+el CSV como columnas informativas, y ninguna regla las lee. El juego de la 3.0
+—ID, OB al nacer y rechazo en unión— sigue implementado bajo
+`CONFIRM_MODE = v30_tres_vias`, **sólo** para regresión y comparación.
 
 Aquí no se detecta ningún impulso ni se calcula ninguna zona: eso ya está hecho y
 auditado. Lo que se hace es recorrer lo que la fase 2.1 dejó y decidir cuándo hay
@@ -39,6 +47,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import StrEnum
 
 import numpy as np
 import pandas as pd
@@ -50,6 +59,8 @@ from chronos.application.structure.detect_impulses import ImpulseRun, TimeframeA
 from chronos.application.structure.zones import ImpulseZones, TimeframeZones, ZonesRun
 from chronos.domain.entries.enums import (
     ConfirmationKind,
+    ConfirmMode,
+    ConfirmPriority,
     DailyContext,
     EntryTimeframe,
     GuardRail,
@@ -70,6 +81,7 @@ from chronos.domain.entries.signal import (
     Observation,
     Signal,
 )
+from chronos.domain.entries.turtle_soup import TurtleSoup, find_turtle_soup
 from chronos.domain.entries.zone_timeline import (
     LastZoneTimeline,
     first_retest_after_break,
@@ -89,6 +101,43 @@ FUNNEL_STEPS: tuple[str, ...] = (
     "entrada_localizada_h1",
     "entrada_localizada_m15",
 )
+
+
+class TurtleReason(StrEnum):
+    """Por qué un turtle soup detectado acabó como acabó (fase 3.1, §6 visual).
+
+    El patrón se dibuja **confirme o no**, así que hace falta decir en cada marca
+    qué le pasó. Son los tres únicos finales posibles de un patrón que la cascada
+    llegó a mirar.
+    """
+
+    #: Fue la vía que confirmó esa observación.
+    CONFIRMA = "confirma"
+    #: Las dos vías cayeron en la misma vela y `CONFIRM_PRIORITY` dio el OB.
+    GANA_EL_OB = "gana_el_ob"
+    #: El patrón apareció con la observación viva pero **el precio no estaba
+    #: dentro de la zona de H4**, que es la puerta de todas las confirmaciones.
+    FUERA_DE_ZONA = "fuera_de_zona"
+
+
+@dataclass(frozen=True, slots=True)
+class TurtleSoupHit:
+    """Un turtle soup que la cascada miró, con lo que le pasó.
+
+    Se registran los que caen dentro de una ventana de observación viva: son los
+    que el motor evaluó de verdad. Los que aparecen en H1 fuera de toda
+    observación no los mira nadie, y el informe da su recuento total aparte para
+    que no parezca que el patrón sólo existe donde hay zona.
+    """
+
+    index: int
+    timestamp: datetime
+    direction: ImpulseDirection
+    extreme: float
+    reason: TurtleReason
+    #: ID de H4 de la observación que lo estaba mirando.
+    id_num: int
+    zone: ZoneKind
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,6 +160,16 @@ class CascadeRun:
     discarded: tuple[DiscardedSignal, ...] = ()
     funnel: dict[str, int] = field(default_factory=dict)
     notes: tuple[str, ...] = ()
+    #: Fase 3.1 — los turtle soup que la cascada miró, confirmen o no (§6 visual).
+    turtle_soups: tuple[TurtleSoupHit, ...] = ()
+    #: Cuántos turtle soup hay en **toda** la serie de H1, por dirección, mire o
+    #: no la cascada. Sin este recuento la capa del explorador daría a entender
+    #: que el patrón sólo ocurre donde hay zona en observación.
+    turtle_census: dict[str, int] = field(default_factory=dict)
+
+    @property
+    def mode(self) -> ConfirmMode:
+        return self.config.confirm_mode
 
     @property
     def emits_nothing(self) -> bool:
@@ -317,6 +376,21 @@ class _Cascade:
         }
         self._funnel = dict.fromkeys(FUNNEL_STEPS, 0)
         self._discarded: list[DiscardedSignal] = []
+        # Fase 3.1. El patrón se busca **una sola vez por vela y dirección** y no
+        # una por observación: dos observaciones vivas a la vez miran las mismas
+        # velas de H1, y repetir la búsqueda haría el trabajo dos veces para
+        # obtener exactamente el mismo booleano.
+        self._turtle: dict[ImpulseDirection, dict[int, TurtleSoup]] = {
+            direction: _turtle_soups(self._series[H1], direction)
+            for direction in ImpulseDirection
+        }
+        self._turtle_census = {
+            direction.value: len(found) for direction, found in self._turtle.items()
+        }
+        # Una marca por vela y dirección, no por observación: el patrón es el
+        # mismo aunque lo estén mirando dos zonas distintas, y dibujarlo dos veces
+        # en el mismo minuto sólo emborrona el gráfico.
+        self._turtle_hits: dict[tuple[int, str], TurtleSoupHit] = {}
 
     # --- Orquestación -------------------------------------------------------
 
@@ -336,6 +410,10 @@ class _Cascade:
             discarded=tuple(self._discarded),
             funnel=dict(self._funnel),
             notes=tuple(self._notes),
+            turtle_soups=tuple(
+                self._turtle_hits[key] for key in sorted(self._turtle_hits)
+            ),
+            turtle_census=dict(self._turtle_census),
         )
 
     # --- §1.1 Contexto diario -----------------------------------------------
@@ -771,18 +849,133 @@ class _Cascade:
         constitutions: Mapping[int, list[DominantImpulse]],
         blocks: Mapping[int, list[tuple[int, ImpulseDirection]]],
     ) -> None:
-        """§1.3 — con la zona en observación y el precio **dentro de ella**.
+        """Con la zona en observación y el precio **dentro de ella**, ¿confirma?
 
-        Las tres confirmaciones valen por igual y no se ordenan por calidad: se
-        toma la primera que aparece, que es la única que el propietario podría
-        haber operado. Si varias caen en la misma vela se registra la primera del
-        orden en que el §1.3 las enumera, y las tres quedan en el CSV.
+        La puerta es la misma en los dos modos y no se toca: el §1.3 pide la zona
+        de H4 en observación y el precio dentro de ella, y sólo entonces se mira
+        H1. Lo que cambia entre la 3.0 y la 3.1 es **qué** se mira después.
         """
         zone = watch.zone_at(h4_bar)
-        if not touches(zone, high, low):
-            return
         direction = watch.impulse.direction
+        turtle = self._turtle[direction].get(bar)
+        if not touches(zone, high, low):
+            # El patrón puede aparecer con la observación viva y el precio ya
+            # fuera de la zona: se dibuja igual, marcado con su motivo, porque el
+            # §6 pide ver los turtle soup detectados confirmen o no.
+            if turtle is not None:
+                self._mark_turtle(watch, turtle, clock, TurtleReason.FUERA_DE_ZONA)
+            return
 
+        if self._config.confirm_mode is ConfirmMode.V30_TRES_VIAS:
+            self._confirm_v30(
+                watch, bar, zone, direction, series, clock, constitutions, blocks
+            )
+            return
+        self._confirm_v31(watch, bar, high, low, zone, direction, series, clock, turtle)
+
+    # --- Fase 3.1: las dos vías ---------------------------------------------
+
+    def _confirm_v31(
+        self,
+        watch: _Watch,
+        bar: int,
+        high: float,
+        low: float,
+        zone: Zone,
+        direction: ImpulseDirection,
+        series: CandleSeries,
+        clock: BarClock,
+        turtle: TurtleSoup | None,
+    ) -> None:
+        """Las **dos** vías de la 3.1, con el orden de prioridad declarado.
+
+        Se evalúan las dos **siempre**, aunque la primera ya confirme: la señal
+        tiene que registrar qué vías estaban disponibles y no sólo la que se tomó.
+        En la 3.0 la cascada cortaba al confirmar y esa información se perdía.
+        """
+        at = clock.close_of(bar)
+        owner = self._h1_zone_owner(direction, at)
+        block = order_block_reached(owner, at, high, low)
+
+        available: list[ConfirmationKind] = []
+        if turtle is not None:
+            available.append(ConfirmationKind.TURTLE_SOUP)
+        if block is not None:
+            available.append(ConfirmationKind.OB_H1)
+        if not available:
+            return
+
+        kind = take_via(available, self._config.confirm_priority)
+        if turtle is not None:
+            self._mark_turtle(
+                watch,
+                turtle,
+                clock,
+                TurtleReason.CONFIRMA
+                if kind is ConfirmationKind.TURTLE_SOUP
+                else TurtleReason.GANA_EL_OB,
+            )
+        watch.confirmation = Confirmation(
+            kind=kind,
+            index=bar,
+            timestamp=at.to_pydatetime(),
+            id_num=None if owner is None else owner.id_num,
+            available=tuple(available),
+        )
+        self._funnel["confirman_en_h1"] += 1
+        # R1, R2 y R3 ya no deciden nada y se siguen calculando: son columnas
+        # informativas del CSV, para poder estudiarlas más adelante sin volver a
+        # recorrer ocho años de H1.
+        watch.rejection_marks = _marks_payload(
+            self._mark_rejections(series, bar, direction, zone)
+        )
+
+    def _mark_turtle(
+        self,
+        watch: _Watch,
+        turtle: TurtleSoup,
+        clock: BarClock,
+        reason: TurtleReason,
+    ) -> None:
+        """Apunta el patrón una vez por vela y dirección, con el mejor motivo.
+
+        El orden de `TurtleReason` es de más a menos concluyente: si una
+        observación lo confirmó, esa es la historia de esa vela, aunque otra
+        observación lo estuviera mirando desde fuera de su zona.
+        """
+        key = (turtle.index, turtle.direction.value)
+        previous = self._turtle_hits.get(key)
+        if previous is not None and _TURTLE_RANK[previous.reason] <= _TURTLE_RANK[reason]:
+            return
+        self._turtle_hits[key] = TurtleSoupHit(
+            index=turtle.index,
+            timestamp=clock.close_of(turtle.index).to_pydatetime(),
+            direction=turtle.direction,
+            extreme=turtle.extreme,
+            reason=reason,
+            id_num=watch.impulse.id_num,
+            zone=watch.kind,
+        )
+
+    # --- Fase 3.0: las tres vías, sólo para regresión ------------------------
+
+    def _confirm_v30(
+        self,
+        watch: _Watch,
+        bar: int,
+        zone: Zone,
+        direction: ImpulseDirection,
+        series: CandleSeries,
+        clock: BarClock,
+        constitutions: Mapping[int, list[DominantImpulse]],
+        blocks: Mapping[int, list[tuple[int, ImpulseDirection]]],
+    ) -> None:
+        """Las tres vías de la 3.0, tal cual estaban. **No se toca ni una línea.**
+
+        Está aquí para que el test de regresión pueda reproducir sus 1.776
+        confirmaciones y sus 3.702 operaciones exactas. Si esto se moviera, la
+        comparación de la 3.1 con la 3.0 dejaría de significar nada.
+        """
         for impulse in constitutions.get(bar, ()):
             if impulse.direction is direction:
                 watch.confirmation = Confirmation(
@@ -790,6 +983,7 @@ class _Cascade:
                     index=bar,
                     timestamp=clock.close_of(bar).to_pydatetime(),
                     id_num=impulse.id_num,
+                    available=(ConfirmationKind.ID_H1,),
                 )
                 self._funnel["confirman_en_h1"] += 1
                 return
@@ -801,15 +995,12 @@ class _Cascade:
                     index=bar,
                     timestamp=clock.close_of(bar).to_pydatetime(),
                     id_num=id_num,
+                    available=(ConfirmationKind.OB_H1,),
                 )
                 self._funnel["confirman_en_h1"] += 1
                 return
 
-        thresholds = {
-            percentile: self._percentile[direction].at(bar, percentile)
-            for percentile in self._config.rejection_grid
-        }
-        marks = mark_rejections(series, bar, direction, zone, thresholds)
+        marks = self._mark_rejections(series, bar, direction, zone)
         # **La unión**, no una definición adoptada: es el filtro más laxo posible
         # y las tres son subconjuntos suyos, así que el desglose del §5.8 puede
         # recortar la población hacia cada una sin volver a recorrer H1. Elegir
@@ -825,9 +1016,23 @@ class _Cascade:
                 for kind in RejectionKind
                 if _marked(marks, kind, self._config.rejection_grid)
             ),
+            available=(ConfirmationKind.RECHAZO,),
         )
         self._funnel["confirman_en_h1"] += 1
         watch.rejection_marks = _marks_payload(marks)
+
+    def _mark_rejections(
+        self,
+        series: CandleSeries,
+        bar: int,
+        direction: ImpulseDirection,
+        zone: Zone,
+    ) -> RejectionMarks:
+        thresholds = {
+            percentile: self._percentile[direction].at(bar, percentile)
+            for percentile in self._config.rejection_grid
+        }
+        return mark_rejections(series, bar, direction, zone, thresholds)
 
     def _constitutions_by_bar(
         self, timeframe: str
@@ -1010,6 +1215,75 @@ class _Cascade:
         )
 
 
+def take_via(
+    available: Sequence[ConfirmationKind], priority: ConfirmPriority
+) -> ConfirmationKind:
+    """Cuál de las vías disponibles se toma, con el orden declarado.
+
+    Con una sola disponible el orden no pinta nada. Con las dos hace falta un
+    criterio determinista, y el que hay es `CONFIRM_PRIORITY`: un parámetro
+    abierto, no una preferencia del motor. Que el informe cuente cuántas veces se
+    usa —y si cambia algo— depende de que esta elección esté escrita en un solo
+    sitio y se pueda leer.
+    """
+    for candidate in priority.order:
+        if candidate in available:
+            return candidate
+    raise DomainError(
+        f"Ninguna vía disponible que tomar: {[kind.value for kind in available]}"
+    )
+
+
+def order_block_reached(
+    item: ImpulseZones | None, at: pd.Timestamp, high: float, low: float
+) -> Zone | None:
+    """Vía 2 de la fase 3.1: el OB del ID de H1 **al que el precio llega**.
+
+    Tres condiciones y las tres son necesarias:
+
+    1. hay ID de H1 vigente y va en la dirección buscada —eso lo resuelve quien
+       llama, que es el único que sabe qué dirección se busca—;
+    2. su OB **está formado**: ha nacido en `at` o antes. Un ID de H1 sin OB
+       formado no confirma nada, y un OB que se confirma después no estaba ahí
+       para colocar ninguna entrada;
+    3. el precio **llega a ese OB** en esta vela. Que el OB exista no basta: la
+       3.0 confirmaba en el minuto en que nacía y eso es otra regla.
+
+    Devuelve la zona para que quien llama no tenga que volver a buscarla: es la
+    misma en la que se coloca la entrada.
+    """
+    if item is None or item.order_block is None:
+        return None
+    block = item.order_block
+    if pd.Timestamp(block.ts_birth) > at:
+        return None
+    return block if touches(block, high, low) else None
+
+
+def _turtle_soups(
+    series: CandleSeries, direction: ImpulseDirection
+) -> dict[int, TurtleSoup]:
+    """Todos los turtle soup de la serie en una dirección, por vela.
+
+    Se calcula una vez y se consulta muchas: el patrón sólo depende de dos velas
+    consecutivas, así que no cambia según qué observación lo esté mirando.
+    """
+    return {
+        index: found
+        for index in range(1, len(series))
+        if (found := find_turtle_soup(series, index, direction)) is not None
+    }
+
+
+#: De más a menos concluyente. Decide qué motivo se queda cuando dos
+#: observaciones distintas miran el mismo patrón en la misma vela.
+_TURTLE_RANK: dict[TurtleReason, int] = {
+    TurtleReason.CONFIRMA: 0,
+    TurtleReason.GANA_EL_OB: 1,
+    TurtleReason.FUERA_DE_ZONA: 2,
+}
+
+
 def _marked(marks: RejectionMarks, kind: RejectionKind, grid: Sequence[int]) -> bool:
     if kind is RejectionKind.R1_MECHA_EN_ZONA:
         return marks.r1
@@ -1034,4 +1308,13 @@ def _marks_payload(marks: RejectionMarks) -> dict[str, bool]:
     return payload
 
 
-__all__ = ["FUNNEL_STEPS", "CascadeRun", "build_cascade", "daily_context"]
+__all__ = [
+    "FUNNEL_STEPS",
+    "CascadeRun",
+    "TurtleReason",
+    "TurtleSoupHit",
+    "build_cascade",
+    "daily_context",
+    "order_block_reached",
+    "take_via",
+]

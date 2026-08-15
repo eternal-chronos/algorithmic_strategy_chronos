@@ -1,16 +1,16 @@
-"""Capturas de la fase 3.0 (§10): cada operación sobre las velas de H4.
+"""Capturas de la fase 3.1: cada operación sobre las velas de H4.
 
-Cuatro lotes, los que pide el §10:
+Cuatro lotes, los que pide la fase:
 
-  1. veinte operaciones ganadoras;
-  2. veinte perdedoras;
-  3. diez señales descartadas en **cada** guardarraíl;
-  4. los cinco arquetipos del §9.
+  1. veinte confirmaciones por **turtle soup** (vía 1);
+  2. veinte confirmaciones por **OB de H1 alcanzado** (vía 2);
+  3. veinte señales que **la 3.0 tomaba y la 3.1 descarta**;
+  4. los cinco arquetipos.
 
-Las ganadoras y las perdedoras son las **primeras cronológicamente** de cada
-clase, no una selección: elegir "las mejores" convertiría la carpeta en un
-argumento en vez de en una muestra. El criterio va escrito en el `LEEME.txt` y es
-el mismo para los dos lotes.
+Todos los lotes son los **primeros cronológicamente** de su clase, no una
+selección: elegir "los mejores" convertiría la carpeta en un argumento en vez de
+en una muestra. El criterio va escrito en el `LEEME.txt` y es el mismo para los
+cuatro.
 
 Cada imagen lleva sobreimpreso lo que hace falta para juzgarla sin abrir ningún
 CSV: la zona de H4 que se observó, el contacto, la confirmación de H1, la
@@ -33,11 +33,12 @@ import plotly.graph_objects as go
 
 from chronos.application.entries import archetypes
 from chronos.application.entries.cascade import CascadeRun
+from chronos.application.entries.comparison import LostConfirmation
 from chronos.application.entries.execution import ExecutionRun
 from chronos.application.structure.config import H4
 from chronos.application.structure.detect_impulses import ImpulseRun, TimeframeAnalysis
 from chronos.application.structure.zones import ImpulseZones, ZonesRun
-from chronos.domain.entries.enums import GuardRail, TradeOutcome
+from chronos.domain.entries.enums import ConfirmationKind
 from chronos.domain.entries.signal import DiscardedSignal, Trade
 from chronos.infrastructure.reporting import theme
 from chronos.infrastructure.reporting.impulse_captures import (
@@ -53,10 +54,9 @@ DECIMALS = 2
 #: Barras de H4 de contexto a cada lado de la ventana de la operación.
 CONTEXT_BARS = 20
 
-#: Cuántas capturas de cada lote (§10).
-WINNERS = 20
-LOSERS = 20
-PER_GUARD_RAIL = 10
+#: Cuántas capturas de cada lote.
+PER_VIA = 20
+LOST = 20
 
 #: Píxeles entre dos rótulos apilados. No es estética: sin separación fija, dos
 #: hitos de la misma vela —o dos precios a medio dólar— salen escritos encima.
@@ -83,8 +83,9 @@ def write_entry_captures(
     cascade: CascadeRun,
     execution: ExecutionRun,
     folder: Path,
+    lost: Sequence[LostConfirmation] = (),
 ) -> list[Path]:
-    """Escribe los cuatro lotes del §10 y devuelve las rutas producidas."""
+    """Escribe los cuatro lotes de la fase y devuelve las rutas producidas."""
     analysis = run.analyses.get(H4)
     zoned = zones.per_timeframe.get(H4)
     if analysis is None or zoned is None:
@@ -99,14 +100,11 @@ def write_entry_captures(
                 written,
                 _write_trade(analysis, by_id, trade, folder, f"{lot}_{position:02d}"),
             )
-    for rail, items in _discarded_lots(cascade, execution):
-        for position, item in enumerate(items, start=1):
-            _keep(
-                written,
-                _write_discarded(
-                    analysis, by_id, item, folder, f"descartada_{rail}_{position:02d}"
-                ),
-            )
+    for position, item in enumerate(lost[:LOST], start=1):
+        _keep(
+            written,
+            _write_lost(analysis, by_id, item, folder, f"perdida_{position:02d}"),
+        )
     for path in _write_archetypes(analysis, by_id, cascade, execution, folder):
         _keep(written, path)
     return written
@@ -127,29 +125,27 @@ def _keep(written: list[Path], path: Path | None) -> None:
 
 
 def _trade_lots(execution: ExecutionRun) -> list[tuple[str, list[Trade]]]:
-    """Las primeras N ganadoras y las primeras N perdedoras, cronológicamente."""
-    winners = [
-        trade for trade in execution.trades if trade.outcome is TradeOutcome.OBJETIVO
-    ]
-    losers = [
-        trade
-        for trade in execution.trades
-        if trade.outcome in (TradeOutcome.STOP, TradeOutcome.STOP_MISMA_BARRA)
-    ]
-    return [("ganadora", winners[:WINNERS]), ("perdedora", losers[:LOSERS])]
+    """Las primeras N de cada vía de confirmación, cronológicamente.
 
-
-def _discarded_lots(
-    cascade: CascadeRun, execution: ExecutionRun
-) -> list[tuple[str, list[DiscardedSignal]]]:
-    """Diez por guardarraíl. Los que no tienen ninguna se omiten y se declaran."""
-    everything = (*cascade.discarded, *execution.discarded)
-    lots = []
-    for rail in GuardRail:
-        items = [item for item in everything if item.guard_rail is rail]
-        if items:
-            lots.append((rail.value, items[:PER_GUARD_RAIL]))
-    return lots
+    Una operación por vía y no por desenlace: lo que esta fase cambia es **qué
+    confirma**, así que la muestra tiene que enseñar cada vía y no cada final.
+    Una vía sin ninguna operación sale con el lote vacío y se ve en el
+    `LEEME.txt`, que cuenta las imágenes que hay.
+    """
+    return [
+        (
+            label,
+            [
+                trade
+                for trade in execution.trades
+                if trade.signal.confirmation.kind is kind
+            ][:PER_VIA],
+        )
+        for label, kind in (
+            ("turtle", ConfirmationKind.TURTLE_SOUP),
+            ("ob", ConfirmationKind.OB_H1),
+        )
+    ]
 
 
 # --- Cómo se dibuja ----------------------------------------------------------
@@ -227,6 +223,58 @@ def _write_discarded(
         )
     _vertical(figure, labels, analysis, item.timestamp, "MUERE", STOP_COLOUR)
     path = folder / f"{name}_{item.timestamp:%Y%m%d_%H%M}.png"
+    figure.write_image(str(path), width=WIDTH, height=HEIGHT, scale=SCALE)
+    return path
+
+
+def _write_lost(
+    analysis: TimeframeAnalysis,
+    by_id: dict[int, ImpulseZones],
+    item: LostConfirmation,
+    folder: Path,
+    name: str,
+) -> Path | None:
+    """Una señal que la 3.0 tomaba y la 3.1 descarta, sobre sus velas de H4.
+
+    La ventana llega hasta donde la 3.0 **confirmaba**, que es el instante que
+    hay que auditar: ahí es donde la fase anterior habría entrado y donde el
+    propietario tiene que juzgar si echa de menos la entrada o no.
+    """
+    zoned = by_id.get(item.id_num)
+    if zoned is None:
+        return None
+    figure, _first, _last, labels = _window(
+        analysis,
+        zoned,
+        name=name,
+        title=(
+            f"H4 · ID {item.id_num} ({item.direction.value}) · "
+            f"zona {item.zone.value} · LA 3.0 ENTRABA AQUÍ · LA 3.1 NO"
+        ),
+        subtitle=(
+            f"vía de la 3.0: <b>{item.via_v30.value}</b> · "
+            f"confirmaba {item.ts_confirmation_v30:%Y-%m-%d %H:%M} UTC · "
+            f"contacto {item.ts_contact:%Y-%m-%d %H:%M} UTC · "
+            f"desenlace de la zona {item.outcome.value} · "
+            + (
+                f"en la 3.1 muere en `{item.rail_v31.value}`"
+                if item.rail_v31 is not None
+                else "en la 3.1 la observación sigue viva sin confirmar"
+            )
+        ),
+        from_index=item.index_contact,
+        until=item.ts_confirmation_v30,
+    )
+    _vertical(figure, labels, analysis, item.ts_contact, "contacto", theme.INK_MUTED)
+    _vertical(
+        figure,
+        labels,
+        analysis,
+        item.ts_confirmation_v30,
+        f"la 3.0 confirmaba ({item.via_v30.value})",
+        STOP_COLOUR,
+    )
+    path = folder / f"{name}_{item.ts_confirmation_v30:%Y%m%d_%H%M}.png"
     figure.write_image(str(path), width=WIDTH, height=HEIGHT, scale=SCALE)
     return path
 
@@ -426,4 +474,4 @@ def _trade_subtitle(trade: Trade) -> str:
     )
 
 
-__all__ = ["EntryCapture", "write_entry_captures"]
+__all__ = ["LOST", "PER_VIA", "EntryCapture", "write_entry_captures"]

@@ -18,9 +18,11 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from chronos.application.entries import comparison as entry_comparison
 from chronos.application.entries import evidence as entry_evidence
 from chronos.application.entries import metrics as entry_metrics
 from chronos.application.entries.cascade import CascadeRun, build_cascade
+from chronos.application.entries.comparison import PhaseRun
 from chronos.application.entries.config import EntriesConfig
 from chronos.application.entries.execution import (
     ExecutionRun,
@@ -64,7 +66,7 @@ from chronos.application.structure.session_audit import (
 from chronos.application.structure.statistics import summarize
 from chronos.application.structure.timezone_audit import TimezoneAudit, audit_timezone
 from chronos.application.structure.zones import ZonesRun, detect_zones
-from chronos.domain.entries.enums import EntryTimeframe
+from chronos.domain.entries.enums import ConfirmMode, EntryTimeframe
 from chronos.domain.errors import DomainError
 from chronos.domain.instrument import InstrumentSpec
 from chronos.domain.structure.enums import AnchorMode, LegStartMode, OverlapPriority
@@ -714,7 +716,7 @@ def _print_break_summary(
 @structure_app.command("entradas")
 def entries_command(
     config: Annotated[Path, typer.Option("--config", "-c")] = DEFAULT_CONFIG,
-    output: Annotated[Path, typer.Option("--salida", "-o")] = Path("now/fase30"),
+    output: Annotated[Path, typer.Option("--salida", "-o")] = Path("now/fase31"),
     captures: Annotated[bool, typer.Option("--capturas/--sin-capturas")] = True,
     explorer: Annotated[bool, typer.Option("--explorador/--sin-explorador")] = True,
     assume_bid: Annotated[
@@ -731,16 +733,19 @@ def entries_command(
     ] = False,
     skip_tz_audit: Annotated[bool, typer.Option("--skip-tz-audit")] = False,
 ) -> None:
-    """Fase 3.0: la cascada de entrada y la primera medición de resultados.
+    """Fase 3.1: la confirmación en H1, con dos vías y sólo dos.
 
-    H4 es el motor, el Diario es contexto, H1 confirma y M15 afina. Se monta
-    **sobre** la fase 2.1: el comando enciende `break_by_zone` y las zonas para
-    su propia corrida, porque con la rotura por línea las zonas no deciden nada y
-    la cascada estaría leyendo otra historia.
+    H4 es el motor, el Diario es contexto, H1 confirma y M15 afina. En H1
+    confirman **el turtle soup** y **el OB de H1 al que el precio llega**, y nada
+    más: el ID de H1 por sí solo deja de confirmar y R1, R2 y R3 dejan de ser
+    vías. Se monta **sobre** la fase 2.1: el comando enciende `break_by_zone` y
+    las zonas para su propia corrida.
 
-    Antes de nada comprueba que con las señales apagadas sale la línea base de la
-    fase 2.1 exacta. Si no sale, **para y avisa**: eso sería un bug de esta fase
-    y no un resultado de la anterior.
+    Corre las **dos** cascadas —la de la 3.1 y la de la 3.0— para poder poner las
+    columnas al lado. Antes comprueba dos líneas base: con las señales apagadas
+    tiene que salir la fase 2.1 exacta, y con `v30_tres_vias`, la fase 3.0
+    exacta. Si alguna no sale, **para y avisa**: eso sería un bug de esta fase y
+    no un resultado de la anterior.
 
     ⚠️ **No hay fichero de ask.** El §4 pide longs al ask y shorts al bid, y sólo
     está descargado el M1 del lado bid. Sin `entries.allow_missing_ask: true` el
@@ -812,9 +817,6 @@ def entries_command(
         if not ok:
             raise typer.Exit(code=1)
 
-        console.print("[dim]Cascada de entrada...[/dim]")
-        cascade = build_cascade(structure, zones, aggregated.get(M15), entries)
-        console.print("[dim]Ejecución sobre M1...[/dim]")
         executor = M1Executor(
             history.frame,
             InstrumentSpec(symbol=run_config.symbol),
@@ -829,9 +831,35 @@ def entries_command(
                 ),
             },
         )
+
+        # La corrida de la 3.0 va PRIMERO: es la que puede parar el comando, y
+        # gastar los minutos de la 3.1 para descubrir después que la
+        # refactorización está mal sería tirarlos.
+        console.print("[dim]Cascada de la fase 3.0 (regresión y comparación)...[/dim]")
+        v30_config = replace(entries, confirm_mode=ConfirmMode.V30_TRES_VIAS)
+        cascade_v30 = build_cascade(structure, zones, aggregated.get(M15), v30_config)
+        execution_v30 = executor.execute(cascade_v30)
+        trades_v30 = trades_table(execution_v30.trades)
+        previous = PhaseRun(cascade_v30, execution_v30, trades_v30)
+        v30_counts = (
+            int(cascade_v30.funnel.get("confirman_en_h1", 0)),
+            len(execution_v30.trades),
+        )
+        if not _print_v30_regression(v30_counts):
+            raise typer.Exit(code=1)
+
+        console.print("[dim]Cascada de la fase 3.1 (dos vías)...[/dim]")
+        cascade = build_cascade(structure, zones, aggregated.get(M15), entries)
         execution = executor.execute(cascade)
         trades = trades_table(execution.trades)
+
+        entry_comparison.check_observations_match(cascade_v30, cascade)
+        lost = entry_comparison.lost_confirmations(cascade_v30, cascade)
+        priority = entry_comparison.priority_effect(
+            structure, zones, aggregated.get(M15), cascade
+        )
         _print_entries_summary(cascade, execution, trades)
+        _print_vias(cascade, priority, lost)
 
         output.mkdir(parents=True, exist_ok=True)
         report = output / "reporte_entradas.txt"
@@ -844,25 +872,39 @@ def entries_command(
                 provenance=provenance,
                 regression_ok=ok,
                 regression_note=note,
+                previous=previous,
+                priority=priority,
+                lost=lost,
+                v30_regression=(
+                    f"VEREDICTO: PASA · {v30_counts[0]:,} confirmaciones y "
+                    f"{v30_counts[1]:,} operaciones, las mismas de la fase 3.0"
+                ),
             ),
             encoding="utf-8",
         )
-        evidence = entry_evidence.collect(phase21, aggregated, entries)
+        evidence = entry_evidence.collect(phase21, aggregated, entries, v30_counts)
         (output / "evidencia_entradas.txt").write_text(
             render_evidence(evidence, entry_evidence.TITLE), encoding="utf-8"
         )
         if not evidence.ok:
             console.print(
-                "\n[bold red]La evidencia de la fase 3.0 NO pasa.[/bold red] "
+                "\n[bold red]La evidencia de la fase 3.1 NO pasa.[/bold red] "
                 f"Revisa {output / 'evidencia_entradas.txt'}."
             )
         trades.to_csv(output / "operaciones.csv", index=False)
+        trades_v30.to_csv(output / "operaciones_v30.csv", index=False)
         discarded_table((*cascade.discarded, *execution.discarded)).to_csv(
             output / "descartadas.csv", index=False
+        )
+        entry_comparison.lost_detail(lost).to_csv(
+            output / "confirmaciones_perdidas.csv", index=False
         )
         console.print(f"\nInforme: [bold]{report}[/bold]")
         console.print(f"Evidencia: [bold]{output / 'evidencia_entradas.txt'}[/bold]")
         console.print(f"Operaciones: [bold]{output / 'operaciones.csv'}[/bold]")
+        console.print(
+            f"Confirmaciones perdidas: [bold]{output / 'confirmaciones_perdidas.csv'}[/bold]"
+        )
 
         if explorer:
             page = output / "explorador_entradas.html"
@@ -874,6 +916,7 @@ def entries_command(
                     zones=zones,
                     cascade=cascade,
                     execution=execution,
+                    lost=lost,
                 ),
                 encoding="utf-8",
             )
@@ -881,14 +924,16 @@ def entries_command(
 
         if captures:
             console.print("[dim]Capturas (Kaleido abre un navegador por imagen)...[/dim]")
-            written = write_entry_captures(structure, zones, cascade, execution, output)
+            written = write_entry_captures(
+                structure, zones, cascade, execution, output, lost=lost
+            )
             console.print(f"  [dim]{len(written)} capturas en {output}[/dim]")
         # El índice cuenta las imágenes que HAY en la carpeta, no las que esta
         # corrida acaba de escribir: con `--sin-capturas` se regenera el informe
         # sobre las que ya estaban, y decir "0 capturas" sería mentir.
         present = sorted(path.name for path in output.glob("*.png"))
         (output / "LEEME.txt").write_text(
-            render_archetype_index(cascade, execution, present),
+            render_archetype_index(cascade, execution, present, lost),
             encoding="utf-8",
         )
         console.print(f"Índice: [bold]{output / 'LEEME.txt'}[/bold]")
@@ -970,6 +1015,68 @@ def _print_entries_regression(
             "fase 2.1. Eso es un bug de esta fase, no un resultado de la anterior."
         )
     return ok, note
+
+
+def _print_v30_regression(counts: tuple[int, int]) -> bool:
+    """Con `v30_tres_vias` tienen que salir los números de la fase 3.0 exactos.
+
+    Es el guardarraíl de la refactorización de esta fase: si no salen, lo que se
+    esté comparando después no es "la 3.0 contra la 3.1" sino un bug contra otra
+    cosa. Por eso el comando **para**.
+    """
+    expected = (entry_evidence.PHASE30_CONFIRMATIONS, entry_evidence.PHASE30_TRADES)
+    ok = counts == expected
+    table = Table(box=None, pad_edge=False)
+    table.add_column("Concepto", style="dim")
+    table.add_column("Esperado", justify="right")
+    table.add_column("Obtenido", justify="right")
+    table.add_column("", justify="left")
+    for label, want, got in (
+        ("confirman_en_h1", expected[0], counts[0]),
+        ("se_ejecutan", expected[1], counts[1]),
+    ):
+        table.add_row(
+            label,
+            f"{want:,}",
+            f"{got:,}",
+            "[green]igual[/green]" if want == got else "[bold red]DISTINTO[/bold red]",
+        )
+    console.print("\n[bold]Regresión con `CONFIRM_MODE = v30_tres_vias`:[/bold]")
+    console.print(table)
+    if not ok:
+        console.print(
+            "\n[bold red]PARADA.[/bold red] El modo de la fase 3.0 ya no reproduce "
+            "la fase 3.0. Eso es un bug en la refactorización de la 3.1, no un "
+            "resultado: la comparación entre las dos fases no significaría nada."
+        )
+    return ok
+
+
+def _print_vias(
+    cascade: CascadeRun,
+    priority: entry_comparison.PriorityEffect,
+    lost: Sequence[entry_comparison.LostConfirmation],
+) -> None:
+    """Las dos vías, lo que el orden cambia y lo que la 3.1 deja de tomar."""
+    table = Table(box=None, pad_edge=False)
+    table.add_column("Vía de confirmación", style="dim")
+    table.add_column("n", justify="right")
+    table.add_column("%", justify="right")
+    table.add_column("con la otra disponible", justify="right")
+    for row in entry_comparison.confirmations_by_via(cascade).to_dict("records"):
+        table.add_row(
+            str(row["via"]),
+            f"{int(row['n']):,}",
+            f"{float(row['pct']):.1%}",
+            f"{int(row['con_la_otra_via_disponible']):,}",
+        )
+    console.print("\n[bold]Confirmaciones por vía (fase 3.1):[/bold]")
+    console.print(table)
+    console.print(f"[dim]{priority.describe()}[/dim]")
+    console.print(
+        f"[dim]{len(lost):,} observaciones confirmaban en la 3.0 y ahora no "
+        "confirman por ninguna de las dos vías.[/dim]"
+    )
 
 
 def _print_entries_summary(

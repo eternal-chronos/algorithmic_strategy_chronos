@@ -36,14 +36,56 @@ class RejectionKind(StrEnum):
 
 
 class ConfirmationKind(StrEnum):
-    """Qué confirmó en H1 (§1.3). Las tres valen por igual; no se ordenan."""
+    """Qué confirmó en H1.
 
-    #: Se constituye un ID de H1 en la dirección buscada.
-    ID_H1 = "id_h1"
-    #: Se forma un OB de H1 en la dirección buscada.
+    La fase 3.1 deja **dos** vías vivas —`TURTLE_SOUP` y `OB_H1`— y conserva las
+    otras dos sólo para poder reproducir la 3.0 en regresión. Cuál de los dos
+    juegos se usa lo decide `ConfirmMode`, y no se mezclan nunca en una corrida.
+    """
+
+    #: 3.1, vía 1. Dos velas de H1 consecutivas: la primera deja mecha y la
+    #: segunda llega a ella y cierra sin superarla.
+    TURTLE_SOUP = "turtle_soup"
+    #: 3.1, vía 2. Hay ID de H1 en la dirección, su OB está formado y **el precio
+    #: llega a ese OB**. En la 3.0 bastaba con que el OB naciera.
     OB_H1 = "ob_h1"
-    #: Aparece un rechazo, en cualquiera de sus tres definiciones.
+    #: 3.0 solamente. Se constituye un ID de H1 en la dirección buscada. Un ID por
+    #: sí solo no confirma nada en la 3.1.
+    ID_H1 = "id_h1"
+    #: 3.0 solamente. Un rechazo en cualquiera de sus tres definiciones, en unión.
+    #: R1, R2 y R3 se siguen calculando y persistiendo, pero ya no deciden nada.
     RECHAZO = "rechazo"
+
+
+class ConfirmMode(StrEnum):
+    """Qué juego de vías de confirmación corre (fase 3.1).
+
+    `v30_tres_vias` **no es una variante del proyecto**: se conserva para el test
+    de regresión y para poder poner las dos columnas una al lado de la otra.
+    """
+
+    #: Las tres de la 3.0: ID de H1, OB de H1 al nacer, y rechazo en unión.
+    V30_TRES_VIAS = "v30_tres_vias"
+    #: Las dos de la 3.1: turtle soup y OB de H1 alcanzado por el precio.
+    V31_DOS_VIAS = "v31_dos_vias"
+
+
+class ConfirmPriority(StrEnum):
+    """Cuál manda si las dos vías caen en la misma vela de H1.
+
+    Hace falta un orden determinista y el propietario no lo ha fijado, así que se
+    declara como parámetro abierto y el informe cuenta cuántas veces coinciden y
+    en cuántas el orden cambia el resultado.
+    """
+
+    TURTLE_PRIMERO = "turtle_primero"
+    OB_PRIMERO = "ob_primero"
+
+    @property
+    def order(self) -> tuple[ConfirmationKind, ConfirmationKind]:
+        if self is ConfirmPriority.TURTLE_PRIMERO:
+            return (ConfirmationKind.TURTLE_SOUP, ConfirmationKind.OB_H1)
+        return (ConfirmationKind.OB_H1, ConfirmationKind.TURTLE_SOUP)
 
 
 class EntryTimeframe(StrEnum):
@@ -77,7 +119,7 @@ class GuardRail(StrEnum):
     OB_ROTO = "ob_roto"
     #: El ID de H4 murió por el otro lado antes de que la observación diera nada.
     ID_H4_MUERTO = "id_h4_muerto"
-    #: Nunca apareció ninguna de las tres confirmaciones de H1.
+    #: Nunca apareció ninguna de las vías de confirmación de H1 del modo activo.
     SIN_CONFIRMACION_H1 = "sin_confirmacion_h1"
     #: Confirmó en H1 pero el ID de H1 no tenía OB con el que colocar la entrada.
     SIN_OB_H1 = "sin_ob_h1"

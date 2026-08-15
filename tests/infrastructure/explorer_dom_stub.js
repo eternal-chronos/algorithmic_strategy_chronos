@@ -61,6 +61,7 @@ function declare(id) {
  'from', 'to', 'layer-limbo', 'layer-marks', 'layer-contacts', 'layer-mid', 'layer-wrong',
  'zone-layers', 'layer-zones-ul', 'layer-zones-ob',
  'entry-layers', 'layer-trades', 'layer-discarded', 'layer-rejections', 'layer-signals',
+ 'layer-turtle', 'layer-lost',
  'layer-recent', 'layer-fresh',
  'break-layers', 'layer-avoided',
  'blind-seed', 'blind-start', 'blind-reveal', 'blind-exit',
@@ -340,6 +341,18 @@ steps.push(snapshot('entradas-apagadas'));
 elements['layer-trades'].fire('change', { target: { checked: true } });
 elements['layer-discarded'].fire('change', { target: { checked: true } });
 elements['layer-rejections'].fire('change', { target: { checked: false } });
+
+// Fase 3.1: las dos capas nuevas —el turtle soup y las señales que la 3.0 tomaba
+// y la 3.1 descarta— encendidas y apagadas por separado. Nacen encendidas, así
+// que el recorrido las apaga primero: si no se dibujaran de salida, el paso
+// `sin-turtle` saldría igual que `entradas-por-defecto` y no comprobaría nada.
+elements['layer-turtle'].fire('change', { target: { checked: false } });
+steps.push(snapshot('sin-turtle'));
+elements['layer-lost'].fire('change', { target: { checked: false } });
+steps.push(snapshot('sin-turtle-ni-perdidas'));
+elements['layer-turtle'].fire('change', { target: { checked: true } });
+steps.push(snapshot('turtle-sin-perdidas'));
+elements['layer-lost'].fire('change', { target: { checked: true } });
 presets[presets.length - 1].fire('click');
 
 // Auditoría ciega (F.1): sortear con semilla, revelar, repetir y salir.

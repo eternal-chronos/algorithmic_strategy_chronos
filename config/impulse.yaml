@@ -241,9 +241,33 @@ zones:
 entries:
   enabled: false
 
-  # PENDIENTE (§2). Percentil de `R2_mecha_dominante`. LOS TRES DE LA REJILLA SE
-  # CALCULAN SIEMPRE y el informe los desglosa; éste es sólo el que encabeza los
-  # resúmenes. No se ha elegido optimizando y no se recomienda ninguno.
+  # FASE 3.1. Qué vías confirman en H1.
+  #
+  #   v31_dos_vias   las DOS del proyecto, y sólo dos:
+  #                  1. turtle soup: dos velas de H1 consecutivas, la primera
+  #                     deja mecha y la segunda llega a ella y cierra sin
+  #                     superarla. Sin parámetros ni umbrales.
+  #                  2. ID de H1 en la dirección con su OB YA FORMADO y el
+  #                     precio llegando a ese OB. La entrada va en ese OB. Un ID
+  #                     de H1 sin OB formado no confirma nada.
+  #   v30_tres_vias  las tres de la fase 3.0 —ID de H1, OB al nacer y rechazo en
+  #                  unión—. SE CONSERVA SÓLO PARA REGRESIÓN Y COMPARACIÓN: no
+  #                  es una variante del proyecto y no hay que elegirla.
+  #
+  # R1, R2 y R3 dejaron de decidir entradas en la 3.1. Se siguen calculando y
+  # persistiendo como columnas informativas del CSV para poder estudiarlas más
+  # adelante sin recalcular el histórico.
+  confirm_mode: v31_dos_vias
+
+  # PENDIENTE. Cuál manda si las DOS vías caen en la misma vela de H1. Hace falta
+  # un orden determinista y el propietario no lo ha fijado; el informe cuenta
+  # cuántas veces coinciden y en cuántas el orden cambia el resultado.
+  # Valores: turtle_primero | ob_primero
+  confirm_priority: turtle_primero
+
+  # PENDIENTE (§2). Percentil de `R2_mecha_dominante`. YA NO DECIDE NINGUNA
+  # ENTRADA: los tres de la rejilla se calculan siempre y viajan al CSV como
+  # columnas informativas. No se ha elegido optimizando y no se recomienda ninguno.
   rejection_percentile: 75
   rejection_grid: [60, 75, 90]
 

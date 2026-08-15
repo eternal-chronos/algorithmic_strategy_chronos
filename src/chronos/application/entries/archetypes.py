@@ -85,7 +85,13 @@ def audit(cascade: CascadeRun, execution: ExecutionRun) -> tuple[Archetype, ...]
 
 def _aligned(trade: Trade) -> bool:
     """Todo alineado: contexto diario a favor, respeto de la zona y confirmación
-    por estructura de H1 —ID u OB—, no por un rechazo."""
+    por una de las vías vivas.
+
+    En la fase 3.1 la tercera condición no descarta nada —las dos vías que quedan
+    son las dos "de estructura"— y se deja escrita igual: con
+    `CONFIRM_MODE = v30_tres_vias` el criterio del arquetipo tiene que seguir
+    siendo el mismo, o las fichas de las dos fases dejarían de compararse.
+    """
     return (
         trade.daily is DailyContext.A_FAVOR
         and trade.outcome_kind is Outcome.RESPETO
@@ -100,8 +106,8 @@ def _manual(trades: Sequence[Trade]) -> Archetype:
         title="El caso de manual: todo alineado y objetivo alcanzado",
         criterion=(
             "el PRIMERO cronológicamente con contexto diario a favor, desenlace de "
-            "respeto, confirmación por ID u OB de H1 (no por rechazo) y objetivo "
-            "alcanzado"
+            "respeto, confirmación por una vía de estructura de H1 (no por rechazo) "
+            "y objetivo alcanzado"
         ),
         trade=found,
         absence=(
@@ -149,8 +155,8 @@ _RAILS: tuple[tuple[GuardRail, str], ...] = (
     ),
     (
         GuardRail.SIN_CONFIRMACION_H1,
-        "la zona estuvo en observación y en H1 no apareció ni ID en la dirección, "
-        "ni OB en la dirección, ni rechazo en ninguna de sus tres definiciones",
+        "la zona estuvo en observación y en H1 no apareció ninguna de las vías "
+        "del modo activo: en la 3.1, ni turtle soup ni OB de H1 alcanzado",
     ),
     (
         GuardRail.SIN_OB_M15,

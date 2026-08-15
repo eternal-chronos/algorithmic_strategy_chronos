@@ -19,6 +19,7 @@ import hashlib
 import json
 from dataclasses import asdict, dataclass, field
 
+from chronos.domain.entries.enums import ConfirmMode, ConfirmPriority
 from chronos.domain.entries.rejection import REJECTION_PERCENTILES
 from chronos.domain.errors import DomainError
 
@@ -79,6 +80,17 @@ class EntriesConfig:
 
     enabled: bool = False
 
+    # --- Fase 3.1: las vías de confirmación en H1 ----------------------------
+
+    #: Qué juego de vías corre. `v31_dos_vias` es el del proyecto; el otro se
+    #: conserva **sólo** para el test de regresión y para poder poner la columna
+    #: de la 3.0 al lado. No es una variante que haya que elegir.
+    confirm_mode: ConfirmMode = ConfirmMode.V31_DOS_VIAS
+    #: Cuál manda si las dos vías caen en la misma vela. **Parámetro abierto**:
+    #: hace falta un orden determinista y el propietario no lo ha fijado. El
+    #: informe cuenta cuántas veces coinciden y si el orden cambia algo.
+    confirm_priority: ConfirmPriority = ConfirmPriority.TURTLE_PRIMERO
+
     # --- Parámetros abiertos (§0: los decide el propietario, mirando gráficos) --
 
     #: `RECHAZO_PERCENTIL` del §2. **Se calculan los tres de la rejilla siempre**
@@ -130,6 +142,8 @@ class EntriesConfig:
         fase 2.1 se comprueba con su propio hash, que este bloque no toca.
         """
         payload = {
+            "confirm_mode": self.confirm_mode.value,
+            "confirm_priority": self.confirm_priority.value,
             "rejection_percentile": self.rejection_percentile,
             "rejection_grid": list(self.rejection_grid),
             "retest_window_h4": self.retest_window_h4,
@@ -153,12 +167,14 @@ class EntriesConfig:
             else f"{self.m15_search_bars} barras de M15"
         )
         return (
+            f"CONFIRM_PRIORITY = {self.confirm_priority.value} "
+            "(cuál manda si las dos vías caen en la misma vela de H1; hace falta "
+            "un orden determinista y no está decidido. El informe cuenta cuántas "
+            "veces coinciden y en cuántas el orden cambia el resultado)",
             f"RECHAZO_PERCENTIL = {self.rejection_percentile} "
-            f"(§2, rejilla {{{', '.join(str(value) for value in self.rejection_grid)}}}; "
-            "los tres se calculan y se desglosan siempre)",
-            "DEFINICIÓN DE RECHAZO = ninguna adoptada "
-            "(§2: R1, R2 y R3 se marcan las tres; la confirmación usa la UNIÓN, "
-            "que es el filtro más laxo y del que las tres son subconjuntos)",
+            f"(rejilla {{{', '.join(str(value) for value in self.rejection_grid)}}}; "
+            "los tres se siguen calculando y persistiendo, pero ya NO deciden "
+            "ninguna entrada: son columnas informativas)",
             f"VENTANA DE RETESTEO = {retest} "
             "(§1.2 no la acota; el valor por defecto es la frontera que la máquina "
             f"de estados ya tenía, no un número nuevo; rejilla {self.retest_grid})",
@@ -171,6 +187,10 @@ class EntriesConfig:
     def closed_decisions(self) -> tuple[str, ...]:
         """Lo que el enunciado cierra y aquí no se discute."""
         return (
+            "CONFIRMACIÓN EN H1 = DOS VÍAS Y SÓLO DOS (fase 3.1): turtle soup, o "
+            "ID de H1 con su OB formado y el precio llegando a ese OB. Un ID de H1 "
+            "solo NO confirma. R1, R2 y R3 dejan de ser vías: se siguen calculando "
+            "y persistiendo como columnas informativas y ninguna regla las lee.",
             "OBJETIVO = 1 : 3,3 R fijo, siempre (§3). Sin parciales, sin trailing, "
             "sin break-even. Equilibrio bruto en el 23,3 % de aciertos.",
             "STOP = versión 1, PRE-REGISTRADA antes de ver ningún resultado (§3): "

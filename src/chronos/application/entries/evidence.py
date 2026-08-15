@@ -1,4 +1,4 @@
-"""Evidencia ejecutable de la fase 3.0 (§7 y §8): el esperado al lado del obtenido.
+"""Evidencia ejecutable de la fase 3.1: el esperado al lado del obtenido.
 
 "Los tests pasan" no es evidencia. Evidencia es el valor esperado al lado del
 obtenido, caso por caso, generado en la misma corrida que produce los informes.
@@ -9,13 +9,16 @@ de correr el motor.
 Reutiliza el `Check`/`CheckGroup`/`Evidence` de la fase 1 para que las cuatro
 salidas del proyecto se lean igual.
 
-Dos bloques obligatorios que no son opcionales aunque pasen siempre:
+Tres bloques obligatorios que no son opcionales aunque pasen siempre:
 
-- **§7, la garantía anti-lookahead**, con al menos cuatro excepciones provocadas
-  a propósito. Una garantía que no se puede ver fallar no es una garantía.
-- **§0, la regresión con las señales apagadas**: con `entries.enabled: false` la
-  corrida tiene que reproducir la línea base de la fase 2.1 exacta. Si no sale,
-  es un bug de esta fase y no un resultado de la anterior.
+- **El día sintético de la fase 3.1**, con sus diez casos: las cuatro formas de
+  turtle soup, las tres de la vía del OB, el orden entre las dos, lo que la 3.0
+  confirmaba y ahora muere, y todo en su versión bajista.
+- **La garantía anti-lookahead**, con cinco excepciones provocadas a propósito.
+  Una garantía que no se puede ver fallar no es una garantía.
+- **Las dos regresiones**: con `entries.enabled: false` tiene que salir la línea
+  base de la fase 2.1, y con `CONFIRM_MODE = v30_tres_vias`, la de la fase 3.0.
+  Si alguna se moviera sería un bug de esta fase, no un resultado de la anterior.
 """
 
 from __future__ import annotations
@@ -25,7 +28,13 @@ from dataclasses import replace
 
 import pandas as pd
 
-from chronos.application.entries.cascade import CascadeRun, build_cascade, daily_context
+from chronos.application.entries.cascade import (
+    CascadeRun,
+    build_cascade,
+    daily_context,
+    order_block_reached,
+    take_via,
+)
 from chronos.application.entries.clock import BarClock, session_ids
 from chronos.application.entries.config import EntriesConfig
 from chronos.application.entries.execution import M1Executor
@@ -42,9 +51,11 @@ from chronos.application.structure.evidence import (
     Evidence,
     format_counts,
 )
-from chronos.application.structure.zones import detect_zones
+from chronos.application.structure.zones import ImpulseZones, detect_zones
 from chronos.domain.entries.enums import (
     ConfirmationKind,
+    ConfirmMode,
+    ConfirmPriority,
     DailyContext,
     EntryTimeframe,
     GuardRail,
@@ -62,6 +73,15 @@ from chronos.domain.entries.signal import (
     Trade,
 )
 from chronos.domain.entries.synthetic_entries import (
+    H1_TURTLE_BREAKS_DOWN,
+    H1_TURTLE_BREAKS_UP,
+    H1_TURTLE_CLEAN_DOWN,
+    H1_TURTLE_CLEAN_UP,
+    H1_TURTLE_GAPPED_DOWN,
+    H1_TURTLE_GAPPED_UP,
+    H1_TURTLE_ONE_SIDED_UP,
+    H1_TURTLE_SHORT_DOWN,
+    H1_TURTLE_SHORT_UP,
     H4_NO_RETEST_DOWN,
     H4_NO_RETEST_UP,
     H4_ORDER_BLOCK_BROKEN_DOWN,
@@ -77,31 +97,51 @@ from chronos.domain.entries.synthetic_entries import (
     M15_LOOSE_DOWN,
     M15_LOOSE_UP,
     SYNTHETIC_ENTRY_START,
+    TURTLE_EXTREME_DOWN,
+    TURTLE_EXTREME_UP,
 )
+from chronos.domain.entries.turtle_soup import find_turtle_soup
 from chronos.domain.entries.zone_timeline import LastZoneTimeline
 from chronos.domain.errors import DomainError
 from chronos.domain.instrument import InstrumentSpec
-from chronos.domain.structure.enums import ImpulseDirection
+from chronos.domain.structure.enums import BodyDirection, ImpulseDirection
 from chronos.domain.structure.errors import LookaheadError
-from chronos.domain.structure.zones import CandleSeries, ZoneKind
+from chronos.domain.structure.zones import CandleSeries, Zone, ZoneKind
 
-TITLE = "E. Evidencia de la fase 3.0 · la cascada de entrada"
+TITLE = "E. Evidencia de la fase 3.1 · la confirmación en H1"
 
 #: Línea base de la fase 2.1 que la fase 3 tiene que preservar (§0).
 PHASE21_HASH = "801951b9cc26"
 PHASE21_DETECTED: dict[str, int] = {"D": 239, "H4": 1214, "H1": 4148}
 PHASE21_PUBLISHED: dict[str, int] = {"D": 233, "H4": 1211, "H1": 4141}
 
+#: Línea base de la fase 3.0, que `CONFIRM_MODE = v30_tres_vias` tiene que
+#: reproducir **exacta**. Si no sale, hay un bug en la refactorización de la 3.1
+#: y la comparación entre las dos fases no significa nada.
+PHASE30_CONFIRMATIONS = 1_776
+PHASE30_TRADES = 3_702
+
 
 def collect(
     config: ImpulseConfig,
     series: Mapping[str, pd.DataFrame],
     entries: EntriesConfig | None = None,
+    v30_counts: tuple[int, int] | None = None,
 ) -> Evidence:
-    """Ejecuta toda la evidencia de la fase 3 sobre las velas ya agregadas."""
+    """Ejecuta toda la evidencia de la fase 3.1 sobre las velas ya agregadas.
+
+    `v30_counts` son las confirmaciones y las operaciones que ha sacado la
+    corrida con `CONFIRM_MODE = v30_tres_vias`. Se reciben ya calculadas en vez
+    de volver a correr la cascada y el ejecutor aquí: son ocho años de M1 y
+    correrlos dos veces para escribir el mismo número sería tirar minutos.
+    """
     entries = entries or EntriesConfig(enabled=True, allow_missing_ask=True)
     return Evidence(
         groups=(
+            _turtle_cases(),
+            _via_two_cases(),
+            _priority_case(),
+            _lost_case(),
             _outcome_cases(),
             _observation_cases(),
             _loose_order_block_case(),
@@ -110,7 +150,294 @@ def collect(
             _lookahead(),
             _switch_off(config, series),
             _regression(config, series),
+            _regression_v30(v30_counts),
         )
+    )
+
+
+# --- El día sintético de la fase 3.1 · casos 1 a 4 y 10 ----------------------
+
+
+def _turtle(
+    candles: tuple[tuple[float, float, float, float], ...],
+    index: int,
+    direction: ImpulseDirection,
+) -> str:
+    """Qué dice el motor sobre esa pareja de velas, en una línea."""
+    series = CandleSeries.of(frame_of(candles, SYNTHETIC_ENTRY_START, "1h"))
+    found = find_turtle_soup(series, index, direction)
+    if found is None:
+        return "no confirma"
+    return f"confirma · extremo {found.extreme:.2f}"
+
+
+def _turtle_cases() -> CheckGroup:
+    """Vía 1 — el turtle soup, con los cuatro finales posibles y su espejo.
+
+    Las cuatro series arrancan con la misma primera vela —mecha inferior hasta
+    1995— para que lo único que cambie entre los casos sea la segunda, que es la
+    que decide. El extremo a rechazar es siempre 1995.
+    """
+    up = ImpulseDirection.ALCISTA
+    down = ImpulseDirection.BAJISTA
+    return CheckGroup(
+        title="E.1 Vía 1 · turtle soup (casos 1, 2, 3, 4 y 10 del día sintético)",
+        note=(
+            "Dos velas de H1 CONSECUTIVAS: la primera deja mecha en la dirección "
+            "del movimiento previo y la segunda llega a ese extremo y cierra sin "
+            "superarlo. Sin parámetros, sin umbrales, sin percentiles: la relación "
+            "entre las dos velas es la definición completa."
+        ),
+        checks=(
+            Check(
+                "1. turtle soup limpio",
+                f"confirma · extremo {TURTLE_EXTREME_UP:.2f}",
+                _turtle(H1_TURTLE_CLEAN_UP, 1, up),
+            ),
+            Check(
+                "2. la segunda SUPERA la mecha con el cierre",
+                "no confirma",
+                _turtle(H1_TURTLE_BREAKS_UP, 1, up),
+            ),
+            Check(
+                "3. la segunda NO LLEGA a la mecha",
+                "no confirma",
+                _turtle(H1_TURTLE_SHORT_UP, 1, up),
+            ),
+            Check(
+                "4. las dos velas no son consecutivas",
+                "no confirma",
+                _turtle(H1_TURTLE_GAPPED_UP, 2, up),
+            ),
+            Check(
+                "4. y con esas dos velas JUNTAS sí confirmaría",
+                f"confirma · extremo {TURTLE_EXTREME_UP:.2f}",
+                _turtle((H1_TURTLE_GAPPED_UP[0], H1_TURTLE_GAPPED_UP[2]), 1, up),
+            ),
+            Check(
+                "10. el espejo del caso 1",
+                f"confirma · extremo {TURTLE_EXTREME_DOWN:.2f}",
+                _turtle(H1_TURTLE_CLEAN_DOWN, 1, down),
+            ),
+            Check(
+                "10. el espejo del caso 2",
+                "no confirma",
+                _turtle(H1_TURTLE_BREAKS_DOWN, 1, down),
+            ),
+            Check(
+                "10. el espejo del caso 3",
+                "no confirma",
+                _turtle(H1_TURTLE_SHORT_DOWN, 1, down),
+            ),
+            Check(
+                "10. el espejo del caso 4",
+                "no confirma",
+                _turtle(H1_TURTLE_GAPPED_DOWN, 2, down),
+            ),
+            Check(
+                "cada dirección mira SU mecha (la primera cierra en su máximo)",
+                "alcista confirma · bajista no confirma",
+                f"alcista {_turtle(H1_TURTLE_ONE_SIDED_UP, 1, up).split(' ·')[0]} · "
+                f"bajista {_turtle(H1_TURTLE_ONE_SIDED_UP, 1, down)}",
+            ),
+        ),
+    )
+
+
+# --- El día sintético de la fase 3.1 · casos 5, 6 y 7 -----------------------
+
+#: El OB alcista de los casos 5, 6 y 7: [1990, 2000], nacido a las 08:00.
+_OB_BIRTH = pd.Timestamp("2024-03-04 08:00", tz="UTC")
+
+
+def _block_zone() -> Zone:
+    return Zone(
+        kind=ZoneKind.ORDER_BLOCK,
+        id_num=1,
+        timeframe="H1",
+        direction=ImpulseDirection.ALCISTA,
+        index_defining=3,
+        ts_defining=_OB_BIRTH.to_pydatetime(),
+        defining_body=BodyDirection.BEARISH,
+        inner=2000.00,
+        outer=1990.00,
+        ts_outer_known=_OB_BIRTH.to_pydatetime(),
+        ts_birth=_OB_BIRTH.to_pydatetime(),
+        index_confirmation=4,
+        ts_confirmation=_OB_BIRTH.to_pydatetime(),
+    )
+
+
+def _block_owner(block: Zone | None) -> ImpulseZones:
+    return ImpulseZones(
+        id_num=1,
+        timeframe="H1",
+        direction=ImpulseDirection.ALCISTA,
+        year=2024,
+        last=replace(_block_zone(), kind=ZoneKind.LAST, inner=2010.0, outer=2012.0),
+        order_block=block,
+        atr=5.0,
+        anchor=1990.0,
+        extreme=2012.0,
+        index_constitution=3,
+        index_end=None,
+        ts_constitution=_OB_BIRTH.to_pydatetime(),
+        ts_end=None,
+        exit_break=None,
+    )
+
+
+def _reached(owner: ImpulseZones | None, at: pd.Timestamp, high: float, low: float) -> str:
+    zone = order_block_reached(owner, at, high, low)
+    return "no confirma" if zone is None else f"confirma · entrada en [{zone.low:.2f}, {zone.high:.2f}]"
+
+
+def _via_two_cases() -> CheckGroup:
+    """Vía 2 — el OB de H1 **alcanzado por el precio** (casos 5, 6 y 7)."""
+    after = pd.Timestamp("2024-03-04 09:00", tz="UTC")
+    before = pd.Timestamp("2024-03-04 07:00", tz="UTC")
+    return CheckGroup(
+        title="E.2 Vía 2 · el OB de H1 alcanzado (casos 5, 6 y 7 del día sintético)",
+        note=(
+            "Hace falta ID de H1 en la dirección, su OB FORMADO y que el PRECIO "
+            "LLEGUE a ese OB. Las tres cosas. En la fase 3.0 bastaba con que el OB "
+            "naciera, y eso es otra regla: un OB puede nacer y no volver a "
+            "visitarse nunca."
+        ),
+        checks=(
+            Check(
+                "5. OB formado y el precio dentro",
+                "confirma · entrada en [1990.00, 2000.00]",
+                _reached(_block_owner(_block_zone()), after, 2005.0, 1995.0),
+            ),
+            Check(
+                "5. tocar el borde ya es llegar",
+                "confirma · entrada en [1990.00, 2000.00]",
+                _reached(_block_owner(_block_zone()), after, 2005.0, 2000.0),
+            ),
+            Check(
+                "6. ID de H1 SIN OB formado",
+                "no confirma",
+                _reached(_block_owner(None), after, 2005.0, 1995.0),
+            ),
+            Check(
+                "6. el OB todavía no ha nacido",
+                "no confirma",
+                _reached(_block_owner(_block_zone()), before, 2005.0, 1995.0),
+            ),
+            Check(
+                "6. no hay ni ID de H1 vigente en la dirección",
+                "no confirma",
+                _reached(None, after, 2005.0, 1995.0),
+            ),
+            Check(
+                "7. OB formado y el precio NO llega",
+                "no confirma",
+                _reached(_block_owner(_block_zone()), after, 2008.0, 2001.0),
+            ),
+        ),
+    )
+
+
+# --- El día sintético de la fase 3.1 · caso 8 --------------------------------
+
+
+def _priority_case() -> CheckGroup:
+    """Caso 8 — las dos vías a la vez, con cada `CONFIRM_PRIORITY`."""
+    both = (ConfirmationKind.TURTLE_SOUP, ConfirmationKind.OB_H1)
+    return CheckGroup(
+        title="E.3 El orden entre las dos vías (caso 8 del día sintético)",
+        note=(
+            "Con las dos disponibles en la misma vela hace falta un orden "
+            "determinista. `CONFIRM_PRIORITY` es un PARÁMETRO ABIERTO: el motor no "
+            "elige, y el informe cuenta cuántas veces se usa y si cambia algo."
+        ),
+        checks=(
+            Check(
+                "8. las dos disponibles · turtle_primero",
+                ConfirmationKind.TURTLE_SOUP.value,
+                take_via(both, ConfirmPriority.TURTLE_PRIMERO).value,
+            ),
+            Check(
+                "8. las dos disponibles · ob_primero",
+                ConfirmationKind.OB_H1.value,
+                take_via(both, ConfirmPriority.OB_PRIMERO).value,
+            ),
+            Check(
+                "con una sola disponible el orden no pinta nada",
+                "turtle_soup, turtle_soup",
+                ", ".join(
+                    take_via((ConfirmationKind.TURTLE_SOUP,), priority).value
+                    for priority in ConfirmPriority
+                ),
+            ),
+        ),
+    )
+
+
+# --- El día sintético de la fase 3.1 · caso 9 --------------------------------
+
+
+def _confirmations_of(mode: ConfirmMode) -> dict[tuple[int, str, int], str]:
+    synthetic = build_synthetic(H4_ORDER_BLOCK_BROKEN_UP)
+    cascade = build_cascade(
+        synthetic.run,
+        synthetic.zones,
+        synthetic.bars["M15"],
+        EntriesConfig(enabled=True, allow_missing_ask=True, confirm_mode=mode),
+    )
+    found: dict[tuple[int, str, int], str] = {}
+    for signal in cascade.signals:
+        item = signal.observation
+        found[(item.id_num, item.zone.value, item.index_contact)] = (
+            signal.confirmation.kind.value
+        )
+    for dead in cascade.discarded:
+        item = dead.observation
+        found.setdefault(
+            (item.id_num, item.zone.value, item.index_contact),
+            dead.confirmation.kind.value
+            if dead.confirmation is not None
+            else f"MUERE · {dead.guard_rail.value}",
+        )
+    return found
+
+
+def _lost_case() -> CheckGroup:
+    """Caso 9 — lo que la 3.0 confirmaba por rechazo y la 3.1 ya no confirma."""
+    before = _confirmations_of(ConfirmMode.V30_TRES_VIAS)
+    after = _confirmations_of(ConfirmMode.V31_DOS_VIAS)
+    key = (2, ZoneKind.ORDER_BLOCK.value, 8)
+    return CheckGroup(
+        title="E.4 Lo que la 3.0 confirmaba y la 3.1 descarta (caso 9)",
+        note=(
+            "Sobre la serie del OB roto, el OB del ID#2. La fase 3.0 lo confirmaba "
+            "por rechazo —en unión de R1, R2 y R3— y con las dos vías de la 3.1 no "
+            "confirma nada: la observación muere. Es el cambio que más población "
+            "mueve, porque en el histórico real el 95,5 % de las confirmaciones de "
+            "la 3.0 llegaban por esa vía."
+        ),
+        checks=(
+            Check(
+                "9. en la 3.0 esa observación confirmaba",
+                ConfirmationKind.RECHAZO.value,
+                before.get(key, "no existe"),
+            ),
+            Check(
+                "9. en la 3.1 la observación MUERE",
+                f"MUERE · {GuardRail.SIN_CONFIRMACION_H1.value}",
+                after.get(key, "no existe"),
+            ),
+            Check(
+                "las dos corridas ven las MISMAS observaciones",
+                f"{len(before)} observaciones, las mismas",
+                (
+                    f"{len(after)} observaciones, las mismas"
+                    if set(before) == set(after)
+                    else f"{len(after)} observaciones, DISTINTAS"
+                ),
+            ),
+        ),
     )
 
 
@@ -130,7 +457,7 @@ def _outcome_cases() -> CheckGroup:
     both = _execute(M1_BOTH_UP)
 
     return CheckGroup(
-        title="E.1 Objetivo, stop y la regla intra-barra (casos 1, 2 y 3 del §8)",
+        title="E.5 Objetivo, stop y la regla intra-barra (casos 1, 2 y 3 de la fase 3.0)",
         note=(
             f"Entrada al open de la primera M1 ({M1_ENTRY:.2f}), stop en "
             f"{M1_STOP:.2f} y objetivo en {M1_TARGET:.2f}. El bruto es una "
@@ -223,7 +550,7 @@ def _observation_cases() -> CheckGroup:
     broken = build_synthetic(H4_ORDER_BLOCK_BROKEN_UP)
 
     return CheckGroup(
-        title="E.2 Respeto, rotura y retesteo, invalidación (casos 4, 5 y 6 del §8)",
+        title="E.6 Respeto, rotura y retesteo, invalidación (fase 3.0)",
         note=(
             "Las tres series recorren el motor entero: se parten minuto a minuto, "
             "se agregan con el agregador del proyecto, se detectan los impulsos con "
@@ -344,7 +671,7 @@ def _loose_order_block_case() -> CheckGroup:
     )
 
     return CheckGroup(
-        title="E.3 El OB suelto de M15, sin ID de M15 (caso 9 del §8)",
+        title="E.7 El OB suelto de M15, sin ID de M15 (fase 3.0)",
         note=(
             "Cuatro velas y ningún impulso: en M15 no se calculan. La vela roja m1 "
             "es superada, mecha incluida, por la verde m3, así que el OB suelto es "
@@ -401,7 +728,7 @@ def _daily_context_cases() -> CheckGroup:
     after = pd.Timestamp("2024-03-25 00:00", tz="UTC")
 
     return CheckGroup(
-        title="E.4 Contexto diario: confirma, contradice, y nunca dispara (casos 7 y 8)",
+        title="E.8 Contexto diario: confirma, contradice, y nunca dispara",
         note=(
             "El contexto vive mientras vive el ID diario que lo produjo. En "
             "conflicto MANDA H4 y la señal se marca, no se descarta: el §5.1 tiene "
@@ -471,7 +798,7 @@ def _mirror_case() -> CheckGroup:
             )
         )
     return CheckGroup(
-        title="E.5 La versión bajista, sin escribir una sola vela (caso 10 del §8)",
+        title="E.9 La versión bajista, sin escribir una sola vela",
         note=(
             "Las tres series alcistas reflejadas en p -> 2C - p con las mechas "
             "cambiadas. Se comparan las observaciones y sus desenlaces, no los "
@@ -561,7 +888,7 @@ def _lookahead() -> CheckGroup:
         return "no lanzó nada"
 
     return CheckGroup(
-        title="E.6 Garantía anti-lookahead: cinco excepciones provocadas a propósito (§7)",
+        title="E.10 Garantía anti-lookahead: cinco excepciones provocadas a propósito (§7)",
         note=(
             "Una zona no puede observarse antes de existir; la confirmación de H1 "
             "sólo se lee con la vela cerrada; el OB suelto de M15 no existe hasta "
@@ -611,7 +938,7 @@ def _switch_off(config: ImpulseConfig, series: Mapping[str, pd.DataFrame]) -> Ch
     zones = detect_zones(run)
     off = build_cascade(run, zones, None, EntriesConfig(enabled=False))
     return CheckGroup(
-        title="E.7 Con las señales apagadas la fase 3 no deja rastro",
+        title="E.11 Con las señales apagadas la fase 3 no deja rastro",
         note=(
             "Todo apagable con test. Con `entries.enabled: false` no se emite ni "
             "una observación, ni una señal, ni un embudo vacío: la corrida sale "
@@ -652,7 +979,7 @@ def _regression(config: ImpulseConfig, series: Mapping[str, pd.DataFrame]) -> Ch
         if timeframe in PHASE21_PUBLISHED
     }
     return CheckGroup(
-        title="E.8 Regresión: la fase 3 no mueve la línea base de la fase 2.1",
+        title="E.12 Regresión: la fase 3 no mueve la línea base de la fase 2.1",
         note=(
             f"{format_counts(PHASE21_DETECTED)} detectados y "
             f"{format_counts(PHASE21_PUBLISHED)} publicados, con hash {PHASE21_HASH}. "
@@ -672,6 +999,31 @@ def _regression(config: ImpulseConfig, series: Mapping[str, pd.DataFrame]) -> Ch
             ),
             Check("config_hash de la estructura", PHASE21_HASH, run.config_hash),
         ),
+    )
+
+
+def _regression_v30(counts: tuple[int, int] | None) -> CheckGroup:
+    """La línea base de la fase 3.0, reproducida con `CONFIRM_MODE = v30_tres_vias`.
+
+    Es el guardarraíl de la refactorización: la 3.1 saca las tres vías de la 3.0
+    del camino, y si al volver a encenderlas no salieran sus 1.776 confirmaciones
+    y sus 3.702 operaciones, la comparación entre las dos fases estaría midiendo
+    un bug en vez de un cambio de regla.
+    """
+    expected = f"{PHASE30_CONFIRMATIONS:,} confirmaciones · {PHASE30_TRADES:,} operaciones"
+    obtained = (
+        "no se corrió el modo v30 en esta ejecución"
+        if counts is None
+        else f"{counts[0]:,} confirmaciones · {counts[1]:,} operaciones"
+    )
+    return CheckGroup(
+        title="E.13 Regresión: con `v30_tres_vias` sale la fase 3.0 exacta",
+        note=(
+            "El modo de la 3.0 se conserva SÓLO para esto y para poder poner las "
+            "dos columnas al lado. No es una variante del proyecto. Exige el "
+            "histórico M1 real: sin él la comprobación no se puede hacer y se dice."
+        ),
+        checks=(Check("embudo de la fase 3.0", expected, obtained),),
     )
 
 
@@ -705,6 +1057,8 @@ __all__ = [
     "PHASE21_DETECTED",
     "PHASE21_HASH",
     "PHASE21_PUBLISHED",
+    "PHASE30_CONFIRMATIONS",
+    "PHASE30_TRADES",
     "TITLE",
     "collect",
 ]

@@ -23,6 +23,7 @@ import pandas as pd
 from chronos.application.entries.cascade import FUNNEL_STEPS, CascadeRun
 from chronos.application.entries.execution import ExecutionRun
 from chronos.domain.entries.enums import (
+    ConfirmationKind,
     DailyContext,
     EntryTimeframe,
     GuardRail,
@@ -165,6 +166,115 @@ def by_year(trades: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=list(METRIC_COLUMNS))
 
 
+# --- Fase 3.1: la columna de la 3.0 al lado ----------------------------------
+
+#: Lo que se compara entre las dos fases. No son todas las columnas de
+#: `METRIC_COLUMNS` a propósito: una tabla con veintiocho columnas no se lee en
+#: un terminal, y estas cinco son las que contestan a "¿qué cambió?".
+COMPARED: tuple[str, ...] = (
+    "n",
+    "win_rate",
+    "expectativa_bruta_r",
+    "expectativa_neta_r",
+    "coste_medio_r",
+)
+
+
+def side_by_side(
+    new: pd.DataFrame, old: pd.DataFrame, columns: Sequence[str] = COMPARED
+) -> pd.DataFrame:
+    """El mismo desglose de las dos fases, población a población.
+
+    Las poblaciones de la 3.0 que la 3.1 ya no tiene **no se esconden**: salen
+    con la columna de la 3.1 vacía, que es exactamente el dato interesante.
+    """
+    if new.empty and old.empty:
+        return pd.DataFrame(columns=["poblacion", *(f"{name}_31" for name in columns)])
+    left = new.set_index("poblacion") if not new.empty else pd.DataFrame()
+    right = old.set_index("poblacion") if not old.empty else pd.DataFrame()
+    order = [*left.index] + [value for value in right.index if value not in set(left.index)]
+    rows = []
+    for label in order:
+        row: dict[str, object] = {"poblacion": label}
+        for name in columns:
+            row[f"{name}_31"] = (
+                left.at[label, name] if label in left.index and name in left else float("nan")
+            )
+            row[f"{name}_30"] = (
+                right.at[label, name] if label in right.index and name in right else float("nan")
+            )
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def by_year_and_direction(trades: pd.DataFrame) -> pd.DataFrame:
+    """⚠️ Largos y cortos, **por separado y por año** (§5.6 de la fase 3.1).
+
+    Es la tabla que hace falta para no confundir un fallo del setup con el hecho
+    de que el oro subió de ~1.200 a ~4.300 USD durante todo el histórico. Se
+    presenta y **no se interpreta**: aquí no se propone filtrar por dirección ni
+    se saca ninguna conclusión de ella.
+    """
+    if trades.empty:
+        return pd.DataFrame(columns=list(METRIC_COLUMNS))
+    rows = []
+    for direction in ImpulseDirection:
+        subset = trades[trades["direccion"] == direction.value]
+        if subset.empty:
+            continue
+        for year, group in subset.groupby("anio", sort=True):
+            rows.append(metrics(f"{direction.value} · {year}", group))
+        rows.append(metrics(f"{direction.value} · TOTAL", subset))
+    rows.append(metrics(TOTAL_ROW, trades))
+    return pd.DataFrame(rows, columns=list(METRIC_COLUMNS))
+
+
+def by_via(trades: pd.DataFrame) -> pd.DataFrame:
+    """§5.2 de la 3.1 — cada vía de confirmación por separado, con su intervalo."""
+    return breakdown(
+        trades, "confirmacion", tuple(value.value for value in ConfirmationKind)
+    )
+
+
+def cost_by_via_and_stop(trades: pd.DataFrame) -> pd.DataFrame:
+    """§5.5 de la 3.1 — coste por operación en R, por vía y por configuración.
+
+    El coste no es un residuo: en la 3.0 el stop de M15 costaba 0,191 R por
+    operación, que sobre una expectativa que se mide en centésimas de R decide el
+    signo. Va con su desglose y con el percentil 90, porque la media sola esconde
+    las operaciones con el 1R minúsculo.
+    """
+    columns = ["poblacion", "n", "coste_medio_r", "coste_p90_r", "coste_maximo_r"]
+    if trades.empty:
+        return pd.DataFrame(columns=columns)
+
+    def row(label: str, group: pd.DataFrame) -> dict[str, object]:
+        cost = pd.to_numeric(group["coste_r"], errors="coerce").to_numpy(dtype=float)
+        cost = cost[np.isfinite(cost)]
+        return {
+            "poblacion": label,
+            "n": len(group),
+            "coste_medio_r": float(cost.mean()) if cost.size else float("nan"),
+            "coste_p90_r": float(np.percentile(cost, 90)) if cost.size else float("nan"),
+            "coste_maximo_r": float(cost.max()) if cost.size else float("nan"),
+        }
+
+    rows = [
+        row(f"vía {value}", trades[trades["confirmacion"] == value])
+        for value in sorted(trades["confirmacion"].dropna().unique())
+    ]
+    rows += [
+        row(f"entrada {entry} · stop {stop}", group)
+        for (entry, stop), group in trades.groupby(["entrada_en", "stop_en"], sort=True)
+    ]
+    rows += [
+        row(f"vía {via} · stop {stop}", group)
+        for (via, stop), group in trades.groupby(["confirmacion", "stop_en"], sort=True)
+    ]
+    rows.append(row(TOTAL_ROW, trades))
+    return pd.DataFrame(rows, columns=columns)
+
+
 #: Los ocho desgloses obligatorios del §5, con el orden en que se imprimen y las
 #: poblaciones que cada uno tiene que enseñar aunque salgan vacías: una categoría
 #: con cero operaciones es un dato, y esconderla la convierte en un olvido.
@@ -207,22 +317,30 @@ def by_rejection(
     filas no suman al total. Es a propósito: lo que el §2 pide es ver cuánto se
     parecen, no repartirlas.
 
-    Sólo entran las operaciones cuya confirmación fue un rechazo. Las que
-    confirmaron por ID de H1 o por OB de H1 no tienen definición que desglosar y
-    se cuentan aparte, en su propia fila.
+    **En la 3.1 las tres son informativas.** Ya no confirman nada, así que el
+    desglose se hace sobre TODAS las operaciones: dice qué habría marcado la vela
+    que confirmó, sin que eso haya decidido nada. En la 3.0, donde el rechazo sí
+    era una vía, sólo entran las operaciones que confirmaron por rechazo y las
+    demás se cuentan aparte. La población se elige mirando los datos, no un
+    parámetro: si no hay ni una confirmación por rechazo, no hay nada que aislar.
     """
     if trades.empty:
         return pd.DataFrame(columns=list(METRIC_COLUMNS))
-    rejections = trades[trades["confirmacion"] == "rechazo"]
+    was_a_via = bool((trades["confirmacion"] == "rechazo").any())
+    population = trades[trades["confirmacion"] == "rechazo"] if was_a_via else trades
     rows: list[dict[str, object]] = []
     for column, label in _rejection_columns(grid):
         if column not in trades.columns:
             continue
-        subset = rejections[rejections[column].fillna(False).astype(bool)]
+        subset = population[population[column].fillna(False).astype(bool)]
         rows.append(metrics(label, subset))
-    rows.append(
-        metrics("confirmadas SIN rechazo (ID u OB de H1)", trades[trades["confirmacion"] != "rechazo"])
-    )
+    if was_a_via:
+        rows.append(
+            metrics(
+                "confirmadas SIN rechazo (ID u OB de H1)",
+                trades[trades["confirmacion"] != "rechazo"],
+            )
+        )
     rows.append(metrics(TOTAL_ROW, trades))
     return pd.DataFrame(rows, columns=list(METRIC_COLUMNS))
 
@@ -257,7 +375,13 @@ def rejection_overlap(
     labels = [label for column, label in _rejection_columns(grid) if column in trades.columns]
     if not columns or trades.empty:
         return pd.DataFrame()
-    rejections = trades[trades["confirmacion"] == "rechazo"]
+    # Misma elección de población que `by_rejection`: con el rechazo ya sin ser
+    # una vía, el solape se mide sobre todas las velas que confirmaron.
+    rejections = (
+        trades[trades["confirmacion"] == "rechazo"]
+        if (trades["confirmacion"] == "rechazo").any()
+        else trades
+    )
     matrix = {
         label: [
             int(
@@ -460,18 +584,23 @@ def break_even_note() -> str:
 
 __all__ = [
     "BREAKDOWNS",
+    "COMPARED",
     "METRIC_COLUMNS",
     "TOTAL_ROW",
     "all_breakdowns",
     "break_even_note",
     "breakdown",
     "by_rejection",
+    "by_via",
     "by_year",
+    "by_year_and_direction",
     "configurations",
+    "cost_by_via_and_stop",
     "frequency",
     "funnel",
     "guard_rails",
     "metrics",
     "rejection_overlap",
     "risk_distribution",
+    "side_by_side",
 ]

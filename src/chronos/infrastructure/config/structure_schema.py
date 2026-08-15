@@ -22,6 +22,7 @@ from chronos.application.structure.config import (
     TimezoneAuditConfig,
     ZonesConfig,
 )
+from chronos.domain.entries.enums import ConfirmMode, ConfirmPriority
 from chronos.domain.structure.enums import (
     AnchorMode,
     DojiBreakMode,
@@ -98,9 +99,13 @@ class EntryCostsSchema(_Strict):
 
 
 class EntriesSchema(_Strict):
-    """Fase 3.0. Apagada por defecto: el fichero tal cual reproduce la 2.1."""
+    """Fase 3.1. Apagada por defecto: el fichero tal cual reproduce la 2.1."""
 
     enabled: bool = False
+    #: Fase 3.1. `v30_tres_vias` se conserva SÓLO para regresión y comparación.
+    confirm_mode: ConfirmMode = ConfirmMode.V31_DOS_VIAS
+    #: Parámetro abierto: el orden cuando las dos vías caen en la misma vela.
+    confirm_priority: ConfirmPriority = ConfirmPriority.TURTLE_PRIMERO
     #: Parámetro abierto del §2. Tiene que estar en la rejilla.
     rejection_percentile: int = Field(default=75, gt=0, lt=100)
     rejection_grid: list[int] = Field(default_factory=lambda: [60, 75, 90])
@@ -117,6 +122,8 @@ class EntriesSchema(_Strict):
     def to_domain(self) -> EntriesConfig:
         return EntriesConfig(
             enabled=self.enabled,
+            confirm_mode=self.confirm_mode,
+            confirm_priority=self.confirm_priority,
             rejection_percentile=self.rejection_percentile,
             rejection_grid=tuple(self.rejection_grid),
             retest_window_h4=self.retest_window_h4,

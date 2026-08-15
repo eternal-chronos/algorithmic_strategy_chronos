@@ -31,6 +31,7 @@ import pandas as pd
 import plotly.offline as pyo
 
 from chronos.application.entries.cascade import CascadeRun
+from chronos.application.entries.comparison import LostConfirmation
 from chronos.application.entries.execution import ExecutionRun
 from chronos.application.structure.detect_impulses import ImpulseRun, TimeframeAnalysis
 from chronos.application.structure.lateralization import (
@@ -91,11 +92,12 @@ def render_explorer(
     zones: ZonesRun | None = None,
     cascade: CascadeRun | None = None,
     execution: ExecutionRun | None = None,
+    lost: Sequence[LostConfirmation] = (),
 ) -> str:
     """Devuelve el HTML completo del explorador."""
     generated_at = generated_at or SystemClock().now()
     payload = build_payload(
-        run, max_bars, lateralization, variants, zones, cascade, execution
+        run, max_bars, lateralization, variants, zones, cascade, execution, lost
     )
     # El JSON viaja dentro de un <script>: escapar `</` evita que un texto
     # cualquiera pueda cerrar la etiqueta antes de tiempo.
@@ -125,6 +127,7 @@ def build_payload(
     zones: ZonesRun | None = None,
     cascade: CascadeRun | None = None,
     execution: ExecutionRun | None = None,
+    lost: Sequence[LostConfirmation] = (),
 ) -> dict[str, Any]:
     """Serializa la corrida a la estructura que consume el explorador.
 
@@ -199,8 +202,21 @@ def build_payload(
         #: las tres definiciones. Van **fuera** de `impulses` a propósito: una
         #: operación es un hecho en el tiempo y en el precio, así que se dibuja
         #: igual sobre las cuatro temporalidades, que es lo que el §10 pide.
-        "entries": _entries_payload(cascade, execution),
+        "entries": _entries_payload(cascade, execution, lost),
         "hasEntries": bool(cascade is not None and cascade.enabled),
+        #: Fase 3.1: qué vías confirmaron esta corrida y con qué orden, y cuántos
+        #: turtle soup hay en TODA la serie de H1. El explorador dibuja los que la
+        #: cascada miró; sin el censo, su capa daría a entender que el patrón sólo
+        #: ocurre donde hay zona en observación.
+        "confirm": (
+            {
+                "mode": cascade.config.confirm_mode.value,
+                "priority": cascade.config.confirm_priority.value,
+                "census": dict(cascade.turtle_census),
+            }
+            if cascade is not None and cascade.enabled
+            else None
+        ),
         "modes": [_mode_summary(variant) for variant in variants],
         # El modo activo ya viaja en `impulses` y repetirlo aquí costaba 4,5 MB
         # de fichero. El explorador lo lee de `impulses` por identidad del modo,
@@ -215,21 +231,31 @@ def build_payload(
 
 
 def _entries_payload(
-    cascade: CascadeRun | None, execution: ExecutionRun | None
+    cascade: CascadeRun | None,
+    execution: ExecutionRun | None,
+    lost: Sequence[LostConfirmation] = (),
 ) -> dict[str, Any]:
-    """Fase 3.0 (§10): cada operación navegable, con todo lo que la explica.
+    """La cascada navegable, con todo lo que la explica.
 
-    Tres capas y no una: las **operaciones**, las señales **descartadas** con el
-    guardarraíl que las mató, y los **rechazos** marcados según las tres
-    definiciones y distinguibles entre sí. La tercera va aparte porque el §2 no
-    ha adoptado ninguna definición: verlas mezcladas sería justo lo que impide
-    elegir.
+    Cinco capas y no una: las **operaciones**, las señales **descartadas** con el
+    guardarraíl que las mató, los **rechazos** marcados según las tres
+    definiciones —que en la 3.1 ya no confirman nada y siguen dibujándose porque
+    siguen midiéndose—, los **turtle soup** detectados confirmen o no, y las
+    señales que **la 3.0 tomaba y la 3.1 descarta**, con la vía por la que
+    confirmaban antes. Las dos últimas son de la fase 3.1 y son lo primero que el
+    propietario quiere auditar.
 
     Cada operación viaja con sus hitos —contacto, rotura, retesteo, confirmación,
     entrada y salida— para que el globo cuente la historia entera sin abrir el
     CSV, y con los tres precios que la deciden: entrada, stop y objetivo.
     """
-    empty: dict[str, Any] = {"trades": [], "discarded": [], "rejections": []}
+    empty: dict[str, Any] = {
+        "trades": [],
+        "discarded": [],
+        "rejections": [],
+        "turtle": [],
+        "lost": [],
+    }
     if cascade is None or not cascade.enabled:
         return empty
 
@@ -243,6 +269,46 @@ def _entries_payload(
             for signal in cascade.signals
             if (record := _rejection_record(signal)) is not None
         ],
+        "turtle": [_turtle_record(item) for item in cascade.turtle_soups],
+        "lost": [_lost_record(item) for item in lost],
+    }
+
+
+def _turtle_record(item: Any) -> dict[str, Any]:
+    """Un turtle soup mirado por la cascada, con lo que le pasó (fase 3.1).
+
+    `y` es el extremo de la mecha de la primera vela: el nivel que la segunda va
+    a buscar y no consigue superar con el cierre. Es el precio sobre el que tiene
+    sentido dibujar la marca, y no el cierre ni el centro de la vela.
+    """
+    return {
+        "x": _minute(pd.Timestamp(item.timestamp)),
+        "y": round(item.extreme, DECIMALS),
+        "d": item.direction.value,
+        "r": item.reason.value,
+        "id": item.id_num,
+        "z": item.zone.value,
+    }
+
+
+def _lost_record(item: Any) -> dict[str, Any]:
+    """Una observación que la 3.0 confirmaba y la 3.1 ya no (fase 3.1).
+
+    Se dibuja en el minuto en que la 3.0 CONFIRMABA, que es el instante que el
+    propietario quiere mirar: ahí es donde la fase anterior habría entrado.
+    """
+    return {
+        "x": _minute(pd.Timestamp(item.ts_confirmation_v30)),
+        "y": round(item.zone_inner, DECIMALS),
+        "d": item.direction.value,
+        "z": item.zone.value,
+        "id": item.id_num,
+        "oc": item.outcome.value,
+        "v30": item.via_v30.value,
+        "rail": None if item.rail_v31 is None else item.rail_v31.value,
+        "xc": _minute(pd.Timestamp(item.ts_contact)),
+        "zi": round(item.zone_inner, DECIMALS),
+        "zo": round(item.zone_outer, DECIMALS),
     }
 
 
@@ -307,11 +373,12 @@ def _discarded_record(item: Any) -> dict[str, Any]:
 
 
 def _rejection_record(signal: Any) -> dict[str, Any] | None:
-    """Un rechazo con **las tres definiciones marcadas por separado** (§2 y §10).
+    """Las **tres definiciones marcadas por separado** sobre la vela que confirmó.
 
-    Sólo salen los que confirmaron: son los únicos que la cascada llegó a
-    evaluar, porque en cuanto una vela confirma la búsqueda se para. El informe
-    da los recuentos y el solape de las tres sobre toda la población.
+    En la fase 3.1 ya no confirman nada: se siguen calculando y se siguen
+    dibujando porque se siguen midiendo. Sólo salen las velas que confirmaron:
+    son las únicas que la cascada llegó a evaluar, porque en cuanto una vela
+    confirma la búsqueda se para.
     """
     if not signal.rejection_marks:
         return None

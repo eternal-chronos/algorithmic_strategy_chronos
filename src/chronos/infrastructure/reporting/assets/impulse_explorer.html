@@ -153,6 +153,17 @@ definiciones candidatas, distinguibles entre sí. NINGUNA está adoptada. El sí
 cuántas coinciden: triángulo = una, rombo = dos, cuadrado = las tres. Apagada de salida
 porque son muchos y taparían el resto hasta que hagan falta.">
             <input type="checkbox" id="layer-rejections"> Rechazos (R1 / R2 / R3)</label>
+          <label class="toggle" title="Fase 3.1, vía 1: los turtle soup que la cascada miró,
+CONFIRMEN O NO. Dos velas de H1 consecutivas: la primera deja mecha y la segunda llega a
+ese extremo y cierra sin superarlo. La marca va sobre el extremo rechazado. Relleno = fue
+la vía que confirmó; hueco = apareció y no confirmó, y el globo dice por qué. El patrón
+aparece muchas más veces en H1: aquí sólo salen los que la cascada llegó a mirar.">
+            <input type="checkbox" id="layer-turtle" checked> Turtle soup (vía 1)</label>
+          <label class="toggle" title="Fase 3.1: las señales que la fase 3.0 TOMABA y la 3.1
+descarta, con la vía por la que confirmaban antes —id_h1, ob_h1 o rechazo— y el guardarraíl
+en el que mueren ahora. Van en el minuto en que la 3.0 confirmaba, que es donde la fase
+anterior habría entrado. Es lo primero que hay que auditar de esta fase.">
+            <input type="checkbox" id="layer-lost" checked> La 3.0 entraba aquí · la 3.1 no</label>
           <label class="toggle" title="Fase 3.0, sólo durante el replay: la señal MIENTRAS está
 viva, del contacto con la zona de H4 hasta que entra o muere. Círculo azul = contacto,
 rombo azul = ya confirmó en H1. El globo no dice en qué acabará: es el tramo en el que
@@ -271,9 +282,14 @@ se abre y en el que se cierra. El estado dice cuál y qué pasó.">
       confirmó en H1. Todavía no hay entrada y el globo no dice si la habrá</span>
     <span>○ hueco = señal DESCARTADA, sobre el borde interior de su zona: el globo
       dice en qué guardarraíl murió</span>
-    <span>△ ▽ ◇ □ = rechazo marcado por 1, 2 o 3 de las definiciones candidatas
-      (R1, R2, R3). NINGUNA está adoptada: la confirmación usa la unión de las tres
-      y el globo dice cuáles marcan y cuáles no</span>
+    <span>△ ▽ ◇ □ = R1, R2 y R3 marcadas sobre la vela que confirmó. En la fase 3.1
+      YA NO CONFIRMAN NADA: se siguen calculando y se siguen dibujando porque se
+      siguen midiendo, y el globo dice cuáles marcan y cuáles no</span>
+    <span>✦ relleno = TURTLE SOUP (fase 3.1, vía 1) que confirmó la entrada ·
+      ✦ hueco = turtle soup detectado que NO confirmó; el globo dice por qué. La marca
+      va sobre el extremo de mecha rechazado, y el color es el de la dirección</span>
+    <span>✕ fino gris = la fase 3.0 CONFIRMABA aquí y la 3.1 no: el globo dice por qué
+      vía confirmaba antes —id_h1, ob_h1 o rechazo— y en qué guardarraíl muere ahora</span>
     <span>«Sólo desde el arranque» empieza el replay en blanco: lo que la fase 3 ya
       tenía en marcha en esa fecha —la operación abierta y todas las anteriores— no se
       dibuja, y sólo se buscan entradas hacia delante</span>
