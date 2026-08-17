@@ -186,14 +186,30 @@ def test_en_el_ob_la_rotura_invalida_siempre() -> None:
 
 
 def test_el_ob_roto_si_llego_a_estar_en_observacion() -> None:
-    """Muere de rotura, no de no haberse tocado nunca: c4 sí lo tocó."""
-    cascade = build_synthetic(H4_ORDER_BLOCK_BROKEN_UP).cascade
-    observed = [
-        item for item in cascade.observations if item.zone is ZoneKind.ORDER_BLOCK
-    ]
+    """Muere de rotura, no de no haberse tocado nunca: c4 sí lo tocó.
 
-    assert observed
-    assert observed[0].index_contact == 4
+    El contacto se busca entre las observaciones **y** entre las descartadas: en
+    la fase 3.2 un contacto que no llega a rechazo no abre observación, y aun así
+    sigue siendo el mismo contacto. Lo que se fija aquí es que el OB **del ID#1**
+    se tocó en c4, y eso no depende del modo de entrada.
+
+    El otro contacto con un OB de esta serie es el del **ID#2** en c8 —la vela
+    del caso 6, que entra en su OB [2004, 2012] y sobrevive porque está
+    confirmado— y no tiene nada que ver con la rotura de arriba. Va en el
+    esperado con su `id_num` para que no se pueda confundir con ella.
+    """
+    cascade = build_synthetic(H4_ORDER_BLOCK_BROKEN_UP).cascade
+    contacts = {
+        (item.id_num, item.index_contact)
+        for item in cascade.observations
+        if item.zone is ZoneKind.ORDER_BLOCK
+    } | {
+        (item.observation.id_num, item.observation.index_contact)
+        for item in cascade.discarded
+        if item.observation.zone is ZoneKind.ORDER_BLOCK
+    }
+
+    assert contacts == {(1, 4), (2, 8)}
 
 
 # --- Casos 7 y 8 del §8 ------------------------------------------------------

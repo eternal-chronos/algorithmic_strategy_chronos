@@ -28,6 +28,7 @@ from chronos.domain.entries.enums import (
     EntryTimeframe,
     GuardRail,
     Outcome,
+    RejectionForm,
     RejectionKind,
     StopZone,
     TradeOutcome,
@@ -139,8 +140,13 @@ def breakdown(
 
     La fila TOTAL va al final y **no sustituye** a las demás: está para cuadrar
     los recuentos, no para leerse sola.
+
+    Una columna que no está en la tabla devuelve el desglose vacío en vez de
+    reventar: hay corridas —las de la fase anterior, cargadas de un CSV viejo—
+    que no traen las columnas que la 3.2 añadió, y el informe tiene que poder
+    ponerlas al lado igualmente.
     """
-    if trades.empty:
+    if trades.empty or column not in trades.columns:
         return pd.DataFrame(columns=list(METRIC_COLUMNS))
     values = list(order) if order is not None else sorted(
         str(value) for value in trades[column].dropna().unique()
@@ -180,16 +186,30 @@ COMPARED: tuple[str, ...] = (
 )
 
 
+#: Sufijos de las dos columnas comparadas. La fase nueva primero, la anterior
+#: detrás, que es como se lee "qué cambió".
+NEW = "32"
+OLD = "31"
+
+
 def side_by_side(
-    new: pd.DataFrame, old: pd.DataFrame, columns: Sequence[str] = COMPARED
+    new: pd.DataFrame,
+    old: pd.DataFrame,
+    columns: Sequence[str] = COMPARED,
+    *,
+    new_suffix: str = NEW,
+    old_suffix: str = OLD,
 ) -> pd.DataFrame:
     """El mismo desglose de las dos fases, población a población.
 
-    Las poblaciones de la 3.0 que la 3.1 ya no tiene **no se esconden**: salen
-    con la columna de la 3.1 vacía, que es exactamente el dato interesante.
+    Las poblaciones de la fase anterior que la nueva ya no tiene **no se
+    esconden**: salen con la columna nueva vacía, que en la 3.2 es exactamente el
+    dato interesante —`UL respeto` desaparece entera—.
     """
     if new.empty and old.empty:
-        return pd.DataFrame(columns=["poblacion", *(f"{name}_31" for name in columns)])
+        return pd.DataFrame(
+            columns=["poblacion", *(f"{name}_{new_suffix}" for name in columns)]
+        )
     left = new.set_index("poblacion") if not new.empty else pd.DataFrame()
     right = old.set_index("poblacion") if not old.empty else pd.DataFrame()
     order = [*left.index] + [value for value in right.index if value not in set(left.index)]
@@ -197,10 +217,10 @@ def side_by_side(
     for label in order:
         row: dict[str, object] = {"poblacion": label}
         for name in columns:
-            row[f"{name}_31"] = (
+            row[f"{name}_{new_suffix}"] = (
                 left.at[label, name] if label in left.index and name in left else float("nan")
             )
-            row[f"{name}_30"] = (
+            row[f"{name}_{old_suffix}"] = (
                 right.at[label, name] if label in right.index and name in right else float("nan")
             )
         rows.append(row)
@@ -236,6 +256,181 @@ def by_via(trades: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+# --- Fase 3.2 -----------------------------------------------------------------
+
+#: §6.2 — las tres ramas que la 3.2 deja vivas, en el orden del enunciado. Se
+#: escriben aquí y no se derivan de los datos para que una rama vacía salga
+#: igualmente: cero operaciones en una rama es un dato, no una fila que sobra.
+BRANCHES: tuple[str, ...] = (
+    f"{ZoneKind.LAST.value} {Outcome.RECHAZO.value}",
+    f"{ZoneKind.LAST.value} {Outcome.ROTURA_Y_RETESTEO.value}",
+    f"{ZoneKind.ORDER_BLOCK.value} {Outcome.RECHAZO.value}",
+    #: Sólo la produce `ENTRY_MODE = v31_contacto`. Se deja en el orden para que
+    #: la tabla de la 3.1 y la de la 3.2 se puedan poner una al lado de la otra.
+    f"{ZoneKind.LAST.value} {Outcome.RESPETO.value}",
+    f"{ZoneKind.ORDER_BLOCK.value} {Outcome.RESPETO.value}",
+)
+
+
+def by_branch(trades: pd.DataFrame) -> pd.DataFrame:
+    """§6.2 — **cada rama por separado**: n, expectativa neta y bruta, WR e IC95.
+
+    Las tres ramas de la 3.2 son poblaciones distintas y no se promedian: la de
+    UL rechazado va en contra del ID, la de rotura y retesteo a favor de la
+    rotura y la de OB rechazado a favor del ID. Un número agregado sobre las tres
+    mezclaría tres estrategias.
+    """
+    return breakdown(trades, "rama", BRANCHES)
+
+
+def by_rejection_form(trades: pd.DataFrame) -> pd.DataFrame:
+    """§6.3 — los rechazos de H4 por forma, con las coincidencias aparte.
+
+    Tres poblaciones y **no** son una partición: la fila `las dos formas` está
+    contenida en las otras dos, porque una vela puede cumplir A y B a la vez. Se
+    presenta así a propósito: lo que el §6.3 pide es cuántas hay de cada una y
+    cuántas veces coincidían, no repartirlas.
+
+    Cuando coinciden, la decisión es idéntica —misma vela, misma dirección— así
+    que la etiqueta de disparo es cosmética y la fila de coincidencias es la que
+    lo demuestra.
+    """
+    columns = list(METRIC_COLUMNS)
+    if trades.empty or "forma_rechazo" not in trades.columns:
+        return pd.DataFrame(columns=columns)
+    rejected = trades[trades["forma_rechazo"].notna()]
+    if rejected.empty:
+        return pd.DataFrame(columns=columns)
+    available = rejected["formas_rechazo_disponibles"].fillna("").astype(str)
+    rows = [
+        metrics(
+            f"disponible · {form.value}",
+            rejected[available.str.contains(form.value, regex=False)],
+        )
+        for form in RejectionForm
+    ]
+    rows += [
+        metrics(f"disparó · {form.value}", rejected[rejected["forma_rechazo"] == form.value])
+        for form in RejectionForm
+    ]
+    rows.append(
+        metrics("las dos formas en la misma vela", rejected[available.str.contains("|", regex=False)])
+    )
+    rows.append(metrics(TOTAL_ROW, rejected))
+    return pd.DataFrame(rows, columns=columns)
+
+
+def rejection_form_counts(trades: pd.DataFrame) -> pd.DataFrame:
+    """§6.3 — el recuento puro: cuántas de cada forma y cuántas coincidencias."""
+    columns = ["forma", "disponible", "disparo", "pct_de_los_rechazos"]
+    if trades.empty or "forma_rechazo" not in trades.columns:
+        return pd.DataFrame(columns=columns)
+    rejected = trades[trades["forma_rechazo"].notna()]
+    if rejected.empty:
+        return pd.DataFrame(columns=columns)
+    available = rejected["formas_rechazo_disponibles"].fillna("").astype(str)
+    total = len(rejected)
+    rows = [
+        {
+            "forma": form.value,
+            "disponible": int(available.str.contains(form.value, regex=False).sum()),
+            "disparo": int((rejected["forma_rechazo"] == form.value).sum()),
+            "pct_de_los_rechazos": float(
+                available.str.contains(form.value, regex=False).mean()
+            ),
+        }
+        for form in RejectionForm
+    ]
+    both = int(available.str.contains("|", regex=False).sum())
+    rows.append(
+        {
+            "forma": "las dos a la vez",
+            "disponible": both,
+            "disparo": both,
+            "pct_de_los_rechazos": both / total if total else float("nan"),
+        }
+    )
+    rows.append(
+        {
+            "forma": TOTAL_ROW,
+            "disponible": total,
+            "disparo": total,
+            "pct_de_los_rechazos": 1.0,
+        }
+    )
+    return pd.DataFrame(rows, columns=columns)
+
+
+def against_the_id(trades: pd.DataFrame) -> pd.DataFrame:
+    """⚠️ §6.4 — las operaciones EN CONTRA del ID de H4, aisladas.
+
+    Es una población **nueva** del proyecto: hasta la 3.1 ninguna operación iba
+    contra el sesgo de H4. Se presenta aparte y no se interpreta.
+    """
+    if trades.empty or "contra_id" not in trades.columns:
+        return pd.DataFrame(columns=list(METRIC_COLUMNS))
+    flag = trades["contra_id"].fillna(False).astype(bool)
+    rows = [
+        metrics("EN CONTRA del ID de H4 (UL rechazado)", trades[flag]),
+        metrics("a favor del ID / de la rotura", trades[~flag]),
+        metrics(TOTAL_ROW, trades),
+    ]
+    return pd.DataFrame(rows, columns=list(METRIC_COLUMNS))
+
+
+def weekend_gap(trades: pd.DataFrame) -> pd.DataFrame:
+    """⚠️ §6.7 — decisión y ejecución separadas por el hueco de fin de semana.
+
+    **No se corrige nada**: es una decisión del propietario. Aquí sólo se separa
+    la población y se pone su expectativa al lado de la del resto.
+    """
+    if trades.empty or "hueco_finde" not in trades.columns:
+        return pd.DataFrame(columns=list(METRIC_COLUMNS))
+    flag = trades["hueco_finde"].fillna(False).astype(bool)
+    rows = [
+        metrics("con hueco de fin de semana", trades[flag]),
+        metrics("sin hueco", trades[~flag]),
+        metrics(TOTAL_ROW, trades),
+    ]
+    return pd.DataFrame(rows, columns=list(METRIC_COLUMNS))
+
+
+def weekend_gap_by_via(trades: pd.DataFrame) -> pd.DataFrame:
+    """§6.7 — el mismo corte por vía de confirmación y por rama.
+
+    En la 3.1 el efecto se vio por vía —turtle -0,399 R y OB -0,761 R frente a
+    -0,079 R y -0,185 R del resto— así que el desglose se conserva igual, con la
+    rama añadida porque en la 3.2 son poblaciones distintas.
+    """
+    columns = ["poblacion", "n_con_hueco", "neto_con_hueco_r", "n_sin", "neto_sin_r"]
+    if trades.empty or "hueco_finde" not in trades.columns:
+        return pd.DataFrame(columns=columns)
+    flag = trades["hueco_finde"].fillna(False).astype(bool)
+
+    def row(label: str, group: pd.DataFrame, mask: pd.Series) -> dict[str, object]:
+        with_gap = metrics(label, group[mask])
+        without = metrics(label, group[~mask])
+        return {
+            "poblacion": label,
+            "n_con_hueco": with_gap["n"],
+            "neto_con_hueco_r": with_gap["expectativa_neta_r"],
+            "n_sin": without["n"],
+            "neto_sin_r": without["expectativa_neta_r"],
+        }
+
+    rows = [
+        row(f"vía {value}", trades[trades["confirmacion"] == value], flag[trades["confirmacion"] == value])
+        for value in sorted(trades["confirmacion"].dropna().unique())
+    ]
+    rows += [
+        row(f"rama {value}", trades[trades["rama"] == value], flag[trades["rama"] == value])
+        for value in BRANCHES
+        if "rama" in trades.columns and (trades["rama"] == value).any()
+    ]
+    rows.append(row(TOTAL_ROW, trades, flag))
+    return pd.DataFrame(rows, columns=columns)
+
+
 def cost_by_via_and_stop(trades: pd.DataFrame) -> pd.DataFrame:
     """§5.5 de la 3.1 — coste por operación en R, por vía y por configuración.
 
@@ -260,6 +455,11 @@ def cost_by_via_and_stop(trades: pd.DataFrame) -> pd.DataFrame:
         }
 
     rows = [
+        row(f"rama {value}", trades[trades["rama"] == value])
+        for value in BRANCHES
+        if "rama" in trades.columns and (trades["rama"] == value).any()
+    ]
+    rows += [
         row(f"vía {value}", trades[trades["confirmacion"] == value])
         for value in sorted(trades["confirmacion"].dropna().unique())
     ]
@@ -286,6 +486,7 @@ BREAKDOWNS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ),
     ("5.2 · Tipo de zona", "zona_h4", tuple(value.value for value in ZoneKind)),
     ("5.3 · Desenlace de la zona", "desenlace_zona", tuple(value.value for value in Outcome)),
+    ("5.3b · Rama (zona y desenlace)", "rama", BRANCHES),
     (
         "5.4 · Entrada en H1 / entrada en M15",
         "entrada_en",
@@ -305,6 +506,12 @@ def all_breakdowns(trades: pd.DataFrame) -> list[tuple[str, pd.DataFrame]]:
     tables = [(title, breakdown(trades, column, order)) for title, column, order in BREAKDOWNS]
     tables.append(("5.7 · Año", by_year(trades)))
     tables.append(("5.8 · Definición de rechazo", by_rejection(trades)))
+    # Fase 3.2. Los dos cortes nuevos van con los ocho de siempre y no en una
+    # sección aparte: el enunciado pide reportar el grupo del hueco de fin de
+    # semana "en todos los desgloses", y un desglose que sólo existe en su propia
+    # página no está en los demás.
+    tables.append(("5.9 · Dirección frente al ID de H4", against_the_id(trades)))
+    tables.append(("5.10 · Hueco de fin de semana", weekend_gap(trades)))
     return tables
 
 
@@ -583,14 +790,20 @@ def break_even_note() -> str:
 
 
 __all__ = [
+    "BRANCHES",
     "BREAKDOWNS",
     "COMPARED",
     "METRIC_COLUMNS",
+    "NEW",
+    "OLD",
     "TOTAL_ROW",
+    "against_the_id",
     "all_breakdowns",
     "break_even_note",
     "breakdown",
+    "by_branch",
     "by_rejection",
+    "by_rejection_form",
     "by_via",
     "by_year",
     "by_year_and_direction",
@@ -600,7 +813,10 @@ __all__ = [
     "funnel",
     "guard_rails",
     "metrics",
+    "rejection_form_counts",
     "rejection_overlap",
     "risk_distribution",
     "side_by_side",
+    "weekend_gap",
+    "weekend_gap_by_via",
 ]

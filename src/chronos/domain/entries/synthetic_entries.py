@@ -39,12 +39,14 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from chronos.domain.structure.enums import BodyDirection, ImpulseDirection
 from chronos.domain.structure.synthetic_break import (
     MIRROR_CENTRE,
     SYNTHETIC_BREAK_UP,
     SYNTHETIC_ORDER_BLOCK_UP,
 )
 from chronos.domain.structure.synthetic_zones import Candle, mirror
+from chronos.domain.structure.zones import Zone, ZoneKind
 
 #: Arranque de las series de H4. Medianoche en punto para que la rejilla de
 #: agregación del sintético —H4 sin desplazamiento y día natural de UTC— caiga
@@ -160,6 +162,148 @@ H1_TURTLE_GAPPED_DOWN: tuple[Candle, ...] = mirror(H1_TURTLE_GAPPED_UP, MIRROR_C
 #: recalcule: si el espejo se moviera, el test tiene que fallar.
 TURTLE_EXTREME_UP = 1995.00
 TURTLE_EXTREME_DOWN = 2 * MIRROR_CENTRE - TURTLE_EXTREME_UP
+
+
+# --- Fase 3.2: el rechazo en H4 ---------------------------------------------
+#
+# Once casos, y van donde su esperado se puede escribir **exacto**, igual que los
+# diez de la 3.0:
+#
+#    1. contacto sin rechazo ni rotura ...... `H4_NO_REJECTION_UP`
+#    2. rechazo forma A ..................... `H4_REJECT_A_UP`
+#    3. rechazo forma B (turtle soup de H4) . `H4_REJECT_B_UP`
+#    4. las dos formas a la vez ............. `H4_REJECT_BOTH_UP` y `H4_REJECT_ORDER_UP`
+#    5. UL roto y retesteado ................ `H4_RETEST_UP`, ya escrito arriba
+#    6. UL roto sin retesteo ................ `H4_NO_RETEST_UP`, ya escrito arriba
+#    7. OB rechazado ........................ `H4_REJECT_OB_A_UP`
+#    8. OB roto ............................. `H4_ORDER_BLOCK_BROKEN_UP`, ya escrito
+#    9. rechazo sin confirmación en H1 ...... la cascada entera, sobre estas velas
+#   10. confirmación de H1 en la dirección contraria a la del rechazo
+#   11. todos los anteriores en bajista ..... los espejos, sin escribir a mano
+#
+# Los casos 1, 2, 3, 4 y 7 se comprueban sobre el **detector de rechazos** con la
+# zona escrita a mano: ahí el esperado es exacto y no depende de que el detector
+# de impulsos coloque el ID donde uno cree. Los demás siguen recorriendo la
+# cascada entera, que es donde viven.
+
+#: La zona UL alcista de referencia: [2010, 2012]. **No es una zona nueva**: es
+#: la del ID#1 de la fase 2.1 (`SYNTHETIC_BREAK_UP`, el UL que deja b3), escrita
+#: aquí como número para que el esperado del test no la recalcule.
+H4_UL_INNER_UP = 2010.00
+H4_UL_OUTER_UP = 2012.00
+
+#: La zona OB alcista de referencia: [1994, 2002], la vela b0 entera. En un ID
+#: alcista el OB se recorre hacia abajo, así que su borde INTERIOR es el de
+#: arriba (2002) y el exterior el de abajo (1994).
+H4_OB_INNER_UP = 2002.00
+H4_OB_OUTER_UP = 1994.00
+
+#: Caso 1. El precio toca [2010, 2012] y **la sostiene**: cierra dentro las dos
+#: veces. Ni forma A —el cierre no sale de la zona— ni forma B —la primera vela
+#: no deja mecha que rechazar, y la segunda no cierra por debajo de la de n1—.
+#: Sin desenlace no hay operación, que es justo lo que la 3.1 sí operaba.
+H4_NO_REJECTION_UP: tuple[Candle, ...] = (
+    (2005.00, 2005.50, 2004.00, 2005.50),  # n0 verde · cierra en su máximo: SIN mecha superior
+    (2005.50, 2010.50, 2005.00, 2010.30),  # n1 verde · TOCA la zona y cierra DENTRO: la sostiene
+    (2010.30, 2011.00, 2010.10, 2010.90),  # n2 verde · sigue dentro; 2010.90 no baja de 2010.50
+)
+
+#: Caso 2. Forma A pura. `a0` cierra en su máximo, así que no deja mecha superior
+#: y la forma B **no puede** existir sobre `a1`: lo que se comprueba es la forma
+#: A sola, sin que la otra la tape.
+H4_REJECT_A_UP: tuple[Candle, ...] = (
+    (2005.00, 2005.50, 2004.00, 2005.50),  # a0 verde · sin mecha superior
+    (2005.50, 2011.00, 2005.00, 2008.00),  # a1 roja · entra a 2011 y CIERRA EN 2008, fuera de la
+    #                                            zona y por el lado por el que entró: FORMA A
+)
+
+#: Caso 3. Forma B pura. La vela que rechaza cierra **dentro** de la zona, así
+#: que la forma A no se cumple, y aun así es un turtle soup bajista en la zona.
+H4_REJECT_B_UP: tuple[Candle, ...] = (
+    (2005.00, 2011.50, 2004.00, 2010.50),  # b0 verde · deja mecha superior hasta 2011.50, en la zona
+    (2010.50, 2011.50, 2010.00, 2010.20),  # b1 roja · llega a 2011.50 y cierra en 2010.20, por
+    #                                            debajo: TURTLE SOUP. Y 2010.20 está DENTRO de
+    #                                            [2010, 2012], así que la forma A no marca
+)
+
+#: Caso 4a. Las dos formas en la **misma** vela: llega a la mecha de la anterior
+#: y además cierra fuera de la zona. La decisión es idéntica por las dos, así que
+#: cuál se apunte como disparo es cosmético; lo que no puede perderse es que las
+#: dos estaban disponibles.
+H4_REJECT_BOTH_UP: tuple[Candle, ...] = (
+    (2005.00, 2011.50, 2004.00, 2010.50),  # c0 verde · mecha superior hasta 2011.50
+    (2010.50, 2011.50, 2007.00, 2008.00),  # c1 roja · llega a 2011.50 (forma B) y cierra en 2008,
+    #                                            fuera de la zona (forma A)
+)
+
+#: Caso 4b. Las dos formas en velas **distintas**: gana la primera
+#: cronológicamente, que aquí es la A de `d1`. La B de `d3` llega dos velas
+#: después y no decide nada.
+H4_REJECT_ORDER_UP: tuple[Candle, ...] = (
+    (2005.00, 2005.50, 2004.00, 2005.50),  # d0 verde · sin mecha superior
+    (2005.50, 2011.00, 2005.00, 2008.00),  # d1 roja · FORMA A, y la B no puede existir sobre ella
+    (2008.00, 2011.50, 2007.00, 2010.50),  # d2 verde · deja mecha hasta 2011.50
+    (2010.50, 2011.50, 2010.00, 2010.20),  # d3 roja · FORMA B, dos velas tarde
+)
+
+#: Caso 7. El OB rechazado: la vela entra en [1994, 2002] y cierra **por encima**
+#: de 2002, que en el OB es el lado de dentro. La operación va A FAVOR del ID.
+#: `o0` no deja mecha inferior, así que la forma B no puede taparlo.
+H4_REJECT_OB_A_UP: tuple[Candle, ...] = (
+    (2004.00, 2005.00, 2004.00, 2004.50),  # o0 verde · low = open: SIN mecha inferior
+    (2004.50, 2005.00, 2001.00, 2003.00),  # o1 roja · entra a 2001 y CIERRA EN 2003: FORMA A ->
+    #                                            COMPRA, a favor del ID alcista
+)
+
+#: Los espejos del §8.11. No se escriben a mano: la reflexión invierte a la vez
+#: todas las desigualdades del módulo, así que una asimetría es un fallo del
+#: código y no de la serie.
+H4_NO_REJECTION_DOWN: tuple[Candle, ...] = mirror(H4_NO_REJECTION_UP, MIRROR_CENTRE)
+H4_REJECT_A_DOWN: tuple[Candle, ...] = mirror(H4_REJECT_A_UP, MIRROR_CENTRE)
+H4_REJECT_B_DOWN: tuple[Candle, ...] = mirror(H4_REJECT_B_UP, MIRROR_CENTRE)
+H4_REJECT_BOTH_DOWN: tuple[Candle, ...] = mirror(H4_REJECT_BOTH_UP, MIRROR_CENTRE)
+H4_REJECT_ORDER_DOWN: tuple[Candle, ...] = mirror(H4_REJECT_ORDER_UP, MIRROR_CENTRE)
+H4_REJECT_OB_A_DOWN: tuple[Candle, ...] = mirror(H4_REJECT_OB_A_UP, MIRROR_CENTRE)
+
+#: Los bordes de las dos zonas, reflejados. La reflexión cambia de sitio el borde
+#: interior y el exterior, así que se escriben derivados y no a ojo.
+H4_UL_INNER_DOWN = 2 * MIRROR_CENTRE - H4_UL_INNER_UP
+H4_UL_OUTER_DOWN = 2 * MIRROR_CENTRE - H4_UL_OUTER_UP
+H4_OB_INNER_DOWN = 2 * MIRROR_CENTRE - H4_OB_INNER_UP
+H4_OB_OUTER_DOWN = 2 * MIRROR_CENTRE - H4_OB_OUTER_UP
+
+
+def reference_zone(
+    kind: ZoneKind, direction: ImpulseDirection, *, id_num: int = 1, timeframe: str = "H4"
+) -> Zone:
+    """La zona de referencia de la fase 3.2, construida una sola vez.
+
+    Existe para que el test, la evidencia y las capturas no la escriban cada uno
+    con sus propios números: si los bordes se movieran, se moverían en un sitio.
+    Es una zona **de laboratorio** —no sale de ningún detector— y por eso nace en
+    el arranque del sintético: aquí lo que se prueba es el rechazo, no cuándo
+    empieza a existir una zona, que ya lo fija la fase 2.0.
+    """
+    up = direction is ImpulseDirection.ALCISTA
+    if kind is ZoneKind.LAST:
+        inner = H4_UL_INNER_UP if up else H4_UL_INNER_DOWN
+        outer = H4_UL_OUTER_UP if up else H4_UL_OUTER_DOWN
+    else:
+        inner = H4_OB_INNER_UP if up else H4_OB_INNER_DOWN
+        outer = H4_OB_OUTER_UP if up else H4_OB_OUTER_DOWN
+    return Zone(
+        kind=kind,
+        id_num=id_num,
+        timeframe=timeframe,
+        direction=direction,
+        index_defining=0,
+        ts_defining=SYNTHETIC_ENTRY_START,
+        defining_body=BodyDirection.BULLISH if up else BodyDirection.BEARISH,
+        inner=inner,
+        outer=outer,
+        ts_outer_known=SYNTHETIC_ENTRY_START,
+        ts_birth=SYNTHETIC_ENTRY_START,
+    )
 
 
 #: Las mismas historias del revés (§8.10). No se escriben a mano a propósito.
@@ -299,12 +443,32 @@ __all__ = [
     "H1_TURTLE_ONE_SIDED_UP",
     "H1_TURTLE_SHORT_DOWN",
     "H1_TURTLE_SHORT_UP",
+    "H4_NO_REJECTION_DOWN",
+    "H4_NO_REJECTION_UP",
     "H4_NO_RETEST_DOWN",
     "H4_NO_RETEST_UP",
+    "H4_OB_INNER_DOWN",
+    "H4_OB_INNER_UP",
+    "H4_OB_OUTER_DOWN",
+    "H4_OB_OUTER_UP",
     "H4_ORDER_BLOCK_BROKEN_DOWN",
     "H4_ORDER_BLOCK_BROKEN_UP",
+    "H4_REJECT_A_DOWN",
+    "H4_REJECT_A_UP",
+    "H4_REJECT_BOTH_DOWN",
+    "H4_REJECT_BOTH_UP",
+    "H4_REJECT_B_DOWN",
+    "H4_REJECT_B_UP",
+    "H4_REJECT_OB_A_DOWN",
+    "H4_REJECT_OB_A_UP",
+    "H4_REJECT_ORDER_DOWN",
+    "H4_REJECT_ORDER_UP",
     "H4_RETEST_DOWN",
     "H4_RETEST_UP",
+    "H4_UL_INNER_DOWN",
+    "H4_UL_INNER_UP",
+    "H4_UL_OUTER_DOWN",
+    "H4_UL_OUTER_UP",
     "M1_BOTH_DOWN",
     "M1_BOTH_UP",
     "M1_ENTRY",
@@ -324,4 +488,5 @@ __all__ = [
     "TURTLE_EXTREME_UP",
     "explode",
     "explode_all",
+    "reference_zone",
 ]

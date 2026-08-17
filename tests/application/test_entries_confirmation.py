@@ -34,6 +34,7 @@ from chronos.domain.entries.enums import (
     ConfirmationKind,
     ConfirmMode,
     ConfirmPriority,
+    EntryMode,
     GuardRail,
 )
 from chronos.domain.entries.synthetic_entries import (
@@ -215,7 +216,15 @@ def _outcomes(candles: tuple[tuple[float, float, float, float], ...], mode: Conf
         synthetic.run,
         synthetic.zones,
         synthetic.bars["M15"],
-        EntriesConfig(enabled=True, allow_missing_ask=True, confirm_mode=mode),
+        # ⚠️ `v31_contacto`: lo que se compara aquí es la 3.0 contra la 3.1, y las
+        # dos operaban POR CONTACTO. Con el modo de la 3.2 no habría nada que
+        # comparar, porque el contacto ya no abre ninguna operación.
+        EntriesConfig(
+            enabled=True,
+            allow_missing_ask=True,
+            confirm_mode=mode,
+            entry_mode=EntryMode.V31_CONTACTO,
+        ),
     )
     found: dict[tuple, str] = {}
     for signal in cascade.signals:

@@ -1,9 +1,9 @@
-"""Informe de la fase 3.1 en texto plano.
+"""Informe de la fase 3.2 en texto plano.
 
 Se lee en un terminal, se pega en un correo y se archiva junto a las capturas, así
 que va en ancho fijo y sin colores.
 
-Cuatro cosas que este informe hace y que no son decorativas:
+Cinco cosas que este informe hace y que no son decorativas:
 
 1. **La portada declara de dónde salió cada lado del precio.** El §4 lo exige
    porque no hay fichero de ask en el proyecto, y un neto leído sin saberlo es un
@@ -13,8 +13,11 @@ Cuatro cosas que este informe hace y que no son decorativas:
    contaminado. El orden de las secciones es esa nota convertida en índice.
 3. **Ningún número agregado sin su desglose.** Todas las tablas traen la
    población delante y ninguna mezcla poblaciones sin decirlo.
-4. **La columna de la 3.0 al lado.** La 3.1 cambia una sola cosa —qué confirma en
-   H1— y sin la columna anterior no se puede saber qué movió ese cambio.
+4. **La columna de la 3.1 al lado.** La 3.2 cambia qué ABRE una operación, y sin
+   la columna anterior no se puede saber qué movió ese cambio.
+5. **Las tres ramas por separado** (§6.2) y **las operaciones contra el ID de H4
+   aisladas** (§6.4). Son poblaciones distintas —una de ellas, nueva del
+   proyecto— y promediarlas mezclaría tres estrategias en un número.
 
 **Aquí no se recomienda nada ni se interpreta ningún resultado.** Se presentan
 números; decide el propietario.
@@ -64,23 +67,30 @@ _METRICS = {
 _COMPARED = {
     # Con coma y sin decimales, no `,d`: una población que existe en una fase y
     # no en la otra deja la celda vacía, y una columna con un hueco es float.
+    "n_32": ",.0f",
     "n_31": ",.0f",
-    "n_30": ",.0f",
+    "win_rate_32": _PCT,
     "win_rate_31": _PCT,
-    "win_rate_30": _PCT,
+    "expectativa_bruta_r_32": _R,
     "expectativa_bruta_r_31": _R,
-    "expectativa_bruta_r_30": _R,
+    "expectativa_neta_r_32": _R,
     "expectativa_neta_r_31": _R,
-    "expectativa_neta_r_30": _R,
+    "coste_medio_r_32": _R_ABS,
     "coste_medio_r_31": _R_ABS,
-    "coste_medio_r_30": _R_ABS,
 }
 _FUNNEL = {"n": _COUNT, "pct_sobre_el_anterior": _PCT, "pct_sobre_el_primero": _PCT}
 _FUNNEL_PAIR = {
-    "n_30": _COUNT,
     "n_31": _COUNT,
+    "n_32": _COUNT,
     "diferencia": "+,d",
-    "pct_de_la_30": _PCT,
+    "pct_de_la_31": _PCT,
+}
+_FORMS = {"disponible": _COUNT, "disparo": _COUNT, "pct_de_los_rechazos": _PCT}
+_GAP = {
+    "n_con_hueco": _COUNT,
+    "neto_con_hueco_r": _R,
+    "n_sin": _COUNT,
+    "neto_sin_r": _R,
 }
 _RAILS = {"n": _COUNT, "pct": _PCT}
 _VIAS = {"n": _COUNT, "pct": _PCT, "con_la_otra_via_disponible": _COUNT}
@@ -129,9 +139,13 @@ def render_entry_report(
         _decisions(config),
         _stop_first(trades, before),
         _funnel(cascade, execution, previous, lost),
+        _branches(trades, before),
+        _rejection_forms(trades),
+        _against(trades, before),
         _vias(cascade, trades, priority),
         _results(trades, execution, before),
         _costs(trades, before),
+        _weekend(trades, before),
         _direction_by_year(trades, before),
         _frequency(trades, before),
         _rejections(trades),
@@ -158,7 +172,8 @@ def _cover(
         ("Estructura", f"fase 2.1 · BREAK_BY_ZONE = true · hash {run.config_hash}"),
         (
             "Cascada",
-            f"fase 3.1 · CONFIRM_MODE = {cascade.config.confirm_mode.value} · "
+            f"fase 3.2 · ENTRY_MODE = {cascade.config.entry_mode.value} · "
+            f"CONFIRM_MODE = {cascade.config.confirm_mode.value} · "
             f"CONFIRM_PRIORITY = {cascade.config.confirm_priority.value} · "
             f"hash {cascade.config_hash}",
         ),
@@ -167,8 +182,8 @@ def _cover(
     width = max(len(label) for label, _ in rows)
     header = "\n".join(f"{label.ljust(width)}   {value}" for label, value in rows)
     return (
-        "FASE 3.1 · CORRECCIÓN DE LA CONFIRMACIÓN EN H1\n"
-        "==============================================\n\n"
+        "FASE 3.2 · EL CONTACTO NO ES SEÑAL\n"
+        "==================================\n\n"
         f"{header}\n\n"
         "DECLARACIÓN OBLIGATORIA DE PORTADA (§4)\n"
         "---------------------------------------\n"
@@ -195,12 +210,13 @@ def _regression(ok: bool, note: str, v30: str) -> str:
         f"  0.1 · LÍNEA BASE DE LA FASE 2.1 — VEREDICTO: {verdict}",
         f"        {note}",
         "",
-        "Y con `CONFIRM_MODE = v30_tres_vias` el motor tiene que reproducir la fase",
-        "3.0 exacta. Si no saliera idéntico habría un bug en la refactorización y la",
-        "comparación entre las dos fases no significaría nada.",
+        "Y con `ENTRY_MODE = v31_contacto` el motor tiene que reproducir la fase 3.1",
+        "exacta: 1.508 confirmaciones y 3.298 operaciones. Si no saliera idéntico",
+        "habría un bug en la refactorización y la comparación entre las dos fases no",
+        "significaría nada.",
         "",
-        f"  0.2 · LÍNEA BASE DE LA FASE 3.0\n        {v30}" if v30 else
-        "  0.2 · LÍNEA BASE DE LA FASE 3.0 — no se corrió en esta ejecución.",
+        f"  0.2 · LÍNEA BASE DE LA FASE 3.1\n        {v30}" if v30 else
+        "  0.2 · LÍNEA BASE DE LA FASE 3.1 — no se corrió en esta ejecución.",
     ]
     return "\n".join(body) + "\n"
 
@@ -209,15 +225,49 @@ def _scope(cascade: CascadeRun) -> str:
     return (
         section("Alcance de esta fase")
         + "\n\n"
-        "La 3.1 corrige la ESPECIFICACIÓN de la confirmación en H1, que en la 3.0\n"
-        "trataba tres vías como equivalentes. No es un arreglo de código: el\n"
-        "propietario nunca dijo que un ID de H1 confirmara una entrada, y las tres\n"
-        "definiciones de rechazo se quedaron sin decidir y funcionando EN UNIÓN, que\n"
-        "es el criterio más laxo posible.\n\n"
-        "NO SE HA TOCADO nada más: ni el ID, ni las zonas, ni la regla de rotura por\n"
+        "EL CONTACTO NO ES SEÑAL. En la 3.0 y la 3.1 tocar una zona de H4 bastaba\n"
+        "para operar a favor del ID. Fue un error de la ESPECIFICACIÓN, no del\n"
+        "código: se escribió que el contacto abría observación y que en el respeto se\n"
+        "operaba a favor del ID. La consecuencia medida es que 2.234 de las 3.702\n"
+        "operaciones de la 3.0 fueron «UL + respeto», es decir COMPRAR cuando el\n"
+        "precio sube al techo del impulso: más de la mitad del backtest eran\n"
+        "operaciones que no existen en la estrategia del propietario.\n\n"
+        "LAS CUATRO RAMAS, Y NINGUNA MÁS:\n\n"
+        "  UL rechazado ............. operación EN CONTRA del ID\n"
+        "  UL roto y retesteado ..... a favor de la rotura (ya estaba)\n"
+        "  OB rechazado ............. a favor del ID\n"
+        "  OB roto .................. SIN operación, la observación muere\n\n"
+        "Se elimina por completo la rama «respeto operado a favor del ID por\n"
+        "contacto». Ninguna operación puede nacer de un contacto sin rechazo ni\n"
+        "rotura con retesteo.\n\n"
+        "EL RECHAZO SE ESPERA EN H4, no en H1. La vela de H4 rechaza la zona, eso fija\n"
+        "la DIRECCIÓN de la operación, y sólo después H1 confirma la entrada con las\n"
+        "dos vías de la 3.1, sin cambios. Dos formas válidas, y VALE LA QUE OCURRA\n"
+        "PRIMERO:\n\n"
+        "  Forma A · RECHAZO SIMPLE\n"
+        "          Una vela de H4 entra en la zona y CIERRA FUERA DE ELLA, sin\n"
+        "          sostenerla. Una sola vela. «Fuera» es el lado por el que entró:\n"
+        "          cerrar más allá del borde exterior ya tiene nombre en el proyecto\n"
+        "          —es la ROTURA de la fase 2.1— y una rotura es lo contrario de un\n"
+        "          rechazo.\n\n"
+        "  Forma B · TURTLE SOUP EN H4\n"
+        "          Dos velas de H4 consecutivas: la segunda llega a la mecha de la\n"
+        "          primera y cierra sin superarla, y eso ocurre EN LA ZONA. Misma\n"
+        "          definición que el turtle soup de H1, aplicada a H4: se llama al\n"
+        "          mismo detector, no se reimplementa.\n\n"
+        "  SIN PARÁMETROS. Ninguna de las dos lleva umbrales, percentiles ni\n"
+        "  proporciones.\n\n"
+        "⚠️ ES LA PRIMERA VEZ QUE UNA OPERACIÓN VA EN CONTRA DEL ID DE H4. En un ID\n"
+        "alcista el rechazo del UL produce una VENTA. La dirección deja de ser una\n"
+        "propiedad del impulso y viaja en la observación hasta el stop y el objetivo;\n"
+        "la sección 5 aísla esa población entera.\n\n"
+        "EL RETESTEO DEL OB NO SE IMPLEMENTA. El propietario lo ha aparcado a\n"
+        "propósito. Queda como PENDIENTE CONOCIDO: hoy el OB roto mata la observación\n"
+        "y no abre ninguna rama.\n\n"
+        "NO SE HA TOCADO nada más: ni el ID, ni las zonas UL/OB, ni la rotura por\n"
         "zona, ni la ejecución, ni el objetivo. No hay FVG. No se ha optimizado nada:\n"
         "no se ha corrido ni una barrida buscando umbrales que mejoren el resultado.\n\n"
-        "H1 CONFIRMA POR DOS VÍAS Y SÓLO DOS:\n\n"
+        "H1 SIGUE CONFIRMANDO POR DOS VÍAS Y SÓLO DOS (fase 3.1, sin cambios):\n\n"
         "  Vía 1 · TURTLE SOUP\n"
         "          Dos velas de H1 CONSECUTIVAS. La primera deja una mecha en la\n"
         "          dirección del movimiento previo. La segunda llega a esa mecha y\n"
@@ -233,7 +283,7 @@ def _scope(cascade: CascadeRun) -> str:
         "  · R1, R2 y R3 como vías. Se siguen calculando y persistiendo en el CSV\n"
         "    como columnas informativas y NINGUNA REGLA LAS LEE: sirven para\n"
         "    estudiarlas más adelante sin recalcular el histórico.\n\n"
-        "El juego de la 3.0 sigue implementado bajo `CONFIRM_MODE = v30_tres_vias`,\n"
+        "El juego de la 3.1 sigue implementado bajo `ENTRY_MODE = v31_contacto`,\n"
         "SÓLO para el test de regresión y para poner las dos columnas al lado. No es\n"
         "una variante del proyecto.\n\n"
         "TURTLE SOUP EN TODA LA SERIE DE H1 (informativo, no es una señal):\n"
@@ -282,7 +332,7 @@ def _stop_first(trades: pd.DataFrame, before: pd.DataFrame) -> str:
         "",
         metrics.break_even_note(),
         "",
-        section("1.1 · §5.4 · Distribución del 1R en USD, en ATR y en % del precio", 2),
+        section("1.1 · §6.5 · ⚠️ DISTRIBUCIÓN DEL 1R en USD, en ATR y en % del precio", 2),
         "",
         "El control de sanidad que dice si la fórmula del stop aterriza en una banda",
         "operable o produce stops de un dólar que la horquilla se come. Los dólares",
@@ -304,7 +354,7 @@ def _stop_first(trades: pd.DataFrame, before: pd.DataFrame) -> str:
             formats=_RISK,
         ),
         "",
-        section("1.3 · El mismo 1R de la fase 3.0, para comparar", 2),
+        section("1.3 · El mismo 1R de la fase 3.1, para comparar", 2),
         "",
         render_table(metrics.risk_distribution(before), formats=_RISK),
     ]
@@ -325,26 +375,32 @@ def _funnel(
     lost: Sequence[LostConfirmation],
 ) -> str:
     body = [
-        section("2. §5.1 · Embudo completo, antes y después"),
+        section("2. §6.1 · Embudo completo, antes y después"),
         "",
         "De cuántos contactos de zona a cuántas operaciones, y dónde se cae cada una.",
         "",
         "DOS PASOS SUBEN EN VEZ DE BAJAR, y no es un error de recuento: una misma zona",
-        "tocada produce hasta DOS observaciones —la de respeto y la de rotura y",
+        "tocada produce hasta DOS observaciones —la de rechazo y la de rotura y",
         "retesteo, que son momentos distintos— y una misma señal produce hasta DOS",
         "operaciones, una por variante de stop. El embudo es la cascada, no una",
         "partición, y se deja como sale.",
+        "",
+        "`rechazos_en_h4` es el paso NUEVO de esta fase y es donde muere la rama que",
+        "la 3.1 operaba por contacto. Con `ENTRY_MODE = v31_contacto` vale 0 porque en",
+        "ese modo no se busca ningún rechazo; poner ahí el número de contactos daría a",
+        "entender que sí.",
         "",
         render_table(metrics.funnel(cascade, execution), formats=_FUNNEL),
     ]
     if previous is not None:
         body += [
             "",
-            section("2.1 · El mismo embudo, 3.0 contra 3.1", 2),
+            section("2.1 · El mismo embudo, 3.1 contra 3.2", 2),
             "",
-            "Los pasos de arriba —zonas y observaciones— son IDÉNTICOS por construcción:",
-            "la 3.1 sólo cambia qué confirma en H1 y las observaciones se recogen antes",
-            "de mirar H1. Si alguno de esos pasos se moviera, sería un bug.",
+            "Los dos primeros pasos —zonas de H4 y zonas tocadas— son IDÉNTICOS por",
+            "construcción: la 3.2 no toca ni el ID, ni las zonas, ni la rotura por zona.",
+            "Si alguno se moviera sería un bug, y el comando para antes de llegar aquí.",
+            "A partir de `observaciones` la caída es el efecto de la fase.",
             "",
             render_table(
                 comparison.funnel_comparison(
@@ -355,23 +411,28 @@ def _funnel(
         ]
     body += [
         "",
-        section("2.2 · Observaciones que confirmaban en la 3.0 y ahora mueren", 2),
+        section("2.2 · Observaciones que confirmaban en la 3.1 y ahora mueren", 2),
         "",
-        f"{len(lost):,} observaciones confirmaban en la 3.0 y con las dos vías de la",
-        "3.1 ya no confirman. Se cuentan por la vía que las confirmaba antes y por el",
-        "guardarraíl en el que mueren ahora. El detalle completo, una fila por",
-        "observación, está en `confirmaciones_perdidas.csv`.",
+        f"{len(lost):,} observaciones confirmaban en la 3.1 y en la 3.2 ya no. Se",
+        "cuentan por la vía que las confirmaba antes y por el guardarraíl en el que",
+        "mueren ahora. El detalle completo, una fila por observación, está en",
+        "`confirmaciones_perdidas.csv`.",
         "",
         render_table(comparison.lost_table(lost), formats=_LOST),
+        "",
+        "        Y las mismas, por RAMA de la 3.1:",
+        "",
+        render_table(comparison.lost_by_branch(lost), formats=_LOST),
         "",
     ]
     if previous is not None:
         gained = comparison.gained_confirmations(previous.cascade, cascade)
         body += [
-            "Y AL REVÉS: hay observaciones que la 3.1 confirma y la 3.0 no. No es una",
-            "contradicción y es lo que hace que la resta cuadre: la vía 2 confirma",
-            "cuando el PRECIO LLEGA al OB, que puede ser muchas velas después de que",
-            "el OB naciera, y en la 3.0 esa visita no confirmaba nada.",
+            "Y AL REVÉS: puede haber observaciones que la 3.2 confirme y la 3.1 no. No",
+            "es una contradicción: la ventana de búsqueda en H1 de una rama de rechazo",
+            "arranca en el cierre de la vela que rechazó, no en el del contacto, y la",
+            "dirección que se busca es otra. Lo que sale de una ventana distinta en una",
+            "dirección distinta no tiene por qué ser un subconjunto.",
             "",
             f"  {len(lost):,} confirmaciones perdidas · {len(gained):,} ganadas · "
             f"saldo {len(gained) - len(lost):+,}",
@@ -381,7 +442,11 @@ def _funnel(
         section("2.3 · En qué guardarraíl muere cada señal descartada", 2),
         "",
         "Cuenta MOTIVOS, no zonas: una zona puede aportar dos, uno por su observación",
-        "de respeto y otro por su rama de rotura y retesteo.",
+        "de rechazo y otro por su rama de rotura y retesteo.",
+        "",
+        "`contacto_sin_desenlace` es el guardarraíl NUEVO: el precio tocó la zona y la",
+        "observación se apagó sin rechazo ni rotura con retesteo. Es donde va a parar",
+        "la rama que la 3.1 operaba a ciegas.",
         "",
         render_table(metrics.guard_rails(cascade, execution), formats=_RAILS),
         "",
@@ -403,6 +468,160 @@ def _funnel(
     return "\n".join(body) + "\n"
 
 
+# --- §6.2 Las tres ramas ------------------------------------------------------
+
+
+def _branches(trades: pd.DataFrame, before: pd.DataFrame) -> str:
+    """⚠️ La tabla más importante de la fase: cada rama medida por separado."""
+    body = [
+        section("3. §6.2 · ⚠️ OPERACIONES POR RAMA, CADA UNA POR SEPARADO"),
+        "",
+        "Las tres ramas que la 3.2 deja vivas NO son la misma estrategia con tres",
+        "etiquetas, y por eso no se promedian:",
+        "",
+        "  UL rechazo ............... el precio sube al techo del impulso, lo rechaza",
+        "                             y se opera EN CONTRA del ID de H4. Población",
+        "                             NUEVA del proyecto.",
+        "  UL rotura_y_retesteo ..... el precio rompe el techo y vuelve a testearlo;",
+        "                             se opera a favor de la rotura. Ya existía.",
+        "  OB rechazo ............... el precio baja al origen de la pierna, lo",
+        "                             rechaza y se opera a favor del ID.",
+        "",
+        "`UL respeto` y `OB respeto` sólo pueden aparecer con `ENTRY_MODE =",
+        "v31_contacto`: son la rama que esta fase elimina. Si salieran aquí con el modo",
+        "de la 3.2, sería un bug.",
+        "",
+        "El intervalo de confianza es normal-asintótico y aproximado: con menos de ~30",
+        "operaciones no significa gran cosa, y está para que se vea cuándo una rama es",
+        "demasiado pequeña para decir nada de ella.",
+        "",
+        render_table(metrics.by_branch(trades), formats=_METRICS),
+    ]
+    if not before.empty:
+        body += [
+            "",
+            section("3.1 · Las mismas ramas en la fase 3.1", 2),
+            "",
+            "Ahí es donde se ve el tamaño de lo que se elimina: la rama `UL respeto` de",
+            "la 3.1 era más de la mitad del backtest.",
+            "",
+            render_table(metrics.by_branch(before), formats=_METRICS),
+            "",
+            "        3.2 contra 3.1:",
+            "",
+            render_table(
+                metrics.side_by_side(metrics.by_branch(trades), metrics.by_branch(before)),
+                formats=_COMPARED,
+            ),
+        ]
+    return "\n".join(body) + "\n"
+
+
+# --- §6.3 Las dos formas del rechazo ------------------------------------------
+
+
+def _rejection_forms(trades: pd.DataFrame) -> str:
+    body = [
+        section("4. §6.3 · Rechazos en H4 por forma (A y B)"),
+        "",
+        "  Forma A · la vela entra en la zona y CIERRA FUERA, por el lado por el que",
+        "            entró. Una sola vela.",
+        "  Forma B · turtle soup de H4: dos velas consecutivas, la segunda llega a la",
+        "            mecha de la primera y cierra sin superarla, EN la zona.",
+        "",
+        "VALE LA QUE OCURRA PRIMERO. Se evalúan las dos SIEMPRE, aunque la primera ya",
+        "rechace: en la 3.0 la evaluación se cortaba al primer acierto y esa",
+        "información hubo que reconstruirla a mano después.",
+        "",
+        "Cuando las dos caen en la MISMA vela la decisión es idéntica —misma vela,",
+        "misma dirección, mismo instante— así que cuál se apunte como disparo es",
+        "COSMÉTICO. La fila `las dos a la vez` es la que lo mide.",
+        "",
+        "`disponible` y `disparo` no suman al total: una vela puede estar en las dos",
+        "filas de arriba a la vez, y ésa es la pregunta que el §6.3 hace.",
+        "",
+        render_table(metrics.rejection_form_counts(trades), formats=_FORMS),
+        "",
+        section("4.1 · Expectativa de cada forma", 2),
+        "",
+        "Las poblaciones SE SOLAPAN y no reparten el total. Se presentan y no se",
+        "interpretan: aquí no se recomienda una forma sobre la otra.",
+        "",
+        render_table(metrics.by_rejection_form(trades), formats=_METRICS),
+    ]
+    return "\n".join(body) + "\n"
+
+
+# --- §6.4 Las operaciones EN CONTRA del ID ------------------------------------
+
+
+def _against(trades: pd.DataFrame, before: pd.DataFrame) -> str:
+    body = [
+        section("5. §6.4 · ⚠️ OPERACIONES EN CONTRA DEL ID DE H4"),
+        "",
+        "Es una POBLACIÓN NUEVA del proyecto. Hasta la fase 3.1 ninguna operación iba",
+        "contra el sesgo de H4: en un ID alcista se compraba siempre. Con el UL",
+        "rechazado se VENDE en un ID alcista, y hay que verla aislada antes de mezclarla",
+        "con nada.",
+        "",
+        "La dirección la fija el rechazo y no el impulso: el UL se atraviesa a favor",
+        "del ID, así que rechazarlo es irse al otro lado. Es la misma regla que ya",
+        "decidía por dónde se rompe cada zona, leída del revés.",
+        "",
+        render_table(metrics.against_the_id(trades), formats=_METRICS),
+    ]
+    if not before.empty:
+        body += [
+            "",
+            section("5.1 · La misma tabla en la fase 3.1", 2),
+            "",
+            "En la 3.1 la fila de «en contra» tiene que salir vacía o no salir: esa",
+            "población no existía. Es la comprobación de que la columna dice lo que",
+            "promete.",
+            "",
+            render_table(metrics.against_the_id(before), formats=_METRICS),
+        ]
+    return "\n".join(body) + "\n"
+
+
+# --- §6.7 El hueco de fin de semana -------------------------------------------
+
+
+def _weekend(trades: pd.DataFrame, before: pd.DataFrame) -> str:
+    body = [
+        section("9. §6.7 · ⚠️ HUECO DE FIN DE SEMANA entre decisión y ejecución"),
+        "",
+        "En el análisis de la 3.1 salieron 49 confirmaciones DECIDIDAS CON VELAS DEL",
+        "VIERNES Y EJECUTADAS EN LA REAPERTURA DEL DOMINGO, tras un hueco de unas 50",
+        "horas. Daban -0,399 R (turtle) y -0,761 R (OB) frente a -0,079 R y -0,185 R",
+        "del resto.",
+        "",
+        "ESTO NO SE CORRIGE. Es una decisión del propietario, no una limpieza técnica.",
+        "Lo único que hace esta fase es MARCAR cada operación y REPORTAR el grupo por",
+        "separado, aquí y en el desglose 5.10 de la sección 7.",
+        "",
+        "La marca NO lleva umbral de horas: no pregunta cuánto tardó, pregunta si",
+        "queda un SÁBADO entre el cierre que decide y el open de M1 que ejecuta. El",
+        "sábado es el único día en que el mercado no cotiza en ningún momento, así que",
+        "su presencia en el intervalo es exactamente «el mercado cerró y volvió a",
+        "abrir», sin elegir ninguna cifra.",
+        "",
+        render_table(metrics.weekend_gap(trades), formats=_METRICS),
+        "",
+        section("9.1 · El mismo corte por vía de confirmación y por rama", 2),
+        "",
+        render_table(metrics.weekend_gap_by_via(trades), formats=_GAP),
+    ]
+    if not before.empty:
+        body += [
+            "",
+            section("9.2 · El mismo hueco en la fase 3.1", 2),
+            "",
+            render_table(metrics.weekend_gap(before), formats=_METRICS),
+        ]
+    return "\n".join(body) + "\n"
+
+
 # --- §5.2 Las dos vías --------------------------------------------------------
 
 
@@ -410,7 +629,7 @@ def _vias(
     cascade: CascadeRun, trades: pd.DataFrame, priority: PriorityEffect | None
 ) -> str:
     body = [
-        section("3. §5.2 · Confirmaciones por vía"),
+        section("6. §5.2 de la 3.1 · Confirmaciones por vía"),
         "",
         "Cuántas observaciones confirmó cada vía y cuántas veces la otra estaba",
         "disponible en la misma vela. La segunda columna es la que dice si las dos",
@@ -421,7 +640,7 @@ def _vias(
     if priority is not None:
         body += [
             "",
-            section("3.1 · ¿Importa el orden? (CONFIRM_PRIORITY)", 2),
+            section("6.1 · ¿Importa el orden? (CONFIRM_PRIORITY)", 2),
             "",
             "Con las dos vías disponibles en la misma vela hace falta un orden",
             "determinista. El propietario no lo ha fijado, así que se declara como",
@@ -432,7 +651,7 @@ def _vias(
         ]
     body += [
         "",
-        section("3.2 · Resultados de cada vía por separado", 2),
+        section("6.2 · Resultados de cada vía por separado", 2),
         "",
         "Expectativa neta y bruta, win rate e intervalo de confianza de cada vía. El",
         "intervalo es normal-asintótico y aproximado: con menos de ~30 operaciones no",
@@ -441,7 +660,7 @@ def _vias(
         "",
         render_table(metrics.by_via(trades), formats=_METRICS),
         "",
-        section("3.3 · Turtle soup detectados dentro de una observación", 2),
+        section("6.3 · Turtle soup de H1 detectados dentro de una observación", 2),
         "",
         "El patrón se dibuja en el explorador CONFIRME O NO. Aquí está el recuento por",
         "motivo: `confirma` es la vía que se tomó, `gana_el_ob` es que las dos cayeron",
@@ -483,7 +702,7 @@ def _results(
     trades: pd.DataFrame, execution: ExecutionRun, before: pd.DataFrame
 ) -> str:
     body = [
-        section("4. §5.3 · Resultados · SIEMPRE en R, netos y brutos"),
+        section("7. §6 · Resultados · SIEMPRE en R, netos y brutos, con TODOS los desgloses"),
         "",
         "La diferencia entre el bruto y el neto es lo que diagnostica si un efecto es",
         "real o aritmética de costes. Por eso van los dos y nunca uno solo.",
@@ -492,11 +711,12 @@ def _results(
         "~30 operaciones no significa gran cosa, y está justamente para que se vea",
         "cuándo la población es demasiado pequeña para decir nada.",
         "",
-        "Cada desglose va dos veces: la tabla completa de la 3.1 y, debajo, las mismas",
-        "poblaciones con la columna de la 3.0 al lado. Una población que existía en la",
-        "3.0 y ya no existe sale con la columna de la 3.1 vacía: es un dato.",
+        "Cada desglose va dos veces: la tabla completa de la 3.2 y, debajo, las mismas",
+        "poblaciones con la columna de la 3.1 al lado. Una población que existía en la",
+        "3.1 y ya no existe sale con la columna de la 3.2 vacía: es un dato, y en esta",
+        "fase es EL dato: `UL respeto` desaparece entera.",
         "",
-        section("4.1 · Las configuraciones (entrada, stop) medidas por separado", 2),
+        section("7.1 · Las configuraciones (entrada, stop) medidas por separado", 2),
         "",
         "La combinación *entrada en H1 con stop de M15* NO aparece y no es un olvido:",
         "la zona de M15 se forma DESPUÉS de decidir la entrada de H1, así que su stop",
@@ -506,7 +726,9 @@ def _results(
     ]
     # Los títulos ya vienen numerados con el desglose que pedía la fase 3.0
     # (5.1, 5.2, ...): se dejan tal cual para que quien lea el informe con el
-    # enunciado al lado encuentre cada desglose donde lo pidió.
+    # enunciado al lado encuentre cada desglose donde lo pidió. Los dos de la
+    # fase 3.2 —dirección frente al ID y hueco de fin de semana— se numeran a
+    # continuación en vez de abrir una serie nueva, por lo mismo.
     for title, table in metrics.all_breakdowns(trades):
         body += ["", section(title, 2), "", render_table(table, formats=_METRICS)]
         if before.empty:
@@ -516,7 +738,7 @@ def _results(
             continue
         body += [
             "",
-            "        3.1 contra 3.0:",
+            "        3.2 contra 3.1:",
             "",
             render_table(metrics.side_by_side(table, twin), formats=_COMPARED),
         ]
@@ -541,7 +763,7 @@ def _same_breakdown(title: str, before: pd.DataFrame) -> pd.DataFrame | None:
 
 def _costs(trades: pd.DataFrame, before: pd.DataFrame) -> str:
     body = [
-        section("5. §5.5 · Coste por operación en R, por vía y por stop"),
+        section("8. §6.6 · Coste por operación en R, por rama, por vía y por stop"),
         "",
         "El coste no es un residuo: en la fase 3.0 el stop de M15 costaba 0,191 R por",
         "operación, y sobre una expectativa que se mide en centésimas de R eso decide",
@@ -553,7 +775,7 @@ def _costs(trades: pd.DataFrame, before: pd.DataFrame) -> str:
         "",
         render_table(metrics.cost_by_via_and_stop(trades), formats=_COSTS),
         "",
-        section("5.1 · El mismo coste en la fase 3.0", 2),
+        section("8.1 · El mismo coste en la fase 3.1", 2),
         "",
         render_table(metrics.cost_by_via_and_stop(before), formats=_COSTS),
     ]
@@ -565,18 +787,22 @@ def _costs(trades: pd.DataFrame, before: pd.DataFrame) -> str:
 
 def _direction_by_year(trades: pd.DataFrame, before: pd.DataFrame) -> str:
     body = [
-        section("6. §5.6 · ⚠️ LARGOS Y CORTOS POR AÑO, POR SEPARADO"),
+        section("10. §6.8 · ⚠️ LARGOS Y CORTOS POR AÑO, POR SEPARADO"),
         "",
         "ESTA TABLA ES IMPRESCINDIBLE. Sin ella no se puede distinguir si los cortos",
         "fallan por el setup o porque el oro subió de ~1.200 a ~4.300 USD durante todo",
         "el histórico. En la fase 3.0 los largos daban +0,010 R y los cortos -0,332 R.",
+        "",
+        "⚠️ En la 3.2 la dirección deja de ser una propiedad del ID de H4: la rama de",
+        "UL rechazado opera EN CONTRA. Un corte por dirección ya no es un corte por",
+        "sesgo, y por eso la sección 5 va aparte.",
         "",
         "AQUÍ NO SE SACA NINGUNA CONCLUSIÓN Y NO SE PROPONE FILTRAR POR DIRECCIÓN.",
         "Se presenta y decide el propietario.",
         "",
         render_table(metrics.by_year_and_direction(trades), formats=_METRICS),
         "",
-        section("6.1 · La misma tabla en la fase 3.0", 2),
+        section("10.1 · La misma tabla en la fase 3.1", 2),
         "",
         render_table(metrics.by_year_and_direction(before), formats=_METRICS),
     ]
@@ -588,7 +814,7 @@ def _direction_by_year(trades: pd.DataFrame, before: pd.DataFrame) -> str:
 
 def _frequency(trades: pd.DataFrame, before: pd.DataFrame) -> str:
     body = [
-        section("7. §5.7 · Frecuencia: operaciones por semana y semanas sin señal"),
+        section("11. §6.9 · Frecuencia: operaciones por semana y semanas sin señal"),
         "",
         "Las semanas se cuentan sobre el calendario completo del histórico y no sobre",
         "las semanas en que hubo operaciones: si no, el porcentaje de semanas vacías",
@@ -604,7 +830,7 @@ def _frequency(trades: pd.DataFrame, before: pd.DataFrame) -> str:
     if not before.empty:
         body += [
             "",
-            section("7.1 · La misma frecuencia en la fase 3.0", 2),
+            section("11.1 · La misma frecuencia en la fase 3.1", 2),
             "",
             render_table(
                 metrics.frequency(
@@ -624,7 +850,7 @@ def _frequency(trades: pd.DataFrame, before: pd.DataFrame) -> str:
 def _rejections(trades: pd.DataFrame) -> str:
     overlap = metrics.rejection_overlap(trades)
     body = [
-        section("8. R1, R2 y R3 · YA NO CONFIRMAN NADA · columnas informativas"),
+        section("12. R1, R2 y R3 · YA NO CONFIRMAN NADA · columnas informativas"),
         "",
         "En la fase 3.0 las tres definiciones de rechazo funcionaban EN UNIÓN y el",
         "95,5 % de las confirmaciones llegó por ahí. En la 3.1 dejan de ser vías: se",
@@ -644,14 +870,14 @@ def _rejections(trades: pd.DataFrame) -> str:
         "El doji no marca en ninguna de las tres: se declara neutro en todo el módulo",
         "y esa lectura no se rompe aquí.",
         "",
-        section("8.1 · Cuántas marca cada una sobre las velas que confirmaron", 2),
+        section("12.1 · Cuántas marca cada una sobre las velas que confirmaron", 2),
         "",
         "La diagonal es cuántas marcó cada definición; fuera de la diagonal, cuántas",
         "marcaron las dos a la vez. Las poblaciones se solapan y NO suman al total.",
         "",
         render_table(overlap.reset_index(names="definicion") if not overlap.empty else overlap),
         "",
-        section("8.2 · Resultados por definición · SIN VALOR DE DECISIÓN", 2),
+        section("12.2 · Resultados por definición · SIN VALOR DE DECISIÓN", 2),
         "",
         "Estas filas NO son estrategias: son la misma población de la 3.1 recortada",
         "por una etiqueta que no decidió nada. Leerlas como si fueran variantes sería",
@@ -668,7 +894,7 @@ def _rejections(trades: pd.DataFrame) -> str:
 def _archetypes(cascade: CascadeRun, execution: ExecutionRun) -> str:
     found = archetypes.audit(cascade, execution)
     body = [
-        section("9. Las cinco auditorías por arquetipo"),
+        section("13. Las auditorías por arquetipo"),
         "",
         "Un ejemplar de cada forma que la cascada puede tomar, elegido con un criterio",
         "escrito ANTES de mirar el resultado y el mismo para todos: el primero",
@@ -681,7 +907,7 @@ def _archetypes(cascade: CascadeRun, execution: ExecutionRun) -> str:
     for item in found:
         body += [
             "",
-            section(f"9.{item.number} · {item.title}", 2),
+            section(f"13.{item.number} · {item.title}", 2),
             "",
             f"Criterio: {item.criterion}",
             "",
@@ -697,7 +923,7 @@ def _archetypes(cascade: CascadeRun, execution: ExecutionRun) -> str:
 
 def _edge_cases() -> str:
     return (
-        section("10. Casos límite encontrados y cómo se resolvieron")
+        section("14. Casos límite encontrados y cómo se resolvieron")
         + "\n\n"
         + "\n\n".join(_wrap(case) for case in EDGE_CASES)
         + "\n"
@@ -706,9 +932,76 @@ def _edge_cases() -> str:
 
 #: Los casos límite que aparecieron al construir la fase y qué se decidió en cada
 #: uno. Van en el informe y no sólo en los comentarios del código porque son
-#: decisiones, y las decisiones las audita el propietario. Los de la 3.0 siguen
-#: vigentes: la 3.1 no ha tocado nada de lo que los produjo.
+#: decisiones, y las decisiones las audita el propietario. Los de la 3.0 y la 3.1
+#: siguen vigentes: la 3.2 no ha tocado nada de lo que los produjo. Los de esta
+#: fase van primero.
 EDGE_CASES: tuple[str, ...] = (
+    "«CIERRA FUERA DE LA ZONA» TIENE DOS LADOS, Y SÓLO UNO PODÍA SER EL RECHAZO. Una "
+    "vela que entra en la zona puede cerrar fuera por el lado de dentro o por el de "
+    "fuera, y el enunciado dice «fuera» sin más. Cerrar más allá del borde EXTERIOR "
+    "ya tiene nombre en el proyecto desde la fase 2.1: es la ROTURA, y una rotura es "
+    "lo contrario de un rechazo. Así que sólo queda el otro lado: el borde por el que "
+    "el precio entró. No es una elección entre dos lecturas, es la única que no choca "
+    "con una regla ya escrita; si marcara el otro lado, el mismo cierre sería a la vez "
+    "rotura a favor del ID y rechazo en contra, y las dos ramas darían señales "
+    "opuestas sobre la misma vela.",
+    "LA DIRECCIÓN DE LA OPERACIÓN DEJÓ DE SER LA DEL ID. Con el UL rechazado se opera "
+    "EN CONTRA de H4, y eso obligaba a decidir dónde vive esa dirección. Se ha puesto "
+    "en la OBSERVACIÓN (`trade_direction`) y se deriva de la zona, no del impulso: es "
+    "`break_direction` del revés, la misma regla que ya decidía por dónde se atraviesa "
+    "cada zona. Desde ahí la lee todo lo que hay debajo —el turtle soup de H1, el OB "
+    "de H1, el OB suelto de M15, el stop, el objetivo y el ejecutor— en un solo punto. "
+    "Escribirla dos veces habría dejado un lado sin invertir, y una venta abierta como "
+    "compra no la delata ninguna tabla.",
+    "«Y ESO OCURRE EN LA ZONA» HABÍA QUE TRADUCIRLO SIN INVENTAR UN CRITERIO NUEVO. La "
+    "forma B es un turtle soup de H4 «en la zona», y el proyecto ya tiene una lectura "
+    "de estar en una zona: `touches`, el mismo con el que se abre la observación y el "
+    "mismo que gobierna la puerta de la confirmación en H1. Se ha reutilizado sobre la "
+    "vela que rechaza —la segunda—. Cualquier otra lectura habría sido un criterio que "
+    "sólo existiría aquí.",
+    "LA VELA QUE ROMPE LA ZONA NO PUEDE ADEMÁS RECHAZARLA. La ventana en la que se "
+    "espera el rechazo termina donde termina el ID, pero si el ID murió atravesando "
+    "ESA MISMA zona, su última vela queda fuera: en su cierre la zona ya está rota, y "
+    "aceptarla sería dar por rechazo el mismo cierre que la fase 2.1 declara rotura.",
+    "EL RECHAZO NO EXCLUYE AL DOJI Y LAS TRES DEFINICIONES DEL §2 SÍ. No es una "
+    "incoherencia: R1, R2 y R3 excluyen el doji para poder compararse sobre la misma "
+    "población, y ahí la exclusión tiene una función. Aquí no hay nada que comparar y "
+    "el enunciado no lo menciona, así que un doji que entra en la zona y cierra fuera "
+    "rechaza como cualquier otra vela. Añadir la excepción habría sido una regla que "
+    "nadie ha dado.",
+    "LA FORMA A Y LA FORMA B PUEDEN CAER EN LA MISMA VELA, Y HABÍA QUE ELEGIR UNA "
+    "ETIQUETA. La decisión es idéntica por las dos —misma vela, misma dirección, mismo "
+    "instante—, así que la elección es COSMÉTICA y no mueve ni una operación. Se apunta "
+    "la A, que es la que el enunciado nombra primero, y las dos quedan registradas en "
+    "`formas_rechazo_disponibles`. El §6.3 cuenta cuántas veces pasa.",
+    "TRAS UN RECHAZO EL PRECIO ESTÁ, POR CONSTRUCCIÓN, FUERA DE LA ZONA. Y la puerta "
+    "de la confirmación en H1 sigue pidiendo el precio DENTRO de la zona de H4. No se "
+    "ha tocado: el enunciado dice que H1 confirma «con las dos vías ya existentes, sin "
+    "cambios», y esa puerta es parte de ellas. La consecuencia es que la confirmación "
+    "exige que el precio vuelva a la zona, y se ve en el embudo como una caída grande "
+    "en `confirman_en_h1`. Se presenta medida en vez de relajarse.",
+    "UNA CONFIRMACIÓN DE H1 EN LA DIRECCIÓN CONTRARIA A LA DEL RECHAZO NO HACE NADA. "
+    "No hace falta una regla nueva: las dos vías se buscan A FAVOR de la dirección "
+    "esperada, que desde la 3.2 es la del rechazo. Una confirmación del otro lado "
+    "simplemente no se busca, así que no aparece; la observación sigue esperando la "
+    "suya hasta que se cierra su ventana y muere en `sin_confirmacion_h1`. En la serie "
+    "sintética del retesteo se ve las dos cosas a la vez: la rama alcista confirma por "
+    "OB de H1 y la rama bajista del rechazo, mirando las mismas velas, no.",
+    "EL CONTEXTO DIARIO SE COMPARA CONTRA LA OPERACIÓN, NO CONTRA EL ID DE H4. Hasta "
+    "la 3.1 daba igual porque eran lo mismo. Con una operación en contra del ID, "
+    "«a favor» tenía que significar a favor de lo que se opera, o la etiqueta estaría "
+    "describiendo una operación que no es la que se hizo. El contacto diario que "
+    "produjo el contexto viaja igualmente en la señal, con su propia dirección, así "
+    "que el corte contrario se puede rehacer desde el CSV sin volver a correr nada.",
+    "EL HUECO DE FIN DE SEMANA SE MARCA SIN UMBRAL DE HORAS. Un «más de N horas» sería "
+    "un parámetro que nadie ha decidido. Lo que se pregunta es un hecho del calendario "
+    "del mercado: si entre el cierre que decide y el open de M1 que ejecuta queda un "
+    "SÁBADO, el único día en que el mercado no cotiza en ningún momento. NO SE "
+    "CORRIGE: es una decisión del propietario y aquí sólo se marca y se reporta.",
+    "EL RETESTEO DEL OB NO ESTÁ IMPLEMENTADO Y ES UN PENDIENTE CONOCIDO. El "
+    "propietario lo ha aparcado a propósito. Hoy el OB roto mata la observación y no "
+    "abre ninguna rama, exactamente como en la 3.0 y la 3.1. Se deja escrito aquí para "
+    "que la ausencia no se lea como un olvido.",
     "QUÉ MECHA MIRA EL TURTLE SOUP. El enunciado la nombra por el contexto —«mecha "
     "superior en un contexto alcista»— y el contexto es el MOVIMIENTO PREVIO, el que "
     "trajo el precio a la zona, que va en contra de lo que se busca. Para una entrada "
@@ -800,66 +1093,88 @@ def render_archetype_index(
     captures: Sequence[str],
     lost: Sequence[LostConfirmation] = (),
 ) -> str:
-    """El `LEEME.txt` de `now/fase31/`: qué es cada fichero de la carpeta."""
+    """El `LEEME.txt` de `now/fase32/`: qué es cada fichero de la carpeta."""
     found = archetypes.audit(cascade, execution)
     lines = [
-        "FASE 3.1 · CORRECCIÓN DE LA CONFIRMACIÓN EN H1 · índice de la carpeta",
-        "=====================================================================",
+        "FASE 3.2 · EL CONTACTO NO ES SEÑAL · índice de la carpeta",
+        "=========================================================",
         "",
         "QUÉ CAMBIA EN ESTA FASE",
         "-----------------------",
-        "H1 confirma por DOS vías y sólo dos:",
-        "  1. TURTLE SOUP: dos velas de H1 consecutivas; la primera deja mecha y la",
-        "     segunda llega a ese extremo y cierra sin superarlo. Sin parámetros.",
-        "  2. OB DE H1 ALCANZADO: hay ID de H1 en la dirección, su OB está formado y",
-        "     el PRECIO LLEGA a ese OB. La entrada se coloca ahí.",
+        "Tocar una zona de H4 abre OBSERVACIÓN y nada más. Sólo hay operación si",
+        "ocurre alguno de estos desenlaces:",
         "",
-        "Se elimina `id_h1` como vía (un ID solo no confirma) y se eliminan R1, R2 y",
-        "R3 como vías. Las tres se siguen calculando y persistiendo en el CSV como",
-        "columnas informativas: ninguna regla las lee.",
+        "  UL rechazado ............. operación EN CONTRA del ID de H4",
+        "  UL roto y retesteado ..... a favor de la rotura (ya estaba)",
+        "  OB rechazado ............. a favor del ID",
+        "  OB roto .................. SIN operación, la observación muere",
+        "",
+        "Se elimina la rama «respeto operado a favor del ID por contacto». En la 3.0",
+        "eran 2.234 de 3.702 operaciones: comprar cuando el precio sube al techo del",
+        "impulso.",
+        "",
+        "EL RECHAZO SE ESPERA EN H4, no en H1, y fija la DIRECCIÓN de la operación.",
+        "Dos formas, sin un solo parámetro, y vale la que ocurra primero:",
+        "  A. la vela entra en la zona y CIERRA FUERA, por el lado por el que entró.",
+        "  B. turtle soup de H4: dos velas consecutivas, la segunda llega a la mecha",
+        "     de la primera y cierra sin superarla, EN la zona.",
+        "",
+        "⚠️ ES LA PRIMERA VEZ QUE UNA OPERACIÓN VA EN CONTRA DEL ID DE H4. En un ID",
+        "alcista, rechazar el UL produce una VENTA. Esa población va aislada en la",
+        "sección 5 del informe y con color propio en el explorador.",
+        "",
+        "EL RETESTEO DEL OB NO SE IMPLEMENTA: el propietario lo ha aparcado a",
+        "propósito. Pendiente conocido, no olvido.",
         "",
         "NOTA PARA EL PROPIETARIO: revisa los stops ANTES de mirar los resultados. Si",
         "ves primero qué operaciones ganaron, tu juicio sobre dónde va el stop queda",
         "contaminado. El informe está ordenado para eso: la sección 1 es la de los",
-        "stops y va delante de la 4, que es la de los resultados.",
+        "stops y va delante de la 7, que es la de los resultados.",
         "",
         "FICHEROS",
         "--------",
-        "  reporte_entradas.txt   el informe entero: embudo antes y después, las dos",
-        "                         vías por separado, métricas con todos los desgloses",
-        "                         y la columna de la 3.0 al lado.",
+        "  reporte_entradas.txt   el informe entero: embudo antes y después, las tres",
+        "                         ramas por separado, las operaciones en contra del ID",
+        "                         aisladas, el hueco de fin de semana y todos los",
+        "                         desgloses con la columna de la 3.1 al lado.",
         "  evidencia_entradas.txt el esperado al lado del obtenido, caso por caso:",
-        "                         el día sintético de la 3.1, las excepciones",
-        "                         anti-lookahead y el apagado.",
-        "  operaciones.csv        una fila por operación, con la vía que confirmó, las",
-        "                         vías disponibles y las columnas informativas de R1,",
-        "                         R2 y R3.",
-        "  operaciones_v30.csv    lo mismo con `CONFIRM_MODE = v30_tres_vias`, para",
-        "                         poder comparar sin volver a correr nada.",
+        "                         el día sintético de la 3.2, las excepciones",
+        "                         anti-lookahead y las dos regresiones.",
+        "  operaciones.csv        una fila por operación, con la rama, la forma del",
+        "                         rechazo, las formas disponibles, si va en contra del",
+        "                         ID, si hay hueco de fin de semana y las columnas",
+        "                         informativas de R1, R2 y R3.",
+        "  operaciones_v31.csv    lo mismo con `ENTRY_MODE = v31_contacto`, para poder",
+        "                         comparar sin volver a correr nada.",
         "  descartadas.csv        una fila por señal descartada y el guardarraíl que",
-        "                         la mató.",
+        "                         la mató, `contacto_sin_desenlace` incluido.",
         "  confirmaciones_perdidas.csv  una fila por observación que confirmaba en la",
-        "                         3.0 y ahora muere, con la vía de antes y el",
+        "                         3.1 y ahora muere, con la vía y la rama de antes y el",
         "                         guardarraíl de ahora.",
         "  explorador_entradas.html  cada operación navegable sobre las cuatro",
-        "                         temporalidades, con los turtle soup y las señales",
-        "                         que la 3.0 tomaba y la 3.1 descarta en capas propias.",
+        "                         temporalidades, con los rechazos de H4 por forma, las",
+        "                         operaciones en contra del ID en color propio y las",
+        "                         señales que la 3.1 tomaba y la 3.2 descarta.",
         "",
         "CAPTURAS",
         "--------",
-        "  turtle_NN_*      veinte confirmaciones por turtle soup.",
-        "  ob_NN_*          veinte confirmaciones por OB de H1 alcanzado.",
-        "  perdida_NN_*     veinte señales que la 3.0 tomaba y la 3.1 descarta.",
-        "  arquetipo_N_*    los cinco arquetipos, uno por forma.",
+        "  rama_ul_rechazo_NN_*      veinte de la rama de UL rechazado (en contra).",
+        "  rama_ul_retesteo_NN_*     veinte de la rama de rotura y retesteo.",
+        "  rama_ob_rechazo_NN_*      veinte de la rama de OB rechazado.",
+        "  perdida_NN_*              veinte que la 3.1 tomaba y la 3.2 descarta, con",
+        "                            el motivo por el que ya no existen.",
+        "  finde_NN_*                diez con hueco de fin de semana entre la decisión",
+        "                            y la ejecución.",
+        "  arquetipo_N_*             los arquetipos, uno por forma.",
         "",
         "Las capturas de cada lote son las PRIMERAS cronológicamente de su clase, no",
         "una selección: elegir 'las mejores' habría convertido la carpeta en un",
         "argumento en vez de en una muestra.",
         "",
-        f"{len(lost):,} observaciones confirmaban en la 3.0 y ahora no confirman.",
+        f"{len(lost):,} observaciones confirmaban en la 3.1 y ahora no confirman.",
         "",
-        "LOS CINCO ARQUETIPOS",
-        "--------------------",
+        "LOS ARQUETIPOS",
+        "--------------",
     ]
     for item in found:
         state = "encontrado" if item.found else "NO EXISTE EN LA MUESTRA"

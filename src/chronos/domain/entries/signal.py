@@ -26,10 +26,12 @@ from chronos.domain.entries.enums import (
     EntryTimeframe,
     GuardRail,
     Outcome,
+    RejectionForm,
     RejectionKind,
     StopZone,
     TradeOutcome,
 )
+from chronos.domain.entries.weekend import crosses_weekend
 from chronos.domain.errors import DomainError
 from chronos.domain.structure.enums import ImpulseDirection
 from chronos.domain.structure.zones import ZoneKind
@@ -157,15 +159,49 @@ class Observation:
     #: El retesteo posterior a la rotura, cuando lo hubo.
     index_retest: int | None = None
     ts_retest: datetime | None = None
+    # --- Fase 3.2 -------------------------------------------------------------
+    #: Dirección de la OPERACIÓN. `None` = la del ID, que es lo que valía hasta la
+    #: 3.1 y lo que sigue valiendo en las ramas a favor. En la rama de UL
+    #: rechazado va **en contra** del ID, y ése es el motivo de que este campo
+    #: exista: sin él, `direction` significaría dos cosas a la vez.
+    trade_direction: ImpulseDirection | None = None
+    #: La vela de H4 que rechazó la zona, cuando la hubo (§2 de la 3.2).
+    index_rejection: int | None = None
+    ts_rejection: datetime | None = None
+    #: Qué forma disparó el rechazo y cuáles estaban disponibles. Las dos se
+    #: registran siempre: en la 3.0 se cortó la evaluación al primer acierto y esa
+    #: información hubo que reconstruirla a mano.
+    rejection_form: RejectionForm | None = None
+    rejection_forms: tuple[RejectionForm, ...] = ()
 
     @property
     def outcome(self) -> Outcome:
-        """Con qué desenlace se opera esta observación."""
-        return (
-            Outcome.ROTURA_Y_RETESTEO
-            if self.index_retest is not None
-            else Outcome.RESPETO
-        )
+        """Con qué desenlace se opera esta observación.
+
+        El orden importa: una observación de la rama de rotura y retesteo nunca
+        lleva rechazo, y una de rechazo nunca lleva retesteo, así que las tres
+        ramas son excluyentes. `respeto` sólo lo produce `ENTRY_MODE =
+        v31_contacto`, que existe únicamente para la regresión.
+        """
+        if self.index_retest is not None:
+            return Outcome.ROTURA_Y_RETESTEO
+        if self.index_rejection is not None:
+            return Outcome.RECHAZO
+        return Outcome.RESPETO
+
+    @property
+    def direction_of_trade(self) -> ImpulseDirection:
+        """La dirección con la que se opera, que puede no ser la del ID."""
+        return self.trade_direction if self.trade_direction is not None else self.direction
+
+    @property
+    def against_the_id(self) -> bool:
+        """⚠️ La operación va EN CONTRA del ID de H4 (fase 3.2, §6.4).
+
+        Es una población nueva del proyecto —la del UL rechazado— y el informe la
+        aísla. Antes de la 3.2 no existía ninguna.
+        """
+        return self.direction_of_trade is not self.direction
 
     @property
     def zone_low(self) -> float:
@@ -218,7 +254,14 @@ class Signal:
 
     @property
     def direction(self) -> ImpulseDirection:
-        return self.observation.direction
+        """La dirección de la OPERACIÓN (fase 3.2).
+
+        Hasta la 3.1 era siempre la del ID de H4. Con el UL rechazado la
+        operación va en contra, y este único punto es el que propaga esa
+        inversión al stop, al objetivo y al ejecutor: si aquí se leyera la del ID,
+        una venta se abriría como compra sin que nada más lo delatara.
+        """
+        return self.observation.direction_of_trade
 
     @property
     def is_long(self) -> bool:
@@ -308,6 +351,28 @@ class Trade:
     @property
     def zone(self) -> ZoneKind:
         return self.signal.observation.zone
+
+    @property
+    def branch(self) -> str:
+        """La rama de la 3.2 (§6.2): zona más desenlace, en una sola etiqueta.
+
+        Las tres que existen son `UL rechazado`, `UL roto y retesteado` y
+        `OB rechazado`. Se compone aquí y no en el CSV para que el informe, el
+        explorador y las capturas no puedan escribirla de tres formas distintas.
+        """
+        return f"{self.zone.value} {self.outcome_kind.value}"
+
+    @property
+    def against_the_id(self) -> bool:
+        return self.signal.observation.against_the_id
+
+    @property
+    def weekend_gap(self) -> bool:
+        """⚠️ La decisión y la ejecución están separadas por el fin de semana.
+
+        No se corrige: se marca y se reporta aparte (§4 de la fase 3.2).
+        """
+        return crosses_weekend(self.signal.ts_decision, self.ts_entry)
 
 
 __all__ = [

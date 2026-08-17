@@ -61,7 +61,7 @@ function declare(id) {
  'from', 'to', 'layer-limbo', 'layer-marks', 'layer-contacts', 'layer-mid', 'layer-wrong',
  'zone-layers', 'layer-zones-ul', 'layer-zones-ob',
  'entry-layers', 'layer-trades', 'layer-discarded', 'layer-rejections', 'layer-signals',
- 'layer-turtle', 'layer-lost',
+ 'layer-turtle', 'layer-lost', 'layer-h4',
  'layer-recent', 'layer-fresh',
  'break-layers', 'layer-avoided',
  'blind-seed', 'blind-start', 'blind-reveal', 'blind-exit',
@@ -353,6 +353,15 @@ steps.push(snapshot('sin-turtle-ni-perdidas'));
 elements['layer-turtle'].fire('change', { target: { checked: true } });
 steps.push(snapshot('turtle-sin-perdidas'));
 elements['layer-lost'].fire('change', { target: { checked: true } });
+
+// Fase 3.2: el rechazo en H4, que es lo que abre la operación. Nace encendido,
+// así que el recorrido lo apaga y lo vuelve a encender: el paso `sin-rechazo-h4`
+// tiene que perder la traza y el texto de estado tiene que decir que la capa
+// está apagada.
+elements['layer-h4'].fire('change', { target: { checked: false } });
+steps.push(snapshot('sin-rechazo-h4'));
+elements['layer-h4'].fire('change', { target: { checked: true } });
+steps.push(snapshot('con-rechazo-h4'));
 presets[presets.length - 1].fire('click');
 
 // Auditoría ciega (F.1): sortear con semilla, revelar, repetir y salir.

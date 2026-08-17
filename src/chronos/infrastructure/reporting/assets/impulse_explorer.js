@@ -90,6 +90,12 @@
      * auditar. Sin cascada en la corrida, las casillas ni se enseñan. */
     turtle: true,
     lost: true,
+    /* Fase 3.2. El RECHAZO EN H4: lo único que abre operación desde esta fase,
+     * junto con la rotura y retesteo. Nace encendida porque es el cambio de la
+     * fase y porque sin ella el explorador enseñaría entradas sin enseñar el
+     * hecho que las justifica. Sin cascada en la corrida, la casilla ni se
+     * enseña. */
+    h4Rejections: true,
     /* La señal mientras está viva, sólo durante el replay: del contacto con la
      * zona hasta que entra o muere. Nace encendida porque es el tramo en el que
      * el propietario decidiría, que es lo que el replay viene a comparar. */
@@ -1086,8 +1092,13 @@
 
   function entries() {
     return DATA.entries ||
-      { trades: [], discarded: [], rejections: [], turtle: [], lost: [] };
+      { trades: [], discarded: [], h4: [], rejections: [], turtle: [], lost: [] };
   }
+
+  /* Fase 3.2: los rechazos en H4 de la corrida. Un payload de la 3.1 no trae la
+   * clave, y en ese caso la capa no dibuja nada en vez de romperse: el mismo
+   * fichero de assets tiene que poder abrir un explorador antiguo. */
+  function h4Rejections() { return entries().h4 || []; }
 
   /* Fase 3.1: qué vías corrieron y cuántos turtle soup hay en toda la serie. El
    * explorador lo enseña en el estado; no lo calcula. */
@@ -1392,6 +1403,67 @@
     }];
   }
 
+  /* Fase 3.2: el RECHAZO EN H4, que es lo que abre la operación. Hasta la 3.1
+   * bastaba TOCAR la zona, así que no había ningún hecho que dibujar: la marca
+   * habría caído sobre el contacto, que ya tiene el suyo. Aquí sí lo hay, y es
+   * el que decide también el LADO —en el UL la operación va en contra del ID—,
+   * de modo que sin esta capa el explorador enseñaría ventas sobre impulsos
+   * alcistas sin enseñar por qué.
+   *
+   * El símbolo dice la forma: relleno = A (la vela entra y cierra fuera), hueco
+   * = B (turtle soup de H4), con punto = las dos en la misma vela. El borde
+   * gruesa las que se operan EN CONTRA del ID, que es la población nueva de la
+   * fase. Va sobre el borde interior de la zona, el nivel que la vela cruzó al
+   * entrar y volvió a dejar atrás al cerrar. */
+  function h4RejectionTraces(range) {
+    if (blindfolded() || !state.h4Rejections || !hasEntries()) { return []; }
+    var edges = window_(range);
+    var items = h4Rejections().filter(function (item) {
+      return known(item.x, edges);
+    });
+    if (!items.length) { return []; }
+    return [{
+      type: "scatter", mode: "markers", name: "Rechazo en H4 (abre operación)",
+      x: items.map(function (item) { return iso(item.x); }),
+      y: items.map(function (item) { return item.y; }),
+      text: items.map(function (item) {
+        return "<b>RECHAZO EN H4</b> · " + h4FormCaption(item) + "<br>" + stamp(item.x) +
+          "<br>borde interior: " + price(item.zi) + " · exterior: " + price(item.zo) +
+          "<br>ID " + item.id + " de H4 (" + item.di + ") · zona " + item.z +
+          "<br>operación: <b>" + item.d + "</b>" +
+          (item.ag ? " · <b>EN CONTRA del ID</b>" : " · a favor del ID") +
+          "<br>contacto con la zona: " + stamp(item.xc);
+      }),
+      hoverinfo: "text", hoverlabel: { align: "left" },
+      marker: {
+        symbol: items.map(function (item) {
+          if (item.fs && item.fs.length === 2) { return "hexagram-dot"; }
+          return item.f === "B_turtle_soup" ? "hexagram-open" : "hexagram";
+        }),
+        size: 13,
+        color: items.map(function (item) {
+          return item.d === "alcista" ? COLORS.bullish : COLORS.bearish;
+        }),
+        line: {
+          color: items.map(function (item) {
+            return item.ag ? COLORS.ink : COLORS.surface;
+          }),
+          width: items.map(function (item) { return item.ag ? 2 : 1; })
+        }
+      }
+    }];
+  }
+
+  function h4FormCaption(item) {
+    if (item.fs && item.fs.length === 2) {
+      return "las DOS formas en la misma vela (A y B)";
+    }
+    if (item.f === "B_turtle_soup") {
+      return "forma B · turtle soup de H4";
+    }
+    return "forma A · entra en la zona y cierra fuera";
+  }
+
   /* Fase 3.1, vía 1: los TURTLE SOUP que la cascada miró, CONFIRMEN O NO. El
    * símbolo dice qué le pasó a cada uno —relleno si confirmó, hueco si no— y el
    * globo dice por qué. Dibujarlos sólo cuando confirman escondería justo la
@@ -1451,12 +1523,12 @@
     var items = entries().lost.filter(function (item) { return known(item.x, edges); });
     if (!items.length) { return []; }
     return [{
-      type: "scatter", mode: "markers", name: "La 3.0 entraba aquí · la 3.1 no",
+      type: "scatter", mode: "markers", name: "Antes se entraba aquí · ahora no",
       x: items.map(function (item) { return iso(item.x); }),
       y: items.map(function (item) { return item.y; }),
       text: items.map(function (item) {
-        return "<b>CONFIRMABA EN LA 3.0 · YA NO</b> · " + item.d +
-          "<br>vía de la 3.0: <b>" + item.v30 + "</b>" +
+        return "<b>ANTES CONFIRMABA · YA NO</b> · " + item.d +
+          "<br>vía de antes: <b>" + item.v30 + "</b>" +
           "<br>confirmaba " + stamp(item.x) +
           "<br>ID " + item.id + " de H4 · zona " + item.z +
           " [" + price(item.zi) + ", " + price(item.zo) + "]" +
@@ -1866,6 +1938,9 @@
       .concat(rejectionTraces(range))
       .concat(lostTraces(range))
       .concat(turtleTraces(range))
+      // El rechazo de H4 va por encima del turtle soup de H1: cuando los dos
+      // caen cerca, el que decide la operación es éste.
+      .concat(h4RejectionTraces(range))
       .concat(signalTraces(range))
       .concat(tradeTraces(range));
 
@@ -1995,10 +2070,34 @@
         confirmados.length.toLocaleString("es-ES") + " confirmaron)" +
         (state.turtle ? "" : " (capa de turtle soup APAGADA)") +
         " · " + perdidas.length.toLocaleString("es-ES") +
-        " señales que la 3.0 tomaba y la 3.1 descarta" +
+        " señales que la fase anterior tomaba y ésta descarta" +
         (state.lost ? "" : " (capa APAGADA)") +
         " · el patrón aparece " + total.toLocaleString("es-ES") +
         " veces en TODA la serie de H1: aquí sólo se dibujan los que la cascada miró";
+      // Fase 3.2: qué abre operación en H4, dicho con nombre y recuento. Si el
+      // modo es el de la 3.1 el texto lo dice igual, porque «tocar la zona
+      // basta» es exactamente lo que hay que poder distinguir de un vistazo.
+      var modo = confirm() ? confirm().entryMode : null;
+      var rechazos = h4Rejections().filter(function (item) {
+        return known(item.x, edges);
+      });
+      var enContra = rechazos.filter(function (item) { return item.ag; }).length;
+      var formaB = rechazos.filter(function (item) {
+        return item.f === "B_turtle_soup";
+      }).length;
+      text += " · FASE 3.2 (" + (modo || "?") + "): ";
+      if (modo === "v31_contacto") {
+        text += "el CONTACTO con la zona basta para operar; no hay ni un rechazo de H4 " +
+          "que dibujar. Es el modo de REGRESIÓN, no la regla del proyecto";
+      } else {
+        text += rechazos.length.toLocaleString("es-ES") +
+          " rechazos en H4 a la vista (" + formaB.toLocaleString("es-ES") +
+          " por la forma B, turtle soup de H4) · " + enContra.toLocaleString("es-ES") +
+          " se operan EN CONTRA del ID de H4" +
+          (state.h4Rejections ? "" : " (capa de rechazos de H4 APAGADA)") +
+          " · tocar la zona ya NO abre operación: lo que no lleva rechazo ni retesteo " +
+          "muere en `contacto_sin_desenlace`";
+      }
       // Los recuentos de arriba son los de la VENTANA, no los de lo que el
       // filtro deja pasar: «sólo lo reciente» esconde marcas, no cambia lo que
       // hubo. Por eso dice de cuántas esconde y no cambia el resumen.
@@ -2308,7 +2407,7 @@
     if (!group || hasEntries()) { return; }
     if (group.style) { group.style.display = "none"; }
     state.trades = state.discardedSignals = state.rejections = state.signals = false;
-    state.turtle = state.lost = false;
+    state.turtle = state.lost = state.h4Rejections = false;
     state.recent = state.fresh = false;
   }
 
@@ -2438,6 +2537,11 @@
       document.getElementById("layer-rejections").checked = state.rejections;
       document.getElementById("layer-turtle").checked = state.turtle;
       document.getElementById("layer-lost").checked = state.lost;
+      var h4 = document.getElementById("layer-h4");
+      h4.checked = state.h4Rejections;
+      // Un explorador de la 3.1 no trae ni un rechazo de H4: la casilla se
+      // apaga en vez de ofrecer una capa que no puede dibujar nada.
+      h4.disabled = !h4Rejections().length;
       document.getElementById("layer-recent").checked = state.recent;
       var signals = document.getElementById("layer-signals");
       signals.checked = state.signals;
@@ -2518,6 +2622,7 @@
       ["layer-rejections", "rejections"],
       ["layer-turtle", "turtle"],
       ["layer-lost", "lost"],
+      ["layer-h4", "h4Rejections"],
       ["layer-signals", "signals"],
       ["layer-recent", "recent"],
       ["layer-fresh", "fresh"]

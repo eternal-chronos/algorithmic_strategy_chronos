@@ -19,7 +19,7 @@ import hashlib
 import json
 from dataclasses import asdict, dataclass, field
 
-from chronos.domain.entries.enums import ConfirmMode, ConfirmPriority
+from chronos.domain.entries.enums import ConfirmMode, ConfirmPriority, EntryMode
 from chronos.domain.entries.rejection import REJECTION_PERCENTILES
 from chronos.domain.errors import DomainError
 
@@ -79,6 +79,14 @@ class EntriesConfig:
     """
 
     enabled: bool = False
+
+    # --- Fase 3.2: qué abre una operación en H4 ------------------------------
+
+    #: Qué desenlace de la zona de H4 abre operación. `v32_rechazo` es el del
+    #: proyecto; `v31_contacto` se conserva **sólo** para el test de regresión
+    #: —1.508 confirmaciones y 3.298 operaciones exactas— y para poder poner la
+    #: columna de la 3.1 al lado. No es una variante que haya que elegir.
+    entry_mode: EntryMode = EntryMode.V32_RECHAZO
 
     # --- Fase 3.1: las vías de confirmación en H1 ----------------------------
 
@@ -142,6 +150,7 @@ class EntriesConfig:
         fase 2.1 se comprueba con su propio hash, que este bloque no toca.
         """
         payload = {
+            "entry_mode": self.entry_mode.value,
             "confirm_mode": self.confirm_mode.value,
             "confirm_priority": self.confirm_priority.value,
             "rejection_percentile": self.rejection_percentile,
@@ -187,6 +196,21 @@ class EntriesConfig:
     def closed_decisions(self) -> tuple[str, ...]:
         """Lo que el enunciado cierra y aquí no se discute."""
         return (
+            "EL CONTACTO NO ES SEÑAL (fase 3.2): tocar una zona de H4 abre "
+            "OBSERVACIÓN y nada más. Sólo hay operación con un RECHAZO en H4 o con "
+            "una ROTURA CON RETESTEO. La rama «respeto operado a favor del ID por "
+            "contacto» queda ELIMINADA.",
+            "DIRECCIÓN POR RAMA (fase 3.2): UL rechazado -> EN CONTRA del ID de H4; "
+            "UL roto y retesteado -> a favor de la rotura; OB rechazado -> a favor "
+            "del ID; OB roto -> sin operación, la observación muere.",
+            "RECHAZO EN H4 = dos formas y vale la que ocurra primero (fase 3.2, §2): "
+            "A) una vela entra en la zona y cierra fuera de ella, del lado por el que "
+            "entró; B) turtle soup de H4, dos velas consecutivas, la segunda llega a "
+            "la mecha de la primera y cierra sin superarla, en la zona. SIN "
+            "PARÁMETROS: ni umbrales, ni percentiles, ni proporciones.",
+            "RETESTEO DEL OB = NO IMPLEMENTADO. El propietario lo ha aparcado a "
+            "propósito. Es un pendiente conocido, no un olvido: hoy el OB roto mata "
+            "la observación y no abre ninguna rama.",
             "CONFIRMACIÓN EN H1 = DOS VÍAS Y SÓLO DOS (fase 3.1): turtle soup, o "
             "ID de H1 con su OB formado y el precio llegando a ese OB. Un ID de H1 "
             "solo NO confirma. R1, R2 y R3 dejan de ser vías: se siguen calculando "

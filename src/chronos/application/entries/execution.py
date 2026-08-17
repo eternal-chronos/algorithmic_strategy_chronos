@@ -377,6 +377,25 @@ def trades_table(trades: Sequence[Trade]) -> pd.DataFrame:
             "id_h4": observation.id_num,
             "zona_h4": observation.zone.value,
             "desenlace_zona": trade.outcome_kind.value,
+            #: Fase 3.2 — la rama del §6.2 en una sola etiqueta: `UL rechazo`,
+            #: `UL rotura_y_retesteo` u `OB rechazo`.
+            "rama": trade.branch,
+            "direccion_id_h4": observation.direction.value,
+            #: ⚠️ Fase 3.2, §6.4 — la operación va EN CONTRA del ID de H4. Es una
+            #: población nueva y el informe la aísla.
+            "contra_id": trade.against_the_id,
+            "forma_rechazo": (
+                None
+                if observation.rejection_form is None
+                else observation.rejection_form.value
+            ),
+            "formas_rechazo_disponibles": "|".join(
+                form.value for form in observation.rejection_forms
+            ),
+            "ts_rechazo": observation.ts_rejection,
+            #: ⚠️ Fase 3.2, §4 — la decisión y la ejecución están separadas por el
+            #: cierre del fin de semana. NO se corrige: se marca y se reporta.
+            "hueco_finde": trade.weekend_gap,
             "contexto_diario": trade.daily.value,
             "confirmacion": trade.signal.confirmation.kind.value,
             #: Fase 3.1 — **todas** las vías disponibles en la vela que confirmó,
@@ -423,8 +442,15 @@ def discarded_table(discarded: Sequence[DiscardedSignal]) -> pd.DataFrame:
             "guardarrail": item.guard_rail.value,
             "id_h4": item.observation.id_num,
             "zona_h4": item.observation.zone.value,
-            "direccion": item.observation.direction.value,
+            "direccion": item.observation.direction_of_trade.value,
+            "direccion_id_h4": item.observation.direction.value,
+            "contra_id": item.observation.against_the_id,
             "desenlace_zona": item.observation.outcome.value,
+            "forma_rechazo": (
+                None
+                if item.observation.rejection_form is None
+                else item.observation.rejection_form.value
+            ),
             "contexto_diario": item.observation.daily.value,
             "ts_contacto": item.observation.ts_contact,
             "confirmacion": (

@@ -66,7 +66,7 @@ from chronos.application.structure.session_audit import (
 from chronos.application.structure.statistics import summarize
 from chronos.application.structure.timezone_audit import TimezoneAudit, audit_timezone
 from chronos.application.structure.zones import ZonesRun, detect_zones
-from chronos.domain.entries.enums import ConfirmMode, EntryTimeframe
+from chronos.domain.entries.enums import ConfirmMode, EntryMode, EntryTimeframe
 from chronos.domain.errors import DomainError
 from chronos.domain.instrument import InstrumentSpec
 from chronos.domain.structure.enums import AnchorMode, LegStartMode, OverlapPriority
@@ -716,9 +716,21 @@ def _print_break_summary(
 @structure_app.command("entradas")
 def entries_command(
     config: Annotated[Path, typer.Option("--config", "-c")] = DEFAULT_CONFIG,
-    output: Annotated[Path, typer.Option("--salida", "-o")] = Path("now/fase31"),
+    output: Annotated[Path, typer.Option("--salida", "-o")] = Path("now/entradas"),
     captures: Annotated[bool, typer.Option("--capturas/--sin-capturas")] = True,
     explorer: Annotated[bool, typer.Option("--explorador/--sin-explorador")] = True,
+    only_explorer: Annotated[
+        bool,
+        typer.Option(
+            "--solo-explorador",
+            help=(
+                "Escribir ÚNICAMENTE el explorador HTML: ni informe, ni evidencia, ni "
+                "CSV, ni capturas, ni índice. Es el modo de auditoría visual mientras "
+                "se ajusta una regla. Se salta también la regresión de cifras contra "
+                "la fase anterior, que necesita su ejecución completa sobre M1."
+            ),
+        ),
+    ] = False,
     assume_bid: Annotated[
         bool,
         typer.Option(
@@ -733,19 +745,22 @@ def entries_command(
     ] = False,
     skip_tz_audit: Annotated[bool, typer.Option("--skip-tz-audit")] = False,
 ) -> None:
-    """Fase 3.1: la confirmación en H1, con dos vías y sólo dos.
+    """La cascada de entrada entera: H4 abre, H1 confirma, M15 afina.
 
-    H4 es el motor, el Diario es contexto, H1 confirma y M15 afina. En H1
-    confirman **el turtle soup** y **el OB de H1 al que el precio llega**, y nada
-    más: el ID de H1 por sí solo deja de confirmar y R1, R2 y R3 dejan de ser
-    vías. Se monta **sobre** la fase 2.1: el comando enciende `break_by_zone` y
-    las zonas para su propia corrida.
+    H4 es el motor y el Diario es contexto. Tocar una zona de H4 **no** abre
+    operación: hace falta un RECHAZO en H4 —forma A, cierre fuera; forma B, turtle
+    soup— o una rotura con retesteo, y el rechazo decide también el lado, que en
+    el UL va en contra del ID. En H1 confirman **el turtle soup** y **el OB de H1
+    al que el precio llega**, y nada más. Se monta **sobre** la fase 2.1: el
+    comando enciende `break_by_zone` y las zonas para su propia corrida.
 
-    Corre las **dos** cascadas —la de la 3.1 y la de la 3.0— para poder poner las
-    columnas al lado. Antes comprueba dos líneas base: con las señales apagadas
-    tiene que salir la fase 2.1 exacta, y con `v30_tres_vias`, la fase 3.0
-    exacta. Si alguna no sale, **para y avisa**: eso sería un bug de esta fase y
-    no un resultado de la anterior.
+    Corre además la cascada de la regla ANTERIOR —el contacto sin rechazo— para
+    poder dibujar dónde se entraba antes y comprobar que el escalón de zonas y
+    contactos no se ha movido. Antes comprueba la línea base de la fase 2.1: con
+    las señales apagadas tiene que salir exacta. Si no sale, **para y avisa**.
+
+    Con `--solo-explorador` escribe únicamente el HTML: es el modo de auditoría
+    visual mientras se ajusta una regla.
 
     ⚠️ **No hay fichero de ask.** El §4 pide longs al ask y shorts al bid, y sólo
     está descargado el M1 del lado bid. Sin `entries.allow_missing_ask: true` el
@@ -832,11 +847,67 @@ def entries_command(
             },
         )
 
-        # La corrida de la 3.0 va PRIMERO: es la que puede parar el comando, y
-        # gastar los minutos de la 3.1 para descubrir después que la
-        # refactorización está mal sería tirarlos.
-        console.print("[dim]Cascada de la fase 3.0 (regresión y comparación)...[/dim]")
-        v30_config = replace(entries, confirm_mode=ConfirmMode.V30_TRES_VIAS)
+        # La cascada de la regla ANTERIOR: el contacto abriendo operación sin
+        # rechazo. Es la referencia contra la que se dibuja «antes se entraba aquí
+        # y ahora no», y es barata: no toca M1. Va primero porque de ella sale la
+        # comprobación que puede parar el comando.
+        console.print("[dim]Cascada de la regla anterior (contacto, para comparar)...[/dim]")
+        before_config = replace(entries, entry_mode=EntryMode.V31_CONTACTO)
+        cascade_before = build_cascade(structure, zones, aggregated.get(M15), before_config)
+
+        console.print("[dim]Cascada con el rechazo en H4...[/dim]")
+        cascade = build_cascade(structure, zones, aggregated.get(M15), entries)
+        # Lo que hay POR ENCIMA del contacto no puede haberse movido: ni los ID,
+        # ni las zonas, ni cuáles toca el precio. Si se ha movido es un bug, y
+        # entonces la comparación de abajo estaría emparejando cosas distintas.
+        entry_comparison.check_contacts_match(cascade_before, cascade)
+        lost = entry_comparison.lost_confirmations(cascade_before, cascade)
+        priority = entry_comparison.priority_effect(
+            structure, zones, aggregated.get(M15), cascade
+        )
+
+        console.print("[dim]Ejecución sobre M1...[/dim]")
+        execution = executor.execute(cascade)
+        trades = trades_table(execution.trades)
+        _print_entries_summary(cascade, execution, trades)
+        _print_vias(cascade, priority, lost)
+
+        output.mkdir(parents=True, exist_ok=True)
+
+        # Modo de auditoría visual: sólo el dibujo. Nada de informes con cifras,
+        # que es lo que se pide mientras una regla se está ajustando y sus números
+        # todavía no significan nada.
+        if only_explorer:
+            page = output / "explorador_entradas.html"
+            page.write_text(
+                render_explorer(
+                    structure,
+                    run_config.reporting.max_explorer_bars,
+                    lateralization=measure(structure),
+                    zones=zones,
+                    cascade=cascade,
+                    execution=execution,
+                    lost=lost,
+                ),
+                encoding="utf-8",
+            )
+            console.print(f"\nExplorador: [bold]{page}[/bold]")
+            console.print(
+                "[dim]Sólo el explorador: ni informe, ni evidencia, ni CSV, ni "
+                "capturas. La regresión de cifras contra la fase anterior no se ha "
+                "comprobado en esta corrida.[/dim]"
+            )
+            return
+
+        # La regresión de cifras exactas necesita la ejecución completa de la
+        # referencia sobre M1, así que sólo se paga en la corrida con informe. El
+        # modo de la 3.0 es contacto + tres vías: las dos cosas, o no es la 3.0.
+        console.print("[dim]Cascada de la fase 3.0 (regresión)...[/dim]")
+        v30_config = replace(
+            entries,
+            entry_mode=EntryMode.V31_CONTACTO,
+            confirm_mode=ConfirmMode.V30_TRES_VIAS,
+        )
         cascade_v30 = build_cascade(structure, zones, aggregated.get(M15), v30_config)
         execution_v30 = executor.execute(cascade_v30)
         trades_v30 = trades_table(execution_v30.trades)
@@ -847,21 +918,6 @@ def entries_command(
         )
         if not _print_v30_regression(v30_counts):
             raise typer.Exit(code=1)
-
-        console.print("[dim]Cascada de la fase 3.1 (dos vías)...[/dim]")
-        cascade = build_cascade(structure, zones, aggregated.get(M15), entries)
-        execution = executor.execute(cascade)
-        trades = trades_table(execution.trades)
-
-        entry_comparison.check_observations_match(cascade_v30, cascade)
-        lost = entry_comparison.lost_confirmations(cascade_v30, cascade)
-        priority = entry_comparison.priority_effect(
-            structure, zones, aggregated.get(M15), cascade
-        )
-        _print_entries_summary(cascade, execution, trades)
-        _print_vias(cascade, priority, lost)
-
-        output.mkdir(parents=True, exist_ok=True)
         report = output / "reporte_entradas.txt"
         report.write_text(
             render_entry_report(

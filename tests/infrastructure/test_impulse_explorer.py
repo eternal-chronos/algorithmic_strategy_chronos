@@ -1509,6 +1509,7 @@ def test_sin_cascada_el_payload_no_declara_las_capas(run: ImpulseRun) -> None:
     assert payload["entries"] == {
         "trades": [],
         "discarded": [],
+        "h4": [],
         "rejections": [],
         "turtle": [],
         "lost": [],
@@ -1683,8 +1684,11 @@ def test_los_rechazos_nacen_apagados_y_se_pueden_encender(
     apagados = _trace_names(_step(resultado, "entradas-por-defecto"))
     encendidos = _trace_names(_step(resultado, "entradas-con-rechazos"))
 
-    assert not any(nombre.startswith("Rechazo") for nombre in apagados)
-    assert any(nombre.startswith("Rechazo") for nombre in encendidos), encendidos
+    # El nombre completo, y no el prefijo: desde la fase 3.2 hay otra capa que
+    # también empieza por «Rechazo» —la del rechazo en H4, que sí nace encendida—
+    # y comprobar el prefijo confundiría las dos.
+    assert "Rechazo (R1 / R2 / R3)" not in apagados
+    assert "Rechazo (R1 / R2 / R3)" in encendidos, encendidos
 
 
 # --- Fase 3.1: el turtle soup y lo que la 3.0 tomaba y la 3.1 descarta -------
@@ -1779,10 +1783,10 @@ def test_las_dos_capas_de_la_31_nacen_encendidas_y_se_apagan(
     sin_nada = _trace_names(_step(resultado, "sin-turtle-ni-perdidas"))
 
     assert any(nombre.startswith("Turtle soup") for nombre in encendidas), encendidas
-    assert any("3.1 no" in nombre for nombre in encendidas), encendidas
+    assert any("ahora no" in nombre for nombre in encendidas), encendidas
     assert not any(nombre.startswith("Turtle soup") for nombre in sin_turtle)
-    assert any("3.1 no" in nombre for nombre in sin_turtle)
-    assert not any("3.1 no" in nombre for nombre in sin_nada)
+    assert any("ahora no" in nombre for nombre in sin_turtle)
+    assert not any("ahora no" in nombre for nombre in sin_nada)
 
 
 def test_el_estado_dice_que_esta_ensenando_la_fase_31(
@@ -1800,6 +1804,97 @@ def test_el_estado_dice_que_esta_ensenando_la_fase_31(
     assert "FASE 3.1" in notas
     assert "turtle soup" in notas
     assert "TODA la serie de H1" in notas
+
+
+# --- Fase 3.2: el rechazo en H4, que es lo que abre la operación --------------
+
+
+def test_cada_rechazo_de_h4_viaja_con_su_forma_y_con_su_lado(
+    zoned_run: ImpulseRun, cascade_run: tuple[CascadeRun, ExecutionRun]
+) -> None:
+    """El rechazo decide la operación Y su lado: las dos cosas tienen que viajar.
+
+    En la rama del UL la operación va **en contra** del ID, así que un registro
+    que sólo llevara la dirección del impulso dibujaría la marca del lado
+    equivocado sin que nada lo delatara.
+    """
+    cascade, execution = cascade_run
+    payload = build_payload(zoned_run, cascade=cascade, execution=execution)
+    rechazos = payload["entries"]["h4"]
+    if not rechazos:
+        pytest.skip("la fixture sintética no produjo ningún rechazo en H4")
+
+    esperados = {
+        (item.id_num, item.zone.value, item.index_rejection)
+        for item in cascade.observations
+        if item.index_rejection is not None
+    }
+    assert len(rechazos) >= len(esperados)
+    for record in rechazos:
+        assert record["f"] in ("A_cierre_fuera", "B_turtle_soup")
+        assert set(record["fs"]) <= {"A_cierre_fuera", "B_turtle_soup"}
+        assert record["d"] in ("alcista", "bajista")
+        # `ag` no es una etiqueta suelta: es exactamente "la operación no va en la
+        # dirección del ID", y si las dos se pudieran contradecir la capa mentiría.
+        assert record["ag"] == (record["d"] != record["di"])
+        # El rechazo nunca precede al contacto: primero se toca la zona.
+        assert record["xc"] <= record["x"]
+
+
+def test_el_payload_declara_que_abre_operacion_en_h4(
+    zoned_run: ImpulseRun, cascade_run: tuple[CascadeRun, ExecutionRun]
+) -> None:
+    """Sin el modo, el explorador no puede distinguir un rechazo de un contacto."""
+    cascade, execution = cascade_run
+    payload = build_payload(zoned_run, cascade=cascade, execution=execution)
+
+    assert payload["confirm"]["entryMode"] == "v32_rechazo"
+
+
+def test_la_capa_de_rechazos_de_h4_nace_encendida_y_se_apaga(
+    zoned_run: ImpulseRun,
+    cascade_run: tuple[CascadeRun, ExecutionRun],
+    tmp_path: Path,
+) -> None:
+    """Es el cambio de la fase: si no se dibujara de salida, no se auditaría."""
+    cascade, execution = cascade_run
+    if not any(item.index_rejection is not None for item in cascade.observations):
+        pytest.skip("la fixture sintética no produjo ningún rechazo en H4")
+    resultado = _draw(zoned_run, tmp_path, cascade=cascade, execution=execution)
+
+    encendida = _trace_names(_step(resultado, "con-rechazo-h4"))
+    apagada = _trace_names(_step(resultado, "sin-rechazo-h4"))
+
+    assert any(nombre.startswith("Rechazo en H4") for nombre in encendida), encendida
+    assert not any(nombre.startswith("Rechazo en H4") for nombre in apagada), apagada
+
+
+def test_el_estado_dice_que_el_contacto_ya_no_abre_operacion(
+    zoned_run: ImpulseRun,
+    cascade_run: tuple[CascadeRun, ExecutionRun],
+    tmp_path: Path,
+) -> None:
+    """Lo que ha dejado de operarse tiene que decirse, no sólo dibujarse menos."""
+    cascade, execution = cascade_run
+    resultado = _draw(zoned_run, tmp_path, cascade=cascade, execution=execution)
+    notas = _step(resultado, "con-rechazo-h4")["notes"]
+
+    assert "FASE 3.2" in notas
+    assert "v32_rechazo" in notas
+    assert "EN CONTRA del ID" in notas
+    assert "contacto_sin_desenlace" in notas
+
+
+def test_el_estado_avisa_cuando_la_capa_de_rechazos_esta_apagada(
+    zoned_run: ImpulseRun,
+    cascade_run: tuple[CascadeRun, ExecutionRun],
+    tmp_path: Path,
+) -> None:
+    """Filtrar no calcula: si la capa está apagada, el texto lo dice."""
+    cascade, execution = cascade_run
+    resultado = _draw(zoned_run, tmp_path, cascade=cascade, execution=execution)
+
+    assert "capa de rechazos de H4 APAGADA" in _step(resultado, "sin-rechazo-h4")["notes"]
 
 
 # --- Fase 3.0 · el replay como PRUEBA, no como respuesta ---------------------

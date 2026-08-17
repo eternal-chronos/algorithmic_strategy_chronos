@@ -1,9 +1,9 @@
-"""El informe y las capturas de la fase 3.1.
+"""El informe y las capturas de la cascada de entrada.
 
 Lo caro de las imágenes es renderizarlas, así que aquí se comprueba lo que se
 decide *antes* de dibujar —qué lotes se piden y con qué criterio— y lo que el
 informe promete: la declaración de portada, el orden de las secciones, la columna
-de la 3.0 al lado y las ausencias declaradas de los arquetipos.
+de la regla anterior al lado y las ausencias declaradas de los arquetipos.
 
 Los tres requisitos que más se juegan aquí:
 
@@ -37,7 +37,7 @@ from chronos.application.entries.execution import (
 )
 from chronos.application.entries.synthetic_run import build_synthetic
 from chronos.application.structure.detect_impulses import ImpulseRun
-from chronos.domain.entries.enums import ConfirmMode
+from chronos.domain.entries.enums import EntryMode
 from chronos.domain.entries.synthetic_entries import H4_RETEST_UP
 from chronos.domain.instrument import InstrumentSpec
 from chronos.infrastructure.reporting.entry_captures import (
@@ -69,14 +69,21 @@ def corrida() -> tuple[ImpulseRun, CascadeRun, ExecutionRun, object]:
 
 @pytest.fixture(scope="module")
 def anterior() -> PhaseRun:
-    """La misma corrida con las tres vías de la fase 3.0, para comparar."""
+    """La misma corrida con la regla ANTERIOR: el contacto abriendo operación.
+
+    La referencia es `ENTRY_MODE = v31_contacto` y **no** las tres vías de la
+    3.0: lo que la columna de al lado tiene que aislar es el efecto de exigir
+    rechazo en H4, y cambiar las dos cosas a la vez mezclaría dos cambios en una
+    sola comparación.
+    """
     from dataclasses import replace
 
     from chronos.application.entries.cascade import build_cascade
 
     synthetic = build_synthetic(H4_RETEST_UP)
-    entries = EntriesConfig(
-        enabled=True, allow_missing_ask=True, confirm_mode=ConfirmMode.V30_TRES_VIAS
+    entries = replace(
+        EntriesConfig(enabled=True, allow_missing_ask=True),
+        entry_mode=EntryMode.V31_CONTACTO,
     )
     cascade = build_cascade(
         synthetic.run, synthetic.zones, synthetic.bars["M15"], entries
@@ -84,7 +91,7 @@ def anterior() -> PhaseRun:
     execution = M1Executor(
         synthetic.m1,
         InstrumentSpec(symbol="SYNTH"),
-        replace(entries, confirm_mode=ConfirmMode.V30_TRES_VIAS),
+        entries,
         has_ask=False,
     ).execute(cascade)
     return PhaseRun(cascade, execution, trades_table(execution.trades))
@@ -135,11 +142,11 @@ def test_la_portada_marca_todos_los_costes_como_verificar(report: str) -> None:
 
 def test_los_stops_van_antes_que_los_resultados(report: str) -> None:
     """La nota del §10 convertida en índice, no en una advertencia al final."""
-    assert report.index("1. LOS STOPS") < report.index("§5.3 · Resultados")
+    assert report.index("1. LOS STOPS") < report.index("7. §6 · Resultados")
 
 
 def test_la_seccion_de_stops_declara_la_version_pre_registrada(report: str) -> None:
-    stops = report.split("1. LOS STOPS")[1].split("2. §5.1")[0]
+    stops = report.split("1. LOS STOPS")[1].split("2. §6.1")[0]
 
     assert "PRE-REGISTRADA" in stops
     assert "versión 2" in stops
@@ -147,7 +154,7 @@ def test_la_seccion_de_stops_declara_la_version_pre_registrada(report: str) -> N
 
 
 def test_la_distribucion_del_1r_va_en_las_tres_unidades(report: str) -> None:
-    stops = report.split("1. LOS STOPS")[1].split("2. §5.1")[0]
+    stops = report.split("1. LOS STOPS")[1].split("2. §6.1")[0]
 
     for unidad in ("usd_p50", "atr_p50", "pct_precio_p50", "bajo_una_horquilla"):
         assert unidad in stops
@@ -193,7 +200,7 @@ def test_el_informe_declara_que_r1_r2_y_r3_ya_no_confirman(report: str) -> None:
 
 def test_los_casos_limite_van_en_el_informe(report: str) -> None:
     """Son decisiones, y las decisiones las audita el propietario."""
-    assert "10. Casos límite encontrados" in report
+    assert "14. Casos límite encontrados" in report
     assert len(EDGE_CASES) >= 8
     for case in EDGE_CASES:
         assert case.split(".")[0][:30] in report
@@ -274,13 +281,14 @@ def test_el_lote_de_perdidas_esta_acotado() -> None:
     assert PER_VIA == 20
 
 
-# --- Fase 3.1: lo que esta fase añade al informe -----------------------------
+# --- Lo que el cambio de regla añade al informe ------------------------------
 
 
 def test_la_portada_declara_el_modo_y_el_orden_de_las_vias(report: str) -> None:
     portada = report.split("0. Regresión")[0]
 
-    assert "FASE 3.1" in portada
+    assert "FASE 3.2" in portada
+    assert "ENTRY_MODE = v32_rechazo" in portada
     assert "CONFIRM_MODE = v31_dos_vias" in portada
     assert "CONFIRM_PRIORITY" in portada
 
@@ -290,7 +298,7 @@ def test_el_informe_declara_las_dos_regresiones(report: str) -> None:
     seccion = report.split("0. Regresión")[1].split("Alcance de esta fase")[0]
 
     assert "LÍNEA BASE DE LA FASE 2.1" in seccion
-    assert "LÍNEA BASE DE LA FASE 3.0" in seccion
+    assert "LÍNEA BASE DE LA FASE 3.1" in seccion
 
 
 def test_el_alcance_dice_las_dos_vias_y_lo_que_se_elimina(report: str) -> None:
@@ -303,30 +311,73 @@ def test_el_alcance_dice_las_dos_vias_y_lo_que_se_elimina(report: str) -> None:
 
 
 def test_el_embudo_va_antes_y_despues(report: str) -> None:
-    embudo = report.split("2. §5.1")[1].split("3. §5.2")[0]
+    embudo = report.split("2. §6.1")[1].split("3. §6.2")[0]
 
-    assert "3.0 contra 3.1" in embudo
-    assert "n_30" in embudo
-    assert "confirmaban en la 3.0 y ahora mueren" in embudo
+    assert "3.1 contra 3.2" in embudo
+    assert "n_31" in embudo
+    assert "confirmaban en la 3.1 y ahora mueren" in embudo
+    # El paso nuevo de la fase: sin él el embudo no explicaría dónde muere la
+    # rama que antes se operaba por contacto.
+    assert "rechazos_en_h4" in embudo
 
 
 def test_las_dos_vias_se_miden_por_separado(report: str) -> None:
-    vias = report.split("3. §5.2")[1].split("4. §5.3")[0]
+    vias = report.split("6. §5.2 de la 3.1")[1].split("7. §6 ·")[0]
 
     assert "con_la_otra_via_disponible" in vias
     assert "CONFIRM_PRIORITY" in vias
-    assert "Turtle soup detectados" in vias
+    assert "Turtle soup de H1 detectados" in vias
 
 
-def test_cada_desglose_lleva_la_columna_de_la_30_al_lado(report: str) -> None:
-    resultados = report.split("4. §5.3")[1].split("5. §5.5")[0]
+def test_cada_desglose_lleva_la_columna_de_la_fase_anterior_al_lado(report: str) -> None:
+    resultados = report.split("7. §6 ·")[1].split("8. §6.6")[0]
 
-    assert resultados.count("3.1 contra 3.0:") >= 6
-    assert "expectativa_neta_r_30" in resultados
+    assert resultados.count("3.2 contra 3.1:") >= 6
+    assert "expectativa_neta_r_31" in resultados
+
+
+def test_las_operaciones_van_por_rama_y_el_respeto_se_declara_eliminado(
+    report: str,
+) -> None:
+    """La rama que se elimina tiene que verse eliminada, no simplemente ausente."""
+    ramas = report.split("3. §6.2")[1].split("4. §6.3")[0]
+
+    assert "POR RAMA" in ramas
+    assert "respeto" in ramas
+    # La comparación con la regla anterior es lo que enseña qué desapareció.
+    assert "3.1" in ramas
+
+
+def test_los_rechazos_de_h4_van_por_forma(report: str) -> None:
+    """Las dos formas se registran siempre, así que se cuentan por separado."""
+    formas = report.split("4. §6.3")[1].split("5. §6.4")[0]
+
+    assert "Forma A" in formas
+    assert "Forma B" in formas
+    assert "turtle soup de H4" in formas
+
+
+def test_las_operaciones_en_contra_del_id_tienen_su_seccion(report: str) -> None:
+    """Población nueva del proyecto: si no se aísla, se lee como una más."""
+    contra = report.split("5. §6.4")[1].split("6. §5.2")[0]
+
+    assert "EN CONTRA DEL ID" in contra
+    assert "POBLACIÓN NUEVA" in contra
+
+
+def test_el_hueco_de_fin_de_semana_se_marca_y_no_se_corrige(report: str) -> None:
+    """§4: se reporta aparte y la decisión es del propietario, no del motor."""
+    finde = report.split("9. §6.7")[1].split("10. §6.8")[0]
+
+    assert "ESTO NO SE CORRIGE" in finde
+    assert "SÁBADO" in finde
+    assert "con hueco de fin de semana" in finde
+    # Sin umbral de horas: es un hecho del calendario, no un parámetro elegido.
+    assert "NO lleva umbral de horas" in finde
 
 
 def test_el_coste_por_operacion_tiene_su_propia_seccion(report: str) -> None:
-    costes = report.split("5. §5.5")[1].split("6. §5.6")[0]
+    costes = report.split("8. §6.6")[1].split("9. §6.7")[0]
 
     assert "coste_p90_r" in costes
     assert "0,191 R" in costes
@@ -335,7 +386,7 @@ def test_el_coste_por_operacion_tiene_su_propia_seccion(report: str) -> None:
 
 def test_largos_y_cortos_por_ano_van_sin_ninguna_conclusion(report: str) -> None:
     """La tabla es imprescindible y NO se interpreta: se presenta y ya está."""
-    seccion = report.split("6. §5.6")[1].split("7. §5.7")[0]
+    seccion = report.split("10. §6.8")[1].split("11. §6.9")[0]
 
     assert "IMPRESCINDIBLE" in seccion
     assert "NO SE SACA NINGUNA CONCLUSIÓN" in seccion
@@ -343,10 +394,10 @@ def test_largos_y_cortos_por_ano_van_sin_ninguna_conclusion(report: str) -> None
 
 
 def test_la_frecuencia_va_antes_y_despues(report: str) -> None:
-    seccion = report.split("7. §5.7")[1].split("8. R1")[0]
+    seccion = report.split("11. §6.9")[1].split("12. R1")[0]
 
     assert "pct_vacias" in seccion
-    assert "fase 3.0" in seccion
+    assert "fase 3.1" in seccion
 
 
 def test_el_informe_no_recomienda_ni_interpreta(report: str) -> None:

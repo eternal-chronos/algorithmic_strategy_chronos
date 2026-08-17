@@ -1,7 +1,29 @@
-"""Caso de uso: la cascada de entrada (§1), con las vías de H1 de la fase 3.1.
+"""Caso de uso: la cascada de entrada (§1), con el desenlace de H4 de la fase 3.2.
 
     H4 es el motor. El día a día se busca ahí. El Diario es contexto: confirma y
     permite alargar, pero **nunca dispara**. H1 confirma. M15 afina.
+
+**EL CONTACTO NO ES SEÑAL** (fase 3.2). Tocar una zona de H4 abre **observación**
+y nada más. A partir de ahí, y sólo si ocurre alguno de estos desenlaces, hay
+operación:
+
+    UL rechazado ............. operación EN CONTRA del ID
+    UL roto y retesteado ..... a favor de la rotura
+    OB rechazado ............. a favor del ID
+    OB roto .................. sin operación, la observación muere
+
+La rama «respeto operado a favor del ID por contacto» queda **eliminada**: era
+más de la mitad del backtest de la 3.0 —2.234 de 3.702 operaciones fueron
+"UL + respeto", es decir comprar cuando el precio sube al techo del impulso— y no
+existe en la estrategia del propietario. El juego de la 3.1 sigue implementado
+bajo `ENTRY_MODE = v31_contacto`, **sólo** para regresión y comparación.
+
+**El rechazo se espera en H4, no en H1**, y fija la DIRECCIÓN de la operación
+(`domain/entries/h4_rejection.py`). Es la primera vez en el proyecto que una
+operación va en contra del ID de H4, así que la dirección deja de ser una
+propiedad del impulso y pasa a viajar en la observación —`trade_direction`—
+hasta el stop y el objetivo. El retesteo del OB **no se implementa**: el
+propietario lo ha aparcado a propósito y queda como pendiente conocido.
 
 **H1 confirma por DOS vías y sólo dos** (fase 3.1): un *turtle soup* de dos velas
 consecutivas, o un ID de H1 en la dirección con su OB ya formado **al que el
@@ -62,11 +84,13 @@ from chronos.domain.entries.enums import (
     ConfirmMode,
     ConfirmPriority,
     DailyContext,
+    EntryMode,
     EntryTimeframe,
     GuardRail,
     RejectionKind,
     StopZone,
 )
+from chronos.domain.entries.h4_rejection import ZoneRejection, first_rejection
 from chronos.domain.entries.loose_order_block import find_loose_order_block
 from chronos.domain.entries.rejection import (
     RejectionMarks,
@@ -96,6 +120,11 @@ from chronos.domain.structure.zones import CandleSeries, Zone, ZoneKind
 FUNNEL_STEPS: tuple[str, ...] = (
     "zonas_de_h4",
     "zonas_tocadas",
+    #: Fase 3.2. Contactos que llegaron a tener un rechazo en H4. Es el paso nuevo
+    #: y es donde muere la rama que la 3.1 operaba por contacto. Con
+    #: `ENTRY_MODE = v31_contacto` vale 0: en ese modo no se busca ningún rechazo,
+    #: y ponerlo igual al número de contactos daría a entender que sí.
+    "rechazos_en_h4",
     "observaciones",
     "confirman_en_h1",
     "entrada_localizada_h1",
@@ -258,6 +287,11 @@ class _Watch:
     zone_at_contact: Zone
     index_contact: int
     ts_contact: pd.Timestamp
+    #: Fase 3.2 — dirección de la OPERACIÓN. Coincide con la del ID salvo en la
+    #: rama de UL rechazado, que es la primera del proyecto que va en contra.
+    #: Todo lo que hay debajo —turtle soup de H1, OB de H1, OB suelto de M15,
+    #: stop y objetivo— lee esta dirección y no la del impulso.
+    trade_direction: ImpulseDirection
     daily: DailyContext
     daily_touch: DailyTouch | None
     #: Ventana de búsqueda en H1, en índices de H1 y ya cerrada por los dos lados.
@@ -271,6 +305,9 @@ class _Watch:
     ts_break: pd.Timestamp | None = None
     index_retest: int | None = None
     ts_retest: pd.Timestamp | None = None
+    #: Fase 3.2 — el rechazo de H4 que abrió esta observación, cuando lo hubo.
+    rejection: ZoneRejection | None = None
+    ts_rejection: pd.Timestamp | None = None
     confirmation: Confirmation | None = None
     #: Las tres definiciones de rechazo que marcaron la vela de confirmación.
     #: Viajan con la observación hasta la señal para poder desglosar por
@@ -310,6 +347,13 @@ class _Watch:
             ts_break=None if self.ts_break is None else self.ts_break.to_pydatetime(),
             index_retest=self.index_retest,
             ts_retest=None if self.ts_retest is None else self.ts_retest.to_pydatetime(),
+            trade_direction=self.trade_direction,
+            index_rejection=None if self.rejection is None else self.rejection.index,
+            ts_rejection=(
+                None if self.ts_rejection is None else self.ts_rejection.to_pydatetime()
+            ),
+            rejection_form=None if self.rejection is None else self.rejection.form,
+            rejection_forms=() if self.rejection is None else self.rejection.forms,
         )
 
 
@@ -495,11 +539,17 @@ class _Cascade:
                     continue
                 self._funnel["zonas_tocadas"] += 1
                 index, zone = contact
-                respect = self._respect_watch(
-                    impulse, kind, zone_by_bar, index, zone, end, daily, clock, h1_clock
+                opened = (
+                    self._rejection_watch(
+                        impulse, kind, zone_by_bar, index, zone, end, daily, clock, h1_clock
+                    )
+                    if self._config.entry_mode is EntryMode.V32_RECHAZO
+                    else self._respect_watch(
+                        impulse, kind, zone_by_bar, index, zone, end, daily, clock, h1_clock
+                    )
                 )
-                if respect is not None:
-                    watches.append(respect)
+                if opened is not None:
+                    watches.append(opened)
                 retest = self._retest_watch(
                     impulse,
                     kind,
@@ -530,7 +580,13 @@ class _Cascade:
         clock: BarClock,
         h1_clock: BarClock,
     ) -> _Watch | None:
-        """La observación mientras la zona sigue entera (§1.2, RESPETO)."""
+        """⚠️ La observación abierta por el CONTACTO (§1.2 de la 3.1, RESPETO).
+
+        **Sólo corre con `ENTRY_MODE = v31_contacto`**, que existe para la
+        regresión. Aquí el contacto basta y se opera a favor del ID: es la rama
+        que la fase 3.2 elimina. No se toca ni una línea, porque si se moviera el
+        test de regresión dejaría de significar nada.
+        """
         opened = clock.close_of(index)
         first = h1_clock.closed_at(opened)
         # La primera barra de H1 utilizable es la que cierra a la vez que la de
@@ -550,6 +606,7 @@ class _Cascade:
             zone_at_contact=zone,
             index_contact=index,
             ts_contact=opened,
+            trade_direction=impulse.direction,
             daily=context,
             daily_touch=touch,
             h1_first=first,
@@ -557,6 +614,99 @@ class _Cascade:
             ts_window_end=h1_clock.close_of(min(last, len(h1_clock) - 1)).to_pydatetime(),
             h4_last=end,
         )
+
+    def _rejection_watch(
+        self,
+        impulse: DominantImpulse,
+        kind: ZoneKind,
+        zone_by_bar: dict[int, Zone],
+        index: int,
+        zone: Zone,
+        end: int,
+        daily: Sequence[DailyTouch],
+        clock: BarClock,
+        h1_clock: BarClock,
+    ) -> _Watch | None:
+        """Fase 3.2 — la observación que abre un **rechazo en H4**.
+
+        El contacto ya no opera nada: sólo abre la ventana en la que se espera el
+        rechazo. Si no llega ninguno, la observación muere en
+        `contacto_sin_desenlace`, que es el guardarraíl donde va a parar la rama
+        que la 3.1 operaba a ciegas.
+
+        **La ventana termina donde termina el ID**, igual que en la 3.1: la zona
+        deja de gobernar cuando el impulso muere. Con una excepción escrita: si el
+        ID murió atravesando **esta misma zona**, la vela de la rotura no puede
+        rechazarla, porque en su cierre la zona ya está rota. Aceptarla sería dar
+        por rechazo el mismo cierre que la fase 2.1 declara rotura.
+
+        **La dirección la fija el rechazo, no el ID.** En el UL sale en contra del
+        impulso y en el OB a favor, y es la misma regla —`break_direction` del
+        revés— para los dos. La ventana de H1 arranca en el cierre de la vela que
+        rechazó: antes de ese cierre el rechazo no se sabía.
+        """
+        series = self._series[H4]
+        last_bar = end - 1 if self._breaks_this_zone(impulse, kind) else end
+        found = first_rejection(series, zone_by_bar, first=index, through=last_bar)
+        if found is None:
+            self._discard(
+                impulse,
+                kind,
+                zone,
+                min(max(last_bar, index), len(clock) - 1),
+                clock,
+                GuardRail.CONTACTO_SIN_DESENLACE,
+                daily,
+                index_contact=index,
+            )
+            return None
+        self._funnel["rechazos_en_h4"] += 1
+
+        rejected_at = clock.close_of(found.index)
+        first = max(h1_clock.closed_at(rejected_at), 0)
+        last = h1_clock.closed_at(clock.close_of(end))
+        if first > last or first >= len(h1_clock):
+            self._discard(
+                impulse,
+                kind,
+                zone,
+                found.index,
+                clock,
+                GuardRail.ID_H4_MUERTO,
+                daily,
+                index_contact=index,
+                direction=found.direction,
+            )
+            return None
+        context, touch = self._daily_context(daily, rejected_at, found.direction)
+        return _Watch(
+            impulse=impulse,
+            kind=kind,
+            zone_by_bar=zone_by_bar,
+            zone_at_contact=zone,
+            index_contact=index,
+            ts_contact=clock.close_of(index),
+            trade_direction=found.direction,
+            daily=context,
+            daily_touch=touch,
+            h1_first=first,
+            h1_last=min(last, len(h1_clock) - 1),
+            ts_window_end=h1_clock.close_of(min(last, len(h1_clock) - 1)).to_pydatetime(),
+            h4_last=end,
+            rejection=found,
+            ts_rejection=rejected_at,
+        )
+
+    def _breaks_this_zone(self, impulse: DominantImpulse, kind: ZoneKind) -> bool:
+        """El ID murió atravesando **esta** zona, no la otra.
+
+        Con `BREAK_BY_ZONE = true` cerrar más allá del UL es la rotura a favor y
+        más allá del OB, la rotura en contra. Así que no se recalcula nada: se lee
+        de cómo murió el impulso, que es donde la fase 2.1 lo dejó escrito.
+        """
+        if kind is ZoneKind.LAST:
+            return impulse.exit_break_kind is BreakKind.A_FAVOR
+        return impulse.exit_break_kind is BreakKind.EN_CONTRA
 
     def _retest_watch(
         self,
@@ -596,12 +746,7 @@ class _Cascade:
             return None
         series = self._series[impulse.timeframe]
         clock = self._clock[impulse.timeframe]
-        broken_by_zone = (
-            impulse.exit_break_kind is BreakKind.A_FAVOR
-            if kind is ZoneKind.LAST
-            else impulse.exit_break_kind is BreakKind.EN_CONTRA
-        )
-        if not broken_by_zone:
+        if not self._breaks_this_zone(impulse, kind):
             # El ID murió por el otro lado, o sigue vivo: esta rama nunca llegó a
             # abrirse. No se apunta un descarte porque no ha muerto ninguna señal
             # aquí; la observación de respeto es la que lleva su propio motivo.
@@ -662,6 +807,9 @@ class _Cascade:
             zone_at_contact=zone,
             index_contact=index_contact,
             ts_contact=clock.close_of(index_contact),
+            # A favor de la ROTURA, que en el UL es a favor del ID. Es la única
+            # rama de la 3.2 cuya dirección no la fija un rechazo.
+            trade_direction=impulse.direction,
             daily=context,
             daily_touch=touch,
             h1_first=first,
@@ -756,16 +904,22 @@ class _Cascade:
         daily: Sequence[DailyTouch],
         confirmation: Confirmation | None = None,
         index_contact: int | None = None,
+        direction: ImpulseDirection | None = None,
     ) -> None:
         """Apunta una señal muerta. `index` es DÓNDE muere, no dónde nació.
 
         Los dos van por separado porque en la rama de rotura y retesteo no
         coinciden: la zona se tocó mucho antes de romperse, y una ficha que
         enseñara la misma hora en las dos líneas haría dudar de la otra.
+
+        `direction` es la de la operación que se habría hecho, cuando ya se sabe.
+        Sin ella —un contacto que muere sin desenlace no tiene lado— manda la del
+        ID, que es lo que la observación sí conoce.
         """
         stamp = clock.close_of(index)
         born = clock.close_of(index if index_contact is None else index_contact)
-        context, touch = self._daily_context(daily, stamp, impulse.direction)
+        traded = direction if direction is not None else impulse.direction
+        context, touch = self._daily_context(daily, stamp, traded)
         self._discarded.append(
             DiscardedSignal(
                 observation=Observation(
@@ -780,6 +934,7 @@ class _Cascade:
                     ts_window_end=None,
                     daily=context,
                     daily_touch=touch,
+                    trade_direction=traded,
                 ),
                 guard_rail=rail,
                 index=index,
@@ -851,12 +1006,18 @@ class _Cascade:
     ) -> None:
         """Con la zona en observación y el precio **dentro de ella**, ¿confirma?
 
-        La puerta es la misma en los dos modos y no se toca: el §1.3 pide la zona
+        La puerta es la misma en los tres modos y no se toca: el §1.3 pide la zona
         de H4 en observación y el precio dentro de ella, y sólo entonces se mira
-        H1. Lo que cambia entre la 3.0 y la 3.1 es **qué** se mira después.
+        H1. Lo que cambia entre la 3.0 y la 3.1 es **qué** se mira después; lo que
+        cambia en la 3.2 es **en qué dirección**.
+
+        La dirección es la de la OPERACIÓN, no la del ID. Con un UL rechazado en
+        un ID alcista se busca un turtle soup bajista y un OB de H1 bajista: leer
+        aquí la del impulso confirmaría la entrada contraria a la que el rechazo
+        acaba de decidir.
         """
         zone = watch.zone_at(h4_bar)
-        direction = watch.impulse.direction
+        direction = watch.trade_direction
         turtle = self._turtle[direction].get(bar)
         if not touches(zone, high, low):
             # El patrón puede aparecer con la observación viva y el precio ya
@@ -1139,7 +1300,7 @@ class _Cascade:
             return None
         clock = self._clock[H1]
         at = pd.Timestamp(confirmation.timestamp)
-        item = self._h1_zone_owner(watch.impulse.direction, at)
+        item = self._h1_zone_owner(watch.trade_direction, at)
         if item is None or item.order_block is None:
             return None
         block = item.order_block
@@ -1187,7 +1348,7 @@ class _Cascade:
             return None
         block = find_loose_order_block(
             self._m15_series,
-            direction=watch.impulse.direction,
+            direction=watch.trade_direction,
             first=first,
             through=limit,
         )

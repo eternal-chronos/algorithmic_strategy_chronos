@@ -10,12 +10,55 @@ from enum import StrEnum
 
 
 class Outcome(StrEnum):
-    """Los dos desenlaces de una zona en observación (§1.2)."""
+    """Los desenlaces de una zona en observación (§1.2 y fase 3.2, §1).
 
-    #: El precio reacciona en la zona sin romperla. Se opera a favor del ID de H4.
+    **El contacto no es un desenlace.** Tocar una zona abre observación y nada
+    más: hasta la fase 3.1 el `respeto` se operaba por contacto, y eso fue un
+    error de la especificación. En la 3.2 sólo hay operación con `rechazo` o con
+    `rotura_y_retesteo`; `respeto` se conserva porque es el desenlace que produce
+    `ENTRY_MODE = v31_contacto`, que existe **sólo** para la regresión.
+    """
+
+    #: ⚠️ Fase 3.1 y anteriores. El precio toca la zona y se opera a favor del ID
+    #: sin exigir rechazo ni rotura. **Eliminado en la 3.2**: sólo lo produce el
+    #: modo de regresión.
     RESPETO = "respeto"
+    #: Fase 3.2. Una vela de H4 rechaza la zona. La dirección de la operación la
+    #: fija el rechazo: en el UL va EN CONTRA del ID, en el OB a favor.
+    RECHAZO = "rechazo"
     #: El precio rompe la zona y después vuelve a testearla. Sólo el UL.
     ROTURA_Y_RETESTEO = "rotura_y_retesteo"
+
+
+class EntryMode(StrEnum):
+    """Qué abre una operación en H4 (fase 3.2, §3).
+
+    `v31_contacto` **no es una variante del proyecto**: se conserva para el test
+    de regresión —1.508 confirmaciones y 3.298 operaciones exactas— y para poder
+    poner las dos columnas una al lado de la otra.
+    """
+
+    #: 3.1. El contacto con la zona basta: se opera a favor del ID.
+    V31_CONTACTO = "v31_contacto"
+    #: 3.2. El contacto sólo abre observación. Hace falta un rechazo en H4 o una
+    #: rotura con retesteo.
+    V32_RECHAZO = "v32_rechazo"
+
+
+class RejectionForm(StrEnum):
+    """Las dos formas válidas de rechazo en H4 (fase 3.2, §2). **Sin parámetros.**
+
+    Vale la que ocurra primero. Cuando las dos caen en la misma vela la decisión
+    es idéntica —misma vela, misma dirección— así que la elección de etiqueta es
+    cosmética y se registran las dos.
+    """
+
+    #: Forma A. Una vela de H4 entra en la zona y **cierra fuera de ella**, del
+    #: lado por el que entró. Una sola vela.
+    A_CIERRE_FUERA = "A_cierre_fuera"
+    #: Forma B. Turtle soup de H4: dos velas consecutivas, la segunda llega a la
+    #: mecha de la primera y cierra sin superarla, y eso ocurre en la zona.
+    B_TURTLE_SOUP = "B_turtle_soup"
 
 
 class RejectionKind(StrEnum):
@@ -113,6 +156,10 @@ class GuardRail(StrEnum):
     que la mató.
     """
 
+    #: Fase 3.2. El precio tocó la zona y la observación se apagó sin desenlace
+    #: operable: ni rechazo en H4 ni rotura con retesteo. Es el guardarraíl que
+    #: recoge la rama que la 3.1 operaba por contacto.
+    CONTACTO_SIN_DESENLACE = "contacto_sin_desenlace"
     #: La zona se rompió y no hubo retesteo dentro de la ventana (§1.2).
     ROTURA_SIN_RETESTEO = "rotura_sin_retesteo"
     #: El OB se rompió: ahí no hay variante de retesteo, la observación muere.

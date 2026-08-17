@@ -252,29 +252,29 @@ def _write_lost(
             f"zona {item.zone.value} · LA 3.0 ENTRABA AQUÍ · LA 3.1 NO"
         ),
         subtitle=(
-            f"vía de la 3.0: <b>{item.via_v30.value}</b> · "
-            f"confirmaba {item.ts_confirmation_v30:%Y-%m-%d %H:%M} UTC · "
+            f"vía de la 3.0: <b>{item.via_before.value}</b> · "
+            f"confirmaba {item.ts_confirmation_before:%Y-%m-%d %H:%M} UTC · "
             f"contacto {item.ts_contact:%Y-%m-%d %H:%M} UTC · "
             f"desenlace de la zona {item.outcome.value} · "
             + (
-                f"en la 3.1 muere en `{item.rail_v31.value}`"
-                if item.rail_v31 is not None
+                f"en la 3.1 muere en `{item.rail_after.value}`"
+                if item.rail_after is not None
                 else "en la 3.1 la observación sigue viva sin confirmar"
             )
         ),
         from_index=item.index_contact,
-        until=item.ts_confirmation_v30,
+        until=item.ts_confirmation_before,
     )
     _vertical(figure, labels, analysis, item.ts_contact, "contacto", theme.INK_MUTED)
     _vertical(
         figure,
         labels,
         analysis,
-        item.ts_confirmation_v30,
-        f"la 3.0 confirmaba ({item.via_v30.value})",
+        item.ts_confirmation_before,
+        f"la 3.0 confirmaba ({item.via_before.value})",
         STOP_COLOUR,
     )
-    path = folder / f"{name}_{item.ts_confirmation_v30:%Y%m%d_%H%M}.png"
+    path = folder / f"{name}_{item.ts_confirmation_before:%Y%m%d_%H%M}.png"
     figure.write_image(str(path), width=WIDTH, height=HEIGHT, scale=SCALE)
     return path
 

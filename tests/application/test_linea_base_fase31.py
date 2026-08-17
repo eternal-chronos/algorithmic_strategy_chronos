@@ -39,7 +39,12 @@ from chronos.application.entries.execution import M1Executor
 from chronos.application.structure.config import M15, ImpulseConfig, ZonesConfig
 from chronos.application.structure.detect_impulses import DetectDominantImpulses, ImpulseRun
 from chronos.application.structure.zones import ZonesRun, detect_zones
-from chronos.domain.entries.enums import ConfirmationKind, ConfirmMode, ConfirmPriority
+from chronos.domain.entries.enums import (
+    ConfirmationKind,
+    ConfirmMode,
+    ConfirmPriority,
+    EntryMode,
+)
 from chronos.domain.instrument import InstrumentSpec
 from chronos.infrastructure.config.loader import load_impulse_config
 
@@ -123,7 +128,12 @@ def cascadas(
     structure: tuple[ImpulseRun, ZonesRun, dict[str, pd.DataFrame]],
 ) -> tuple[object, object]:
     run, zones, series = structure
-    entries = EntriesConfig(enabled=True, allow_missing_ask=True)
+    # ⚠️ `ENTRY_MODE = v31_contacto`: las dos líneas base de este fichero son las
+    # de las fases 3.0 y 3.1, y las dos se operaban POR CONTACTO. Con el modo de
+    # la 3.2 no se pueden reproducir y no deberían: el contacto dejó de operar.
+    entries = EntriesConfig(
+        enabled=True, allow_missing_ask=True, entry_mode=EntryMode.V31_CONTACTO
+    )
     m15 = series.get(M15)
     return (
         build_cascade(
@@ -201,7 +211,7 @@ def test_la_31_pierde_confirmaciones_y_se_pueden_enumerar(
     lost = lost_confirmations(v30, v31)  # type: ignore[arg-type]
 
     assert lost
-    assert all(item.via_v30 for item in lost)
+    assert all(item.via_before for item in lost)
 
 
 def test_el_orden_entre_las_vias_se_mide_en_vez_de_razonarse(

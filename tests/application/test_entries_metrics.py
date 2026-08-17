@@ -134,7 +134,14 @@ def test_el_total_va_al_final_y_no_sustituye_a_nadie() -> None:
     assert int(table.iloc[-1]["n"]) == 2
 
 
-def test_los_ocho_desgloses_del_5_estan_todos() -> None:
+def test_los_desgloses_del_5_estan_todos() -> None:
+    """Los ocho del enunciado original y los dos que añade la fase 3.2.
+
+    Los dos nuevos —dirección frente al ID y hueco de fin de semana— van con los
+    demás y no en una sección aparte: el §4 pide reportar el grupo del hueco «en
+    todos los desgloses», y un desglose que sólo existe en su propia página no
+    está en los demás.
+    """
     rows = [
         trade(
             zona_h4="UL",
@@ -147,7 +154,7 @@ def test_los_ocho_desgloses_del_5_estan_todos() -> None:
     titles = [title for title, _ in metrics.all_breakdowns(frame(rows))]
 
     assert [title.split(" ")[0] for title in titles] == [
-        "5.1", "5.2", "5.3", "5.4", "5.5", "5.6", "5.7", "5.8"
+        "5.1", "5.2", "5.3", "5.3b", "5.4", "5.5", "5.6", "5.7", "5.8", "5.9", "5.10"
     ]
 
 

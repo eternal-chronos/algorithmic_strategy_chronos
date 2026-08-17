@@ -1,15 +1,19 @@
-"""Fase 3.1 contra fase 3.0: las dos corridas, una al lado de la otra.
+"""Una fase contra la anterior: las dos corridas, una al lado de la otra.
 
-La 3.1 cambia **una sola cosa** —qué confirma en H1— y todo lo demás se queda
-igual: el mismo detector, las mismas zonas, la misma regla de rotura, la misma
-ejecución y el mismo objetivo. Por eso la comparación se puede hacer observación
-a observación: las dos corridas producen **exactamente las mismas
-observaciones**, porque las observaciones se recogen antes de mirar H1. Lo único
-que cambia es cuáles de ellas confirman.
+Sirve para los dos saltos que el proyecto ha hecho sobre la misma cascada:
 
-Esa es la razón de que aquí no haya ningún emparejamiento aproximado ni ninguna
-heurística: dos observaciones son la misma si coinciden en ID, tipo de zona,
-vela de contacto y vela de retesteo. Si esa clave dejara de ser única, la
+- **3.0 → 3.1**, que cambia qué confirma en H1. Ahí las dos corridas producen
+  exactamente las mismas observaciones, porque se recogen antes de mirar H1, y lo
+  único que cambia es cuáles confirman.
+- **3.1 → 3.2**, que cambia qué **abre** una observación operable. Ahí ya no son
+  las mismas: los contactos sin rechazo dejan de producir observación. Lo que sí
+  sigue siendo idéntico es lo que hay **por encima del contacto** —las zonas de
+  H4 y cuáles se tocan—, y eso se comprueba.
+
+Dos observaciones son la misma si coinciden en ID, tipo de zona, vela de contacto
+y vela de retesteo. La clave la comparten las tres ramas: la de contacto de la
+3.1 y la de rechazo de la 3.2 nacen en la misma vela, así que se emparejan solas
+y no hace falta ninguna heurística. Si esa clave dejara de ser única la
 comparación entera estaría mintiendo, así que se comprueba.
 
 **Aquí no se interpreta nada.** Se cuenta qué se perdió y qué se ganó; qué
@@ -57,7 +61,10 @@ class PhaseRun:
 
     @property
     def label(self) -> str:
-        return self.cascade.config.confirm_mode.value
+        return (
+            f"{self.cascade.config.entry_mode.value} · "
+            f"{self.cascade.config.confirm_mode.value}"
+        )
 
 
 def observation_key(observation: Observation) -> ObservationKey:
@@ -115,7 +122,7 @@ def outcomes_by_observation(cascade: CascadeRun) -> dict[ObservationKey, Observa
 
 @dataclass(frozen=True, slots=True)
 class LostConfirmation:
-    """Una observación que la 3.0 confirmaba y la 3.1 ya no.
+    """Una observación que la fase anterior confirmaba y la nueva ya no.
 
     Es lo primero que el propietario quiere auditar, así que viaja con la vía por
     la que confirmaba antes y con el guardarraíl en el que muere ahora.
@@ -130,19 +137,20 @@ class LostConfirmation:
     zone_inner: float
     zone_outer: float
     #: Por dónde confirmaba en la 3.0, y cuándo.
-    via_v30: ConfirmationKind
-    ts_confirmation_v30: datetime
-    #: Dónde muere en la 3.1. `None` sólo si la observación desapareciera, que no
-    #: puede pasar: las dos corridas producen las mismas observaciones.
-    rail_v31: GuardRail | None
+    via_before: ConfirmationKind
+    ts_confirmation_before: datetime
+    #: Dónde muere ahora. `None` sólo si la observación desapareciera sin dejar ni
+    #: un descarte, que no puede pasar: un contacto que muere sin desenlace apunta
+    #: igualmente su guardarraíl.
+    rail_after: GuardRail | None
 
 
 def lost_confirmations(
-    v30: CascadeRun, v31: CascadeRun
+    before_run: CascadeRun, after_run: CascadeRun
 ) -> tuple[LostConfirmation, ...]:
     """Las que confirmaban antes y ahora no. En orden cronológico de contacto."""
-    before = outcomes_by_observation(v30)
-    after = outcomes_by_observation(v31)
+    before = outcomes_by_observation(before_run)
+    after = outcomes_by_observation(after_run)
     lost = []
     for key, item in before.items():
         if item.confirmation is None:
@@ -161,21 +169,21 @@ def lost_confirmations(
                 ts_contact=observation.ts_contact,
                 zone_inner=observation.zone_inner,
                 zone_outer=observation.zone_outer,
-                via_v30=item.confirmation.kind,
-                ts_confirmation_v30=item.confirmation.timestamp,
-                rail_v31=None if now is None else now.guard_rail,
+                via_before=item.confirmation.kind,
+                ts_confirmation_before=item.confirmation.timestamp,
+                rail_after=None if now is None else now.guard_rail,
             )
         )
-    return tuple(sorted(lost, key=lambda item: item.ts_confirmation_v30))
+    return tuple(sorted(lost, key=lambda item: item.ts_confirmation_before))
 
 
 def gained_confirmations(
-    v30: CascadeRun, v31: CascadeRun
+    before_run: CascadeRun, after_run: CascadeRun
 ) -> tuple[ObservationOutcome, ...]:
     """Las que la 3.1 confirma y la 3.0 no. Existen: el OB alcanzado no es el OB
     al nacer, y una observación puede llegar al OB mucho después de que naciera."""
-    before = outcomes_by_observation(v30)
-    after = outcomes_by_observation(v31)
+    before = outcomes_by_observation(before_run)
+    after = outcomes_by_observation(after_run)
     return tuple(
         item
         for key, item in after.items()
@@ -186,7 +194,8 @@ def gained_confirmations(
 def check_observations_match(v30: CascadeRun, v31: CascadeRun) -> None:
     """Las dos corridas tienen que producir las MISMAS observaciones.
 
-    Si no coincidieran, el cambio de la 3.1 habría tocado algo por encima de H1 y
+    Vale para el salto 3.0 → 3.1, donde el cambio está **por debajo** del
+    contacto: si no coincidieran, el cambio habría tocado algo por encima de H1 y
     toda la comparación estaría emparejando cosas distintas. Se comprueba en vez
     de suponerse.
     """
@@ -195,8 +204,40 @@ def check_observations_match(v30: CascadeRun, v31: CascadeRun) -> None:
     if left != right:
         raise DomainError(
             "Las dos corridas no producen las mismas observaciones: "
-            f"{len(left - right)} sólo en v30 y {len(right - left)} sólo en v31. "
-            "El cambio de la fase 3.1 sólo puede afectar a la confirmación en H1."
+            f"{len(left - right)} sólo en la primera y {len(right - left)} sólo en "
+            "la segunda. Un cambio en la confirmación de H1 no puede mover ninguna."
+        )
+
+
+def check_contacts_match(before: CascadeRun, after: CascadeRun) -> None:
+    """Fase 3.2 — lo que hay **por encima del contacto** tiene que ser idéntico.
+
+    Aquí las observaciones sí cambian, y a propósito: un contacto sin rechazo deja
+    de abrir ninguna. Lo que no puede moverse es el escalón anterior —cuántas
+    zonas de H4 hay y cuáles toca el precio—, porque la 3.2 no toca ni el ID, ni
+    las zonas, ni la rotura por zona.
+
+    Y toda observación de la corrida nueva tiene que existir en la anterior: la
+    3.2 sólo puede **quitar** ramas, nunca inventar un contacto que la 3.1 no
+    tuviera. Las claves se buscan también entre las descartadas, porque un
+    contacto que muere sin desenlace sigue siendo el mismo contacto.
+    """
+    for step in ("zonas_de_h4", "zonas_tocadas"):
+        left = int(before.funnel.get(step, 0))
+        right = int(after.funnel.get(step, 0))
+        if left != right:
+            raise DomainError(
+                f"El paso `{step}` del embudo se ha movido: {left} antes y {right} "
+                "ahora. La fase 3.2 no toca ni el ID, ni las zonas, ni la rotura "
+                "por zona: si ese escalón cambia, es un bug."
+            )
+    known = {observation_key(item) for item in before.observations}
+    known |= {observation_key(item.observation) for item in before.discarded}
+    unknown = {observation_key(item) for item in after.observations} - known
+    if unknown:
+        raise DomainError(
+            f"{len(unknown)} observaciones de la corrida nueva no existen en la "
+            "anterior. La fase 3.2 sólo puede quitar ramas, no crear contactos."
         )
 
 
@@ -204,7 +245,10 @@ def check_observations_match(v30: CascadeRun, v31: CascadeRun) -> None:
 
 
 def funnel_comparison(
-    v30: CascadeRun, v31: CascadeRun, execution_v30: ExecutionRun, execution_v31: ExecutionRun
+    before_run: CascadeRun,
+    after_run: CascadeRun,
+    execution_before: ExecutionRun,
+    execution_after: ExecutionRun,
 ) -> pd.DataFrame:
     """El embudo entero de las dos corridas, paso a paso y con la diferencia."""
     steps = [
@@ -215,44 +259,72 @@ def funnel_comparison(
     rows = []
     for name, key in steps:
         if key is not None:
-            before = int(v30.funnel.get(key, 0))
-            after = int(v31.funnel.get(key, 0))
+            before = int(before_run.funnel.get(key, 0))
+            after = int(after_run.funnel.get(key, 0))
         elif name == "se_ejecutan":
-            before, after = len(execution_v30.trades), len(execution_v31.trades)
+            before, after = len(execution_before.trades), len(execution_after.trades)
         else:
-            before = sum(1 for trade in execution_v30.trades if trade.outcome.is_resolved)
-            after = sum(1 for trade in execution_v31.trades if trade.outcome.is_resolved)
+            before = sum(1 for trade in execution_before.trades if trade.outcome.is_resolved)
+            after = sum(1 for trade in execution_after.trades if trade.outcome.is_resolved)
         rows.append(
             {
                 "paso": name,
-                "n_30": before,
-                "n_31": after,
+                "n_31": before,
+                "n_32": after,
                 "diferencia": after - before,
-                "pct_de_la_30": after / before if before else float("nan"),
+                "pct_de_la_31": after / before if before else float("nan"),
             }
         )
     return pd.DataFrame(rows)
 
 
 def lost_table(lost: Sequence[LostConfirmation]) -> pd.DataFrame:
-    """Las confirmaciones perdidas, desglosadas por vía de la 3.0 y guardarraíl."""
+    """Las confirmaciones perdidas, por vía de la fase anterior y guardarraíl."""
     if not lost:
-        return pd.DataFrame(columns=["via_30", "muere_en_31", "n"])
+        return pd.DataFrame(columns=["via_antes", "muere_ahora", "n"])
     frame = pd.DataFrame(
         [
             {
-                "via_30": item.via_v30.value,
-                "muere_en_31": "(sigue viva)" if item.rail_v31 is None else item.rail_v31.value,
+                "via_antes": item.via_before.value,
+                "muere_ahora": (
+                    "(sigue viva)" if item.rail_after is None else item.rail_after.value
+                ),
             }
             for item in lost
         ]
     )
     counted = (
-        frame.groupby(["via_30", "muere_en_31"], sort=True)
+        frame.groupby(["via_antes", "muere_ahora"], sort=True)
         .size()
         .reset_index(name="n")
     )
-    total = pd.DataFrame([{"via_30": "TOTAL", "muere_en_31": "", "n": len(lost)}])
+    total = pd.DataFrame([{"via_antes": "TOTAL", "muere_ahora": "", "n": len(lost)}])
+    return pd.concat([counted, total], ignore_index=True)
+
+
+def lost_by_branch(lost: Sequence[LostConfirmation]) -> pd.DataFrame:
+    """Fase 3.2 — las perdidas por RAMA de la fase anterior.
+
+    Es la tabla que contesta a la pregunta del §0: cuántas de las que la 3.1
+    tomaba eran "UL + respeto", la rama que la 3.2 elimina entera.
+    """
+    if not lost:
+        return pd.DataFrame(columns=["rama_antes", "muere_ahora", "n"])
+    frame = pd.DataFrame(
+        [
+            {
+                "rama_antes": f"{item.zone.value} {item.outcome.value}",
+                "muere_ahora": (
+                    "(sigue viva)" if item.rail_after is None else item.rail_after.value
+                ),
+            }
+            for item in lost
+        ]
+    )
+    counted = (
+        frame.groupby(["rama_antes", "muere_ahora"], sort=True).size().reset_index(name="n")
+    )
+    total = pd.DataFrame([{"rama_antes": "TOTAL", "muere_ahora": "", "n": len(lost)}])
     return pd.concat([counted, total], ignore_index=True)
 
 
@@ -261,12 +333,13 @@ def lost_detail(lost: Sequence[LostConfirmation]) -> pd.DataFrame:
     return pd.DataFrame(
         [
             {
-                "ts_confirmacion_30": item.ts_confirmation_v30,
-                "via_30": item.via_v30.value,
-                "muere_en_31": None if item.rail_v31 is None else item.rail_v31.value,
+                "ts_confirmacion_antes": item.ts_confirmation_before,
+                "via_antes": item.via_before.value,
+                "muere_ahora": None if item.rail_after is None else item.rail_after.value,
                 "id_h4": item.id_num,
                 "zona_h4": item.zone.value,
                 "desenlace_zona": item.outcome.value,
+                "rama_antes": f"{item.zone.value} {item.outcome.value}",
                 "direccion": item.direction.value,
                 "ts_contacto": item.ts_contact,
                 "zona_interior": item.zone_inner,
@@ -426,10 +499,12 @@ __all__ = [
     "ObservationOutcome",
     "PhaseRun",
     "PriorityEffect",
+    "check_contacts_match",
     "check_observations_match",
     "confirmations_by_via",
     "funnel_comparison",
     "gained_confirmations",
+    "lost_by_branch",
     "lost_confirmations",
     "lost_detail",
     "lost_table",

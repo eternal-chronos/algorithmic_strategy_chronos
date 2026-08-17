@@ -210,6 +210,10 @@ def build_payload(
         #: ocurre donde hay zona en observación.
         "confirm": (
             {
+                #: Fase 3.2: qué abre operación en H4. Sin esto el explorador no
+                #: podría decir si lo que dibuja sale de un rechazo o del simple
+                #: contacto, y son dos estrategias distintas.
+                "entryMode": cascade.config.entry_mode.value,
                 "mode": cascade.config.confirm_mode.value,
                 "priority": cascade.config.confirm_priority.value,
                 "census": dict(cascade.turtle_census),
@@ -237,13 +241,13 @@ def _entries_payload(
 ) -> dict[str, Any]:
     """La cascada navegable, con todo lo que la explica.
 
-    Cinco capas y no una: las **operaciones**, las señales **descartadas** con el
-    guardarraíl que las mató, los **rechazos** marcados según las tres
-    definiciones —que en la 3.1 ya no confirman nada y siguen dibujándose porque
-    siguen midiéndose—, los **turtle soup** detectados confirmen o no, y las
-    señales que **la 3.0 tomaba y la 3.1 descarta**, con la vía por la que
-    confirmaban antes. Las dos últimas son de la fase 3.1 y son lo primero que el
-    propietario quiere auditar.
+    Seis capas y no una: las **operaciones**, las señales **descartadas** con el
+    guardarraíl que las mató, los **rechazos de H4** que son lo único que abre
+    operación desde la fase 3.2, los **rechazos R1/R2/R3** marcados sobre la vela
+    que confirmó —que ya no confirman nada y siguen dibujándose porque siguen
+    midiéndose—, los **turtle soup** de H1 detectados confirmen o no, y las
+    señales que **la fase anterior tomaba y ésta descarta**, con la vía por la que
+    confirmaban antes.
 
     Cada operación viaja con sus hitos —contacto, rotura, retesteo, confirmación,
     entrada y salida— para que el globo cuente la historia entera sin abrir el
@@ -252,6 +256,7 @@ def _entries_payload(
     empty: dict[str, Any] = {
         "trades": [],
         "discarded": [],
+        "h4": [],
         "rejections": [],
         "turtle": [],
         "lost": [],
@@ -264,6 +269,7 @@ def _entries_payload(
     return {
         "trades": [_trade_record(trade) for trade in trades],
         "discarded": [_discarded_record(item) for item in dead],
+        "h4": _h4_rejections_payload(cascade),
         "rejections": [
             record
             for signal in cascade.signals
@@ -271,6 +277,59 @@ def _entries_payload(
         ],
         "turtle": [_turtle_record(item) for item in cascade.turtle_soups],
         "lost": [_lost_record(item) for item in lost],
+    }
+
+
+def _h4_rejections_payload(cascade: CascadeRun) -> list[dict[str, Any]]:
+    """Los rechazos en H4 de la corrida, vivan o mueran después (fase 3.2).
+
+    Se recogen de las observaciones **y** de las descartadas: un rechazo que
+    después no confirma en H1 sigue siendo un rechazo, y esconderlo dejaría la
+    capa contando sólo la mitad que salió bien. Una observación descartada lleva
+    la misma marca que la viva, así que se deduplica por la vela que rechazó.
+
+    No se ordena por tiempo aquí: el explorador filtra por ventana y Plotly
+    dibuja marcas, no una línea, así que el orden no cambia nada de lo que se ve.
+    """
+    seen: set[tuple[int, str, int]] = set()
+    records: list[dict[str, Any]] = []
+    observations = (
+        *cascade.observations,
+        *(item.observation for item in cascade.discarded),
+    )
+    for observation in observations:
+        if observation.index_rejection is None:
+            continue
+        key = (observation.id_num, observation.zone.value, observation.index_rejection)
+        if key in seen:
+            continue
+        seen.add(key)
+        records.append(_h4_rejection_record(observation))
+    return records
+
+
+def _h4_rejection_record(observation: Any) -> dict[str, Any]:
+    """El rechazo en H4 que abrió la operación, con su forma y su lado.
+
+    Va sobre el borde **interior** de la zona, que es el nivel que la vela cruzó
+    al entrar y el que su cierre volvió a dejar atrás: es el precio del que habla
+    la regla. `ag` marca los rechazos que se operan **en contra** del ID de H4
+    —la rama del UL— porque es la población que no existía antes de la 3.2 y la
+    primera que hay que mirar.
+    """
+    return {
+        "x": _minute(pd.Timestamp(observation.ts_rejection)),
+        "y": round(observation.zone_inner, DECIMALS),
+        "d": observation.direction_of_trade.value,
+        "di": observation.direction.value,
+        "z": observation.zone.value,
+        "id": observation.id_num,
+        "f": None if observation.rejection_form is None else observation.rejection_form.value,
+        "fs": [form.value for form in observation.rejection_forms],
+        "ag": observation.against_the_id,
+        "xc": _minute(pd.Timestamp(observation.ts_contact)),
+        "zi": round(observation.zone_inner, DECIMALS),
+        "zo": round(observation.zone_outer, DECIMALS),
     }
 
 
@@ -298,14 +357,14 @@ def _lost_record(item: Any) -> dict[str, Any]:
     propietario quiere mirar: ahí es donde la fase anterior habría entrado.
     """
     return {
-        "x": _minute(pd.Timestamp(item.ts_confirmation_v30)),
+        "x": _minute(pd.Timestamp(item.ts_confirmation_before)),
         "y": round(item.zone_inner, DECIMALS),
         "d": item.direction.value,
         "z": item.zone.value,
         "id": item.id_num,
         "oc": item.outcome.value,
-        "v30": item.via_v30.value,
-        "rail": None if item.rail_v31 is None else item.rail_v31.value,
+        "v30": item.via_before.value,
+        "rail": None if item.rail_after is None else item.rail_after.value,
         "xc": _minute(pd.Timestamp(item.ts_contact)),
         "zi": round(item.zone_inner, DECIMALS),
         "zo": round(item.zone_outer, DECIMALS),
