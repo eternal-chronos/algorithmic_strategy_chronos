@@ -56,17 +56,14 @@ function declare(id) {
 
 // Elementos que la plantilla HTML declara de verdad.
 ['tf-buttons', 'view-buttons', 'preset-buttons', 'visible-buttons', 'mode-buttons',
- 'mode-group', 'impulse-layers', 'chart', 'zoom-reset',
+ 'mode-group', 'impulse-layers', 'chart', 'zoom-reset', 'noise-buttons',
  'prev', 'next',
  'from', 'to', 'layer-limbo', 'layer-marks', 'layer-contacts', 'layer-mid', 'layer-wrong',
- 'zone-layers', 'layer-zones-ul', 'layer-zones-ob',
- 'entry-layers', 'layer-trades', 'layer-discarded', 'layer-rejections', 'layer-signals',
- 'layer-turtle', 'layer-lost', 'layer-h4',
- 'layer-recent', 'layer-fresh',
- 'break-layers', 'layer-avoided',
+ 'zone-layers', 'layer-zones-ul', 'layer-zones-ob', 'layer-zones-context',
+ 'break-layers', 'avoided-layer', 'layer-avoided', 'steps-layer', 'layer-steps',
  'blind-seed', 'blind-start', 'blind-reveal', 'blind-exit',
  'replay-group', 'replay-date', 'replay-start', 'replay-back', 'replay-step',
- 'replay-play', 'replay-exit', 'replay-forming', 'replay-halt', 'replay-speed', 'replay-window',
+ 'replay-play', 'replay-exit', 'replay-forming', 'replay-speed', 'replay-window',
  'notes', 'explorer-data'].forEach(declare);
 
 elements['explorer-data'].textContent = fs.readFileSync(payloadPath, 'utf8');
@@ -95,6 +92,7 @@ global.document = {
     if (selector === '#preset-buttons button') { return elements['preset-buttons'].children; }
     if (selector === '#visible-buttons button') { return elements['visible-buttons'].children; }
     if (selector === '#mode-buttons button') { return elements['mode-buttons'].children; }
+    if (selector === '#noise-buttons button') { return elements['noise-buttons'].children; }
     if (selector === '#view-buttons button') { return viewButtons; }
     missing.push(selector);
     return [];
@@ -153,14 +151,15 @@ global.Plotly = {
           // confirmar, sólo con el contorno. La diferencia se comprueba aquí.
           fill: trace.fill || null,
           fillcolor: trace.fillcolor || null,
-          // Fase 3.0 en replay: el globo de una operación abierta no puede decir
-          // cómo acabó, así que el texto también se comprueba.
           captions: trace.text && trace.text.length <= 200 ? trace.text.slice() : null,
-          // Las marcas de la fase 3 son pocas y hay que poder preguntar por UNA
-          // operación: si no, «hay una ganadora dibujada» no distingue entre la
-          // que se está siguiendo y otra que cerró hace tres días.
           xs: trace.mode === 'markers' && (trace.x || []).length <= 200
             ? trace.x.slice()
+            : null,
+          // Fase 2.1 (§3.2): la línea del extremo va en ESCALERA, así que «cuántos
+          // puntos tiene» no dice nada. Para comprobar QUÉ nivel se dibuja en CADA
+          // tramo hace falta el trazo entero: cada segmento es (x0, x1, precio).
+          segments: trace.mode === 'lines' && (trace.x || []).length <= 3000
+            ? (trace.x || []).map(function (x, index) { return [x, trace.y[index]]; })
             : null,
         };
       }),
@@ -200,6 +199,20 @@ function snapshot(label) {
     legStartMode: (elements['mode-buttons'].children.filter(function (button) {
       return button.getAttribute('aria-pressed') === 'true';
     })[0] || {}).dataset?.mode || null,
+    // H.1 — el nivel de ruido que está puesto, o null cuando las capas se han
+    // tocado a mano y ningún botón puede decir que el estado es suyo.
+    noiseLevel: (elements['noise-buttons'].children.filter(function (button) {
+      return button.getAttribute('aria-pressed') === 'true';
+    })[0] || {}).dataset?.noise || null,
+    // Las casillas que el preset mueve sin que nadie las toque: si el estado y
+    // el control se separan, el explorador miente sobre lo que se está viendo.
+    boxes: ['layer-limbo', 'layer-marks', 'layer-contacts', 'layer-mid', 'layer-wrong',
+      'layer-zones-ul', 'layer-zones-ob', 'layer-zones-context', 'layer-avoided',
+      'layer-steps']
+      .reduce(function (state, id) {
+        state[id] = elements[id].checked === true;
+        return state;
+      }, {}),
   };
 }
 
@@ -210,6 +223,29 @@ const payloadMeta = JSON.parse(elements['explorer-data'].textContent).meta;
 const steps = [];
 const tabs = elements['tf-buttons'].children;
 const presets = elements['preset-buttons'].children;
+
+// H.1 — el nivel de ruido. El explorador abre en «Limpio», así que lo primero
+// que se retrata es el gráfico tal como sale; después se pasa a «Todo» y se deja
+// en «Normal», que es el estado que audita el resto del recorrido.
+const noises = elements['noise-buttons'].children;
+
+function setNoise(level) {
+  noises.filter(function (button) { return button.dataset.noise === level; })
+    .forEach(function (button) { button.fire('click'); });
+}
+
+steps.push(snapshot('ruido-de-salida'));
+setNoise('all');
+steps.push(snapshot('ruido-todo'));
+setNoise('normal');
+steps.push(snapshot('ruido-normal'));
+// Tocar una casilla suelta deja el nivel sin dueño: ningún botón pulsado.
+elements['layer-mid'].fire('change', { target: { checked: true } });
+steps.push(snapshot('ruido-a-mano'));
+elements['layer-mid'].fire('change', { target: { checked: false } });
+setNoise('clean');
+steps.push(snapshot('ruido-limpio'));
+setNoise('normal');
 
 // Un recorrido por cada gráfico, mirando el preset más corto para que la
 // ventana quepa en cualquier histórico de prueba.
@@ -288,6 +324,11 @@ elements['layer-zones-ob'].fire('change', { target: { checked: false } });
 steps.push(snapshot('zonas-apagadas'));
 elements['layer-zones-ul'].fire('change', { target: { checked: true } });
 elements['layer-zones-ob'].fire('change', { target: { checked: true } });
+// H.1 — las zonas de la temporalidad de contexto se apagan solas: son dos
+// rectángulos del tamaño de la pantalla y tapan el precio.
+elements['layer-zones-context'].fire('change', { target: { checked: false } });
+steps.push(snapshot('zonas-sin-contexto'));
+elements['layer-zones-context'].fire('change', { target: { checked: true } });
 // El filtro de ID visibles NO toca las zonas: UL y OB son siempre los del ID
 // actual, así que los tres pasos tienen que salir iguales.
 const visiblesZonas = elements['visible-buttons'].children;
@@ -314,54 +355,18 @@ steps.push(snapshot('evitadas-por-defecto'));
 elements['layer-avoided'].fire('change', { target: { checked: false } });
 steps.push(snapshot('evitadas-apagadas'));
 elements['layer-avoided'].fire('change', { target: { checked: true } });
+
+// Fase 2.1 (§3.2): la escalera del extremo. Los saltos son una capa propia que se
+// apaga; los ESCALONES no, porque no son una capa sino la línea del ID dibujada
+// como fue. Los dos pasos siguientes lo separan.
+steps.push(snapshot('escalera-por-defecto'));
+elements['layer-steps'].fire('change', { target: { checked: false } });
+steps.push(snapshot('escalera-sin-saltos'));
+elements['layer-steps'].fire('change', { target: { checked: true } });
 capaPrincipal.fire('change', { target: { checked: false } });
 visiblesZonas.filter(function (button) { return button.dataset.visible === 'pair'; })
   .forEach(function (button) { button.fire('click'); });
 tabs[0].fire('click');
-presets[presets.length - 1].fire('click');
-
-// Fase 3.0 (§10): las tres capas de la cascada, encendidas y apagadas por
-// separado y sobre TODAS las temporalidades. Una operación es un hecho en el
-// tiempo y en el precio, no una propiedad de un gráfico, así que tiene que
-// dibujarse igual en las cuatro: si alguna pestaña dejara de enseñarlas, el
-// recorrido de abajo lo delata.
-presets[0].fire('click');
-tabs.forEach(function (tab) {
-  tab.fire('click');
-  steps.push(snapshot('entradas-' + tab.dataset.tf));
-});
-tabs[0].fire('click');
-steps.push(snapshot('entradas-por-defecto'));
-elements['layer-rejections'].fire('change', { target: { checked: true } });
-steps.push(snapshot('entradas-con-rechazos'));
-elements['layer-discarded'].fire('change', { target: { checked: false } });
-steps.push(snapshot('entradas-sin-descartadas'));
-elements['layer-trades'].fire('change', { target: { checked: false } });
-steps.push(snapshot('entradas-apagadas'));
-elements['layer-trades'].fire('change', { target: { checked: true } });
-elements['layer-discarded'].fire('change', { target: { checked: true } });
-elements['layer-rejections'].fire('change', { target: { checked: false } });
-
-// Fase 3.1: las dos capas nuevas —el turtle soup y las señales que la 3.0 tomaba
-// y la 3.1 descarta— encendidas y apagadas por separado. Nacen encendidas, así
-// que el recorrido las apaga primero: si no se dibujaran de salida, el paso
-// `sin-turtle` saldría igual que `entradas-por-defecto` y no comprobaría nada.
-elements['layer-turtle'].fire('change', { target: { checked: false } });
-steps.push(snapshot('sin-turtle'));
-elements['layer-lost'].fire('change', { target: { checked: false } });
-steps.push(snapshot('sin-turtle-ni-perdidas'));
-elements['layer-turtle'].fire('change', { target: { checked: true } });
-steps.push(snapshot('turtle-sin-perdidas'));
-elements['layer-lost'].fire('change', { target: { checked: true } });
-
-// Fase 3.2: el rechazo en H4, que es lo que abre la operación. Nace encendido,
-// así que el recorrido lo apaga y lo vuelve a encender: el paso `sin-rechazo-h4`
-// tiene que perder la traza y el texto de estado tiene que decir que la capa
-// está apagada.
-elements['layer-h4'].fire('change', { target: { checked: false } });
-steps.push(snapshot('sin-rechazo-h4'));
-elements['layer-h4'].fire('change', { target: { checked: true } });
-steps.push(snapshot('con-rechazo-h4'));
 presets[presets.length - 1].fire('click');
 
 // Auditoría ciega (F.1): sortear con semilla, revelar, repetir y salir.
@@ -499,113 +504,6 @@ steps.push(snapshot('reloj-fino-de-vuelta'));
 elements['replay-exit'].fire('click');
 h4.fire('click');
 
-// Fase 3.0 en replay: una operación entera, paso a paso. Es la prueba de que el
-// explorador sirve para probar la estrategia y no para leer la respuesta: antes
-// de la entrada no puede haber ni marcador ni desenlace; entre la entrada y la
-// salida la operación está abierta y el desenlace sigue sin dibujarse; y sólo
-// cuando el reloj llega a la salida aparecen la estrella o el aspa.
-function replayClock() {
-  const marca = /reloj (\d{4}-\d{2}-\d{2} \d{2}:\d{2}) UTC/.exec(elements['notes'].textContent);
-  return marca ? Math.round(Date.parse(marca[1].replace(' ', 'T') + ':00Z') / 60000) : null;
-}
-
-function avanzarHasta(minuto, tope) {
-  let dados = 0;
-  while (dados < tope) {
-    const reloj = replayClock();
-    if (reloj === null || reloj >= minuto) { return dados; }
-    elements['replay-step'].fire('click');
-    dados += 1;
-    // Fin del histórico: el paso no mueve el reloj y seguir sería un bucle.
-    if (replayClock() === reloj) { return dados; }
-  }
-  return dados;
-}
-
-const operaciones = (payload.entries && payload.entries.trades) || [];
-// Una misma señal produce hasta tres operaciones —entrada en H1, y entrada en
-// M15 con stop de M15 o de H1— y las dos de M15 entran en el MISMO minuto con
-// salidas distintas. Sus marcadores caen en la misma x, así que preguntar por
-// esa x no distingue una de otra: se sigue una entrada que no comparta minuto
-// con ninguna otra.
-const minutosDeEntrada = {};
-operaciones.forEach(function (item) {
-  minutosDeEntrada[item.xe] = (minutosDeEntrada[item.xe] || 0) + 1;
-});
-// La más corta de las que duran al menos una vela del gráfico: así hay un paso
-// con la operación abierta y el recorrido no se eterniza.
-const conSalida = operaciones
-  .filter(function (item) { return item.xx !== null && item.xx !== undefined; })
-  .filter(function (item) { return item.xx - item.xe > payload.spans[h4.dataset.tf]; })
-  .filter(function (item) { return minutosDeEntrada[item.xe] === 1; })
-  .sort(function (a, b) { return (a.xx - a.xe) - (b.xx - b.xe); });
-
-const operacion = conSalida.length ? conSalida[0] : null;
-
-if (operacion) {
-  h4.fire('click');
-  elements['replay-date'].value = new Date(operacion.xe * 60000).toISOString().slice(0, 10);
-  elements['replay-start'].fire('click');
-  // El reloj de este paso es el arranque: lo que «sólo desde el arranque» toma
-  // como frontera.
-  steps.push(snapshot('op-arranque'));
-  // Sin vela en formación cada paso es una vela entera: llegar cuesta menos
-  // pasos y el reloj es el cierre, que es lo que la comprobación mide.
-  elements['replay-forming'].fire('change', { target: { checked: false } });
-  avanzarHasta(operacion.xe, 400);
-  // Un paso atrás: el reloj queda antes de la entrada y la operación no existe.
-  elements['replay-back'].fire('click');
-  steps.push(snapshot('op-antes-de-entrar'));
-  elements['replay-step'].fire('click');
-  steps.push(snapshot('op-abierta'));
-  avanzarHasta(operacion.xx, 3000);
-  steps.push(snapshot('op-cerrada'));
-  // La capa de señales en curso se apaga y se enciende como cualquier otra.
-  elements['layer-signals'].fire('change', { target: { checked: false } });
-  steps.push(snapshot('op-sin-senales'));
-  elements['layer-signals'].fire('change', { target: { checked: true } });
-
-  // «Sólo lo reciente»: en el mismo instante, con el filtro puesto y sin él. Lo
-  // que queda es lo vivo y lo último que pasó; el resto sigue en los datos.
-  elements['layer-recent'].fire('change', { target: { checked: true } });
-  steps.push(snapshot('reciente-en-el-replay'));
-  elements['layer-recent'].fire('change', { target: { checked: false } });
-  steps.push(snapshot('reciente-apagado-en-el-replay'));
-
-  // «Sólo desde el arranque»: en el mismo instante, nada de lo que la fase 3
-  // tenía ya en marcha en la fecha elegida puede quedar dibujado.
-  elements['layer-fresh'].fire('change', { target: { checked: true } });
-  steps.push(snapshot('op-solo-desde-el-arranque'));
-  elements['layer-fresh'].fire('change', { target: { checked: false } });
-  elements['replay-exit'].fire('click');
-  steps.push(snapshot('op-fuera-del-replay'));
-
-  // Y fuera del replay manda igual, medido contra el borde de la ventana. Con
-  // el periodo completo hay años de marcas: es donde de verdad se nota.
-  presets[0].fire('click');
-  steps.push(snapshot('reciente-fuera-apagado'));
-  elements['layer-recent'].fire('change', { target: { checked: true } });
-  steps.push(snapshot('reciente-fuera-encendido'));
-  elements['layer-recent'].fire('change', { target: { checked: false } });
-  presets[presets.length - 1].fire('click');
-
-  // «Parar en eventos»: con la reproducción en marcha, el paso que abre la
-  // operación la detiene. El temporizador se queda sin efecto porque `playing`
-  // pasa a falso, que es justo lo que se comprueba.
-  elements['replay-date'].value = new Date(operacion.xe * 60000).toISOString().slice(0, 10);
-  elements['replay-start'].fire('click');
-  elements['replay-forming'].fire('change', { target: { checked: false } });
-  elements['replay-halt'].fire('change', { target: { checked: true } });
-  avanzarHasta(operacion.xe, 400);
-  elements['replay-back'].fire('click');
-  elements['replay-play'].fire('click');
-  steps.push(snapshot('halt-reproduciendo'));
-  avanzarHasta(operacion.xe, 400);
-  steps.push(snapshot('halt-en-la-entrada'));
-  elements['replay-halt'].fire('change', { target: { checked: false } });
-  elements['replay-exit'].fire('click');
-}
-
 // G.2 — el encuadre hecho a mano tiene que sobrevivir a los pasos: el zoom no se
 // rehace en cada dibujo y la ventana sólo se desplaza para seguir al presente.
 function minuteOf(text) {
@@ -712,8 +610,5 @@ console.log(JSON.stringify({
   modeLabels: elements['mode-buttons'].children.map(function (b) { return b.textContent; }),
   modeTitles: elements['mode-buttons'].children.map(function (b) { return b.title; }),
   totalPlots: plotCalls.length,
-  // La operación que el recorrido de la fase 3 sigue paso a paso, para poder
-  // preguntar por ella y no por «alguna».
-  tradeDelReplay: operacion,
   steps: steps,
 }));

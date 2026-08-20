@@ -48,11 +48,11 @@ implementada, testeada y con un backtest reproducible.
 | Fase | Nombre | Descripción | Estado | Informe |
 |---|---|---|---|---|
 | 0 | `ema_cross` | Baseline de referencia para validar el motor | Hecha | — |
-| 1 | Impulso dominante | Detección del ID en Diario, H4 y H1 (M15 se dibuja con el de H1): rotura → limbo → constitución | Implementada y corrida sobre 2018–2025 de Dukascopy; **pendiente de auditoría visual del propietario** | `chronos structure detect` |
+| 1 | Impulso dominante | Detección del ID en Diario y H4 (H1 y M15 se dibujan con el de H4): rotura → limbo → constitución | Implementada y corrida sobre 2018–2025 de Dukascopy; **pendiente de auditoría visual del propietario** | `chronos structure detect` |
 | 2.0 | Zonas UL y OB | Detección y dibujo de las dos zonas de cada ID; la rotura sigue siendo por línea | Implementada sobre 2018–2025; **pendiente de auditoría visual del propietario** | `chronos structure zonas` |
 | 2.1 | Rotura por zona | La zona sustituye a la línea como nivel de rotura del ID: el UL a favor, el OB en contra | Implementada sobre 2018–2025; **pendiente de auditoría visual del propietario** | `chronos structure rotura-por-zona` |
 | 2.2 | — | *(aparcada: FVG)* | — | — |
-| 3.0 | Entradas | La cascada Diario → H4 → H1 → M15 y la **primera medición de resultados** del proyecto | Implementada sobre 2018–2025; **pendiente de auditoría visual y de cerrar los parámetros abiertos** | `chronos structure entradas` |
+| 3.x | Entradas | **RETIRADA.** La cascada Diario → H4 → H1 → M15, la ejecución en M1 y sus métricas se han borrado del proyecto: se rehacen desde cero | — | — |
 
 ### Fase 1 — impulso dominante
 
@@ -121,7 +121,7 @@ completo —reglas, casos límite, garantía anti-lookahead y procedimiento— e
 [`MODULO_2_ZONAS.md`](MODULO_2_ZONAS.md).
 
 La línea base de la fase 1 se conserva intacta y verificada: mismo hash
-`8e51cd9140c8` y mismos 401 / 1.914 / 7.231 impulsos con las zonas encendidas y
+`f2f2a87f8efe` y mismos 401 / 1.914 impulsos con las zonas encendidas y
 apagadas. Encenderlas no puede mover un impulso, y el comando lo comprueba antes
 de escribir nada.
 
@@ -169,15 +169,30 @@ Un UL de altura cero tiene los dos bordes en la línea y se comporta exactamente
 como ella.
 
 No es un filtro posterior: es un cambio en la máquina de estados. Salvar una
-rotura deja el ID vivo, **su extremo sigue extendiéndose** y el UL se recalcula
-sobre la vela nueva; el OB no se mueve nunca, porque lo fija la vela del ancla.
-Por eso la comparación de abajo son dos ejecuciones completas del módulo sobre
-las mismas velas, no una tabla reetiquetada.
+rotura deja el ID vivo y **su extremo sigue extendiéndose**, pero **ninguna de
+las dos zonas se remarca**: el UL lo fija la vela del extremo con la que el ID se
+constituyó y el OB, la vela del ancla. Por eso la comparación de abajo son dos
+ejecuciones completas del módulo sobre las mismas velas, no una tabla
+reetiquetada.
+
+**Ajuste posterior — el UL no se remarca.** En la primera versión de esta fase
+cada rechazo a favor movía la vela del extremo y con ella el UL, así que el borde
+exterior contra el que se juzgaba al ID se alejaba en cada rechazo y el ID podía
+ir subiendo escalón a escalón sin morirse. Ahora la zona se marca **una vez**, al
+constituirse el ID, y el mismo borde exterior juzga todas las velas de su vida.
+La línea del extremo sigue yendo en escalera —eso no ha cambiado— y por eso a
+partir de la primera extensión ya no coincide con el borde interior del UL.
 
 **Regresión verificada:** con `break_by_zone: false` el sistema reproduce
-`8e51cd9140c8` con D 401 / H4 1.914 / H1 7.231 detectados y 392 / 1.910 / 7.224
-publicados. **Línea base nueva: `801951b9cc26` · D 239 / H4 1.214 / H1 4.148
-detectados y 233 / 1.211 / 4.141 publicados.**
+`f2f2a87f8efe` con D 401 / H4 1.914 detectados y 392 / 1.910 publicados. **Línea
+base nueva: `00e7013d627b` · D 251 / H4 1.184 detectados y 245 / 1.181
+publicados.**
+
+⚠️ **Las cifras de abajo son de antes del ajuste del UL** —se midieron con la zona
+remarcándose en cada rechazo, sobre D 239 / H4 1.214 / H1 4.148—. Los recuentos de
+impulsos ya están actualizados arriba; el resto **está pendiente de volver a
+medir** con `chronos structure rotura-por-zona`. El sentido de cada hallazgo se
+mantiene, los números no.
 
 Lo que salió de medirla (D / H4 / H1, totales de 2018–2025):
 
@@ -205,7 +220,7 @@ Lo que salió de medirla (D / H4 / H1, totales de 2018–2025):
   cumple siempre `borde exterior del UL >= extremo > ancla >= borde exterior del
   OB` mientras el rango sea positivo, y con la regla nueva no queda ningún impulso
   de rango no positivo. Los dos órdenes quedan implementados y producen la misma
-  historia (hashes `801951b9cc26` y `f4714ba0b488`).
+  historia (hashes `00e7013d627b` y `d54dd285c451`).
 - **R-36 sigue abierto y cambia de puerta.** Extremos sobre vela de color contrario:
   4 → 3, 39 → 17, 146 → 22. Los que quedan ya no entran sólo por el arranque de la
   pierna: 3 / 4 / 9 de ellos entran por la vela que **extendió** el extremo con el
@@ -221,88 +236,29 @@ Sigue sin haber señales, entradas, stops ni targets, y `OVERLAP_PRIORITY` es el
 que el propietario audite `now/fase21/`, empezando por las capturas de roturas
 evitadas.
 
-### Fase 3.0 — entradas, y la primera medición de resultados
+### Fase 3 — entradas: RETIRADA, se rehace desde cero
 
-Primera fase que **decide operar**. Todo lo anterior era estructura. El detalle
-completo —reglas, casos límite, garantía anti-lookahead y parámetros abiertos—
-está en [`MODULO_3_ENTRADAS.md`](MODULO_3_ENTRADAS.md).
+Todo el módulo de entradas se ha **borrado del proyecto**: la cascada
+Diario → H4 → H1 → M15, las tres definiciones de rechazo, el turtle soup, el OB
+suelto de M15, la ejecución sobre M1, los costes, las métricas en R, el informe,
+los arquetipos y sus capas del explorador. También el comando
+`chronos structure entradas` y el bloque `entries:` del YAML. Con él se han ido
+las cifras que publicaba: el embudo, el resultado por configuración y los
+arquetipos ya no están medidos por nada que corra hoy.
 
-    Diario  contexto OPCIONAL: confirma y permite alargar, NUNCA dispara.
-            En conflicto, MANDA H4 y el conflicto se registra.
-    H4      el motor: el precio toca una zona del ID vigente y queda en
-            observación. RESPETO, o ROTURA Y RETESTEO (sólo el UL).
-    H1      confirma: ID de H1, OB de H1, o rechazo (§2, tres definiciones).
-    M15     afina: OB suelto, sin exigir ID de M15.
+La razón no es un bug: la cascada se montó sobre una lectura de la estrategia que
+hay que volver a fijar antes de escribir una línea de código. Lo que toca ahora,
+y en este orden, es comprobar que la base se entiende:
 
-**Regresión verificada:** con `entries.enabled: false` la corrida reproduce la
-fase 2.1 exacta —`801951b9cc26`, D 239 / H4 1.214 / H1 4.148 detectados y
-233 / 1.211 / 4.141 publicados— y encender las señales no mueve un solo impulso.
-La fase 3 lee la estructura y no la toca.
+1. **el toque de una zona** —cuándo el precio toca un UL y cuándo toca un OB, y en
+   qué se distingue tocar de atravesar;
+2. **los ID** —qué ID está vigente en cada instante y con qué identificador;
+3. **la multitemporalidad** —qué dice el Diario mientras H4 dice otra cosa, y cómo
+   se lee eso sobre H1 y M15, que ya no llevan ID propio.
 
-⚠️ **Corrida hecha sin fichero de ask.** El §4 pide longs al ask y shorts al bid, y
-sólo está descargado el M1 del lado bid. El comando **se detiene por defecto**; la
-corrida de `now/fase30/` está autorizada explícitamente y usa el bid para los dos
-lados, declarado en portada. **Todos los costes van marcados VERIFICAR**: ninguno
-está calibrado contra Pepperstone Razor.
-
-**El embudo, de 2018 a 2025:** 2.414 zonas de H4 → 1.970 tocadas → 2.420
-observaciones (una zona tocada produce hasta dos: la de respeto y la de rotura y
-retesteo) → 1.776 confirman en H1 → 1.186 con entrada de H1 y 1.566 con entrada de
-M15 → **3.702 operaciones** en las tres configuraciones que existen. Dónde mueren
-las descartadas: 644 sin confirmación en H1, 590 sin OB de H1, 470 con el OB roto,
-283 sin retesteo, 210 sin OB de M15 y 93 con el precio ya al otro lado del stop
-cuando tocaba ejecutar.
-
-Lo que salió de medirla (en R, **neto**, con el bruto al lado):
-
-- **Las tres configuraciones (entrada, stop), por separado.** Entrada H1 / stop H1:
-  1.160 operaciones, 22,2 % de aciertos, bruto −0,044 R y neto −0,124 R. Entrada
-  M15 / stop H1: 985, 23,6 %, bruto +0,013 R y neto −0,056 R. Entrada M15 / stop
-  M15: 1.555, 22,5 %, bruto −0,032 R y neto −0,223 R. **Entrada en H1 con stop de
-  M15 no existe y no es un olvido:** la zona de M15 se forma *después* de decidir
-  la entrada de H1, así que su stop no se puede leer sin lookahead.
-- **El coste se lo come casi todo, y no por igual.** Coste medio 0,075 R con stop
-  de H1 frente a 0,191 R con stop de M15: el stop de M15 es más ajustado, así que
-  el mismo coste en dólares pesa mucho más en R. Es aritmética de costes y se ve
-  porque el bruto va al lado.
-- **El contexto diario: la hipótesis del propietario se sostiene en el signo.**
-  Con contexto a favor, 1.005 operaciones a 24,3 % y neto −0,074 R; sin contexto,
-  1.288 a 22,5 % y −0,149 R; en conflicto, 1.407 a 21,7 % y −0,198 R. El orden es
-  el que él predijo, pero los tres intervalos de confianza se solapan.
-- **Rotura y retesteo es la población más pequeña y la única con bruto positivo:**
-  251 operaciones, 25,1 % de aciertos, bruto +0,079 R y neto −0,028 R, frente a
-  3.449 respetos a 22,5 % y −0,156 R. Con 251 operaciones el intervalo va de
-  −0,268 a +0,211 R: no separa nada todavía.
-- **Los largos y los cortos no se parecen.** Largos: 1.997, 26,2 %, neto +0,010 R.
-  Cortos: 1.703, 18,6 %, neto −0,332 R. Es el desglose con la diferencia más
-  grande de los ocho, y el oro subió en casi todo el periodo.
-- **Por año no se sostiene nada.** El neto va de −0,359 R (2022) a +0,111 R (2025)
-  y cambia de signo cinco veces en ocho años.
-- **Las tres definiciones de rechazo se solapan mucho menos de lo que parece.**
-  R1 marca 1.067 velas, R3 marca 1.997 y R2 va de 1.787 (P60) a 426 (P90). R1 ∩ R3
-  = 642; R1 ∩ R2(P75) = 268. Son tres criterios distintos, no tres nombres del
-  mismo. **Ninguna está adoptada** y el motor no recomienda ninguna.
-- **La distribución del 1R es el aviso que pedía el §3.** Mediana 5,72 USD (1,79
-  ATR, 0,29 % del precio), pero **21 operaciones tienen el 1R por debajo de una
-  horquilla entera** y el mínimo es de 1 céntimo. Ahí el desenlace no es fiable, y
-  menos aún sin fichero de ask.
-- **Dos guardarraíles salen a cero por construcción, no por la muestra.** Una zona
-  de entrada no puede medir cero —la vela que la define tiene cuerpo— y el ID de
-  H4 no puede morirse antes de que su observación tenga una sola vela de H1 salvo
-  en el borde del histórico. Se dejan en la tabla: un guardarraíl que no puede
-  dispararse dice algo sobre las reglas.
-- **Frecuencia:** 8,88 operaciones por semana y sólo el 6,0 % de semanas sin
-  ninguna señal.
-
-**Los cinco arquetipos del §9 existen todos** en la muestra —el caso de manual, el
-caso en contra, los tres guardarraíles, los dos bordes y el conflicto— y cada uno
-tiene su ficha y su captura en `now/fase30/`.
-
-Antes de la fase 3.1 hacen falta tres cosas del propietario, y ninguna la puede
-decidir el motor: cerrar los parámetros abiertos (definición de rechazo y su
-percentil, ventana de retesteo, ventana de búsqueda en M15) **mirando gráficos**,
-calibrar los cuatro costes contra Pepperstone Razor, y revisar los stops de
-`now/fase30/` **antes** de mirar los resultados.
+Hasta que eso esté auditado sobre el explorador no se vuelve a escribir la
+cascada. El proyecto queda, por tanto, **sin señales, sin entradas, sin stops,
+sin targets y sin medición de rentabilidad**: la última fase viva es la 2.1.
 
 ## Antes de pensar en demo
 

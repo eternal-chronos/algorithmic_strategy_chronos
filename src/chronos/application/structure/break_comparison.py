@@ -549,7 +549,7 @@ def _same_history(left: TimeframeAnalysis, right: TimeframeAnalysis) -> bool:
 
 
 def _alignment(baseline: ImpulseRun, zoned: ImpulseRun) -> pd.DataFrame:
-    """§6.9 — qué hacen a la vez las tres temporalidades, antes y después."""
+    """§6.9 — qué hacen a la vez las temporalidades detectadas, antes y después."""
     columns = [
         "anio", "barras_antes", "barras_despues",
         "vigentes_antes", "vigentes_despues",
@@ -567,8 +567,8 @@ def _alignment(baseline: ImpulseRun, zoned: ImpulseRun) -> pd.DataFrame:
             "anio": merged["anio"],
             "barras_antes": merged["barras_antes"],
             "barras_despues": merged["barras_despues"],
-            "vigentes_antes": merged["pct_tres_vigentes_antes"],
-            "vigentes_despues": merged["pct_tres_vigentes_despues"],
+            "vigentes_antes": merged["pct_todas_vigentes_antes"],
+            "vigentes_despues": merged["pct_todas_vigentes_despues"],
             "limbo_antes": merged["pct_alguna_en_limbo_antes"],
             "limbo_despues": merged["pct_alguna_en_limbo_despues"],
             "alineadas_antes": merged["pct_misma_direccion_antes"],

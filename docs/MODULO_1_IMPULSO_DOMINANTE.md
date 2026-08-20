@@ -5,6 +5,14 @@ Detecta el impulso dominante y **nada más**: sin último/penúltimo, sin RSI, s
 Fibonacci, sin patrones, sin zonas, sin señales, sin entradas, sin stops, sin
 targets y sin medición de rentabilidad.
 
+> **El ID vive sólo en el Diario y en H4.** H1 y M15 no llevan detector: no se
+> les marca ID, y sobre las dos se dibuja el de H4 como contexto. Las cifras de
+> H1 que aparecen más abajo son de cuando H1 llevaba detector y quedan como
+> registro histórico: ya no se comprueban. Los recuentos del Diario y de H4 no
+> se han movido —cada temporalidad se detecta por su cuenta, y hay una
+> comprobación que lo fija— pero el `config_hash` sí, porque las temporalidades
+> detectadas entran en él.
+
 ## Cómo se usa
 
 ```bash
@@ -142,7 +150,7 @@ El motor no ha elegido ninguno por criterio propio. El informe los imprime todos
 en cada corrida, cerrados y abiertos.
 
 **Cerrados por el propietario. Son los que definen la línea base definitiva
-(`8e51cd9140c8`):**
+(`f2f2a87f8efe`; era `8e51cd9140c8` con el detector de H1 puesto):**
 
 | Parámetro | Valor | Por qué |
 |---|---|---|
@@ -157,7 +165,7 @@ en cada corrida, cerrados y abiertos.
 |---|---|---|
 | `seed_mode` | `S1_first_non_doji` · `S2_first_counter_bar` | Cómo arranca la máquina al principio del histórico, donde no hay pasado a la izquierda. Afecta sólo a los primeros impulsos |
 | `doji_break_mode` | `D1_doji_no_rompe` · `D2_doji_rompe_por_cierre` | §2.2 dice que el doji "no rompe nada"; §2.6 evalúa la rotura por cierre sin mirar el cuerpo. El informe cuenta cuántas barras distinguen una lectura de la otra |
-| `break_by_zone` (fase 2.1) | `false` · `true` | Si la rotura es por línea o por zona. `false` es esta línea base; `true` es la de la fase 2.1 (`801951b9cc26`) |
+| `break_by_zone` (fase 2.1) | `false` · `true` | Si la rotura es por línea o por zona. `false` es esta línea base; `true` es la de la fase 2.1 (`00e7013d627b`) |
 | `overlap_priority` (fase 2.1) | `a_favor_primero` · `en_contra_primero` | Qué lado se evalúa primero cuando una vela cumple las dos condiciones de rotura. Sobre este histórico no ocurre **ni una vez**, así que la elección es cosmética; los dos órdenes están implementados |
 
 `h4_offset_hours` sigue en el YAML pero **no pinta nada** mientras haya ancla de
@@ -173,7 +181,7 @@ parámetros en vez de resolverlos por cuenta propia.
 queda **fuera del hash de configuración**: las corridas ya archivadas siguen
 siendo comparables. `L2` y `L3` sí entran en el hash. `break_by_zone: false` se
 omite por la misma razón y con la misma consecuencia buscada —la línea base
-`8e51cd9140c8` se conserva—, y con él se omite `overlap_priority`, que sólo puede
+`f2f2a87f8efe` se conserva—, y con él se omite `overlap_priority`, que sólo puede
 decidir algo con la regla nueva encendida.
 
 ### La línea base definitiva y lo que sustituye
@@ -184,7 +192,10 @@ hora de reapertura del domingo sola en una vela diaria propia. Cada corrida
 vuelve a ejecutar el módulo entero con aquella configuración y publica la tabla
 de antes y después (`antes_y_despues.csv`), así que la comparación no envejece.
 
-| | provisional `4c299bcf2fba` | definitivo `8e51cd9140c8` |
+Las tres columnas de recuentos son D / H4 / H1: son de cuando H1 llevaba
+detector. Hoy sólo se comprueban las dos primeras.
+
+| | provisional `e2e974c7704c` | definitivo `f2f2a87f8efe` |
 |---|---|---|
 | Ancla | `A2_first_leg_bar` | `A1_last_counter_body` |
 | Corte diario | `00:00` UTC | `NY_18:00` (DST real) |
@@ -375,21 +386,22 @@ y, por tanto, impulsos distintos a los que ves en tu pantalla.
 |---|---|---|
 | **Diario** | Diario | sí |
 | **H4** | H4 (principal) + Diario (contexto) | sí |
-| **H1** | H1 (principal) + H4 (contexto) | sí |
-| **M15** | H1 | **no** |
+| **H1** | H4 (contexto) | **no** |
+| **M15** | H4 (contexto) | **no** |
 
 El reparto lo fija el propietario en `config/impulse.yaml`; no es una decisión
-del motor. M15 es temporalidad de ejecución: no aporta estructura propia y por
-eso no lleva detector, sólo velas con el impulso de H1 encima. M5 y M1 quedan
-fuera del módulo.
+del motor. **El ID sólo se marca en el Diario y en H4.** H1 y M15 no aportan
+estructura propia: son las temporalidades en las que se mira cómo llega el
+precio a la zona, así que llevan velas con el impulso de H4 encima y nada más.
+M5 y M1 quedan fuera del módulo.
 
 El **principal** de cada gráfico —el primero de su lista— es el que manda: de él
 salen el sombreado del limbo y los marcadores de constitución y rotura, y va en
 línea continua. El de contexto va punteado y más grueso, sin marcadores, para
 que no compita con lo que se está auditando.
 
-Un ID sólo se rompe con cierres de su propia temporalidad (§2.4), así que las
-cuatro son estructuras distintas y no cuatro zooms de la misma.
+Un ID sólo se rompe con cierres de su propia temporalidad (§2.4), así que el
+Diario y H4 son dos estructuras distintas y no dos zooms de la misma.
 
 Sólo H4 y el diario llevan desplazamiento de rejilla: los cuartos de hora y las
 horas en punto son iguales en todas las plataformas.
@@ -528,7 +540,7 @@ del cuerpo de la vela contraria que creó el impulso y cuántas barras duró el
 limbo previo. Ese rombo es el sitio donde comprobar si una vela minúscula está
 creando impulsos que tu ojo no marcaría.
 
-## Lo que dicen los números (2018-2025, bid, sesión NY_18:00, hash `8e51cd9140c8`)
+## Lo que dicen los números (2018-2025, bid, sesión NY_18:00, hash `8e51cd9140c8`, con detector en H1)
 
 Ninguna de estas cifras es una recomendación. Son las que hay.
 

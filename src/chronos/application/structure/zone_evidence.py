@@ -105,7 +105,11 @@ def _zoned(
                 id_num=impulse.id_num,
                 timeframe="H4",
                 direction=impulse.direction,
-                index_extreme=impulse.index_extreme,
+                # La vela del UL es siempre la del extremo de la constitución.
+                # Aquí coinciden —este detector corre sin rotura por zona, así
+                # que ningún extremo se estira— pero se pide la misma que en el
+                # resto del proyecto para no dejar dos definiciones del UL.
+                index_extreme=impulse.index_extreme_at_constitution,
                 ts_constitution=impulse.ts_constitution,
             ),
             order_block_zone(
@@ -369,7 +373,13 @@ def _zones_off(config: ImpulseConfig, series: Mapping[str, pd.DataFrame]) -> Che
         checks=(
             Check("apagadas, no emiten nada", "True", str(zonas_off.emits_nothing)),
             Check("apagadas, filas en la tabla de zonas", "0", str(len(zonas_off.table()))),
-            Check("encendidas, temporalidades con zonas", "3", str(len(zonas_on.per_timeframe))),
+            # Una por temporalidad con detector, ni una más: M15 no lleva ID y
+            # por tanto tampoco zonas.
+            Check(
+                "encendidas, temporalidades con zonas",
+                str(len(config.charts.detected)),
+                str(len(zonas_on.per_timeframe)),
+            ),
             Check(
                 "impulsos con zonas y sin zonas",
                 format_counts({tf: len(a.impulses) for tf, a in sin.analyses.items()}),

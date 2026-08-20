@@ -34,24 +34,30 @@ from chronos.domain.structure.synthetic_day import (
 #: Línea base DEFINITIVA de la fase 1: ancla A1, arranque de pierna L1 y sesión
 #: anclada a las 18:00 de Nueva York. Cualquier cambio que la mueva es una
 #: regresión. Son impulsos **detectados**, publicados o no.
-PHASE1_BASELINE: dict[str, int] = {"D": 401, "H4": 1914, "H1": 7231}
+#:
+#: **Sólo el Diario y H4.** H1 dejó de llevar detector: los 7.231 impulsos de H1
+#: que traía esta línea base quedan archivados y ya no se comprueban. Los dos
+#: recuentos que quedan no se han movido ni un impulso, que es justo lo que
+#: garantiza la independencia entre temporalidades de G.5.
+PHASE1_BASELINE: dict[str, int] = {"D": 401, "H4": 1914}
 
 #: Hash de la configuración que produce esa línea base. Va en el mismo sitio que
 #: los recuentos: un recuento correcto con otra configuración no es la línea base.
-BASELINE_HASH = "8e51cd9140c8"
+#: Era `8e51cd9140c8` cuando H1 llevaba detector: las temporalidades detectadas
+#: entran en el hash, así que quitar el ID de H1 lo mueve sin mover un impulso.
+BASELINE_HASH = "f2f2a87f8efe"
 
 #: Línea base anterior, con el ancla A2 y el corte diario en 00:00 UTC. Queda
 #: escrita para que quien lea un informe archivado sepa a qué corrida pertenece;
-#: no se comprueba contra nada.
-PROVISIONAL_BASELINE: dict[str, int] = {"D": 477, "H4": 2068, "H1": 7416}
+#: no se comprueba contra nada. (Traía además H1 7.416.)
+PROVISIONAL_BASELINE: dict[str, int] = {"D": 477, "H4": 2068}
 
-#: Pasos de las tres temporalidades con las que se corre el día sintético. El
+#: Pasos de las dos temporalidades con las que se corre el día sintético. El
 #: detector es agnóstico a la temporalidad: si el resultado dependiera del paso,
 #: sería un fallo.
 SYNTHETIC_STEPS: dict[str, pd.Timedelta] = {
     "D": pd.Timedelta(days=1),
     "H4": pd.Timedelta(hours=4),
-    "H1": pd.Timedelta(hours=1),
 }
 
 
@@ -110,7 +116,7 @@ def collect(
     )
 
 
-# --- G.1 El día sintético en las tres temporalidades ------------------------
+# --- G.1 El día sintético en las dos temporalidades -------------------------
 
 
 def _synthetic_day(timeframe: str) -> CheckGroup:
@@ -343,33 +349,30 @@ def _determinism(config: ImpulseConfig, series: Mapping[str, pd.DataFrame]) -> C
 
 
 def _independence(config: ImpulseConfig, series: Mapping[str, pd.DataFrame]) -> CheckGroup:
-    """Apagar el ID de H1 no puede mover ni un ID de H4 ni del diario."""
-    if not {"D", "H4", "H1"} <= set(series):
+    """Apagar el ID de H4 no puede mover ni un ID del diario."""
+    if not {"D", "H4"} <= set(series):
         return CheckGroup(
             title="G.5 Independencia entre temporalidades",
-            note="No se puede medir: esta corrida no lleva las tres temporalidades.",
+            note="No se puede medir: esta corrida no lleva las dos temporalidades.",
             checks=(),
         )
-    with_h1 = DetectDominantImpulses(config).execute(dict(series))
-    without = replace(config, charts=ChartsConfig({"D": ("D",), "H4": ("H4", "D")}))
+    with_h4 = DetectDominantImpulses(config).execute(dict(series))
+    without = replace(config, charts=ChartsConfig({"D": ("D",)}))
     reduced = DetectDominantImpulses(without).execute(
-        {timeframe: frame for timeframe, frame in series.items() if timeframe != "H1"}
+        {timeframe: frame for timeframe, frame in series.items() if timeframe != "H4"}
     )
     checks = [
         Check(
             "temporalidades detectadas",
-            "D, H4",
+            "D",
             ", ".join(reduced.analyses),
-        )
+        ),
+        Check(
+            "impulsos de D",
+            _fingerprint(with_h4.analyses["D"].impulses),
+            _fingerprint(reduced.analyses["D"].impulses),
+        ),
     ]
-    for timeframe in ("D", "H4"):
-        checks.append(
-            Check(
-                f"impulsos de {timeframe}",
-                _fingerprint(with_h1.analyses[timeframe].impulses),
-                _fingerprint(reduced.analyses[timeframe].impulses),
-            )
-        )
     return CheckGroup(
         title="G.5 Independencia entre temporalidades",
         note=(

@@ -2,7 +2,7 @@
 
 Un panel de comprobaciones que siempre dice "OK" no vale nada: aquí se verifica
 que las comprobaciones detectan de verdad —rompiendo a propósito lo que miran— y
-que el día sintético da el mismo resultado en las tres temporalidades.
+que el día sintético da el mismo resultado en las dos temporalidades.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ from tests.conftest import make_m1_history
 def config() -> ImpulseConfig:
     return ImpulseConfig(
         data=StructureDataConfig(path="no-se-lee.parquet"),
-        charts=ChartsConfig({DAILY: (DAILY,), H4: (H4, DAILY), H1: (H1, H4)}),
+        charts=ChartsConfig({DAILY: (DAILY,), H4: (H4, DAILY), H1: (H4,)}),
         rules=ImpulseRulesConfig(warmup_bars=5),
     )
 
@@ -102,7 +102,7 @@ def test_la_regresion_compara_contra_la_linea_base_de_la_fase(
     grupo = next(g for g in collect(config, series).groups if g.title.startswith("G.6"))
     assert not grupo.ok, "la fixture no es el histórico real: no puede dar la línea base"
     assert "401" in grupo.checks[0].expected
-    assert PHASE1_BASELINE == {"D": 401, "H4": 1914, "H1": 7231}
+    assert PHASE1_BASELINE == {"D": 401, "H4": 1914}
     # La base provisional queda archivada en el texto, no comprobada.
     assert "477" in grupo.note
 
@@ -113,6 +113,7 @@ def test_la_independencia_compara_huellas_y_no_solo_recuentos(
     grupo = next(g for g in collect(config, series).groups if g.title.startswith("G.5"))
     assert grupo.ok
     assert all("huella" in check.expected for check in grupo.checks[1:])
+    assert grupo.checks[0].expected == "D"
 
 
 def test_el_determinismo_se_mide_con_dos_ejecuciones(

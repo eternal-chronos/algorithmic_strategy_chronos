@@ -17,12 +17,12 @@ velas cerradas **antes** de `t`. Por eso todo se pide con un `through`, que es e
 índice de la última vela ya cerrada, y pedir más allá de la frontera lanza
 `LookaheadError` en vez de devolver un número. Las dos consecuencias que importan:
 
-- El UL nace con la mecha de la vela del extremo y puede estirarse a la
-  **siguiente**. Cuando el extremo se extiende en la vela `t`, la de margen es
-  `t+1`, que todavía no ha cerrado: en `t+1` se juzga contra el UL sin estirar y
-  la extensión sólo cuenta desde `t+2`. Lo contrario sería juzgar una vela contra
-  un borde que ella misma acaba de fijar, y ninguna vela puede cerrar más allá de
-  su propia mecha.
+- El UL nace con la mecha de la vela del extremo de la **constitución** y puede
+  estirarse a la **siguiente**, que es la vela de margen. Ese es todo su
+  recorrido: no se remarca cuando el extremo se estira, así que el borde exterior
+  contra el que se juzga al ID es el mismo desde que nace hasta que muere. La
+  comprobación de que la vela de margen ha cerrado se queda igual, porque la
+  regla es que un borde no se lee antes de que lo fije su vela.
 - El OB no gobierna hasta que su vela de confirmación ha cerrado. La vela que
   confirma no se juzga ya contra el OB; la siguiente sí.
 """
@@ -210,10 +210,12 @@ class ZoneBreakLevels:
     ) -> SideLevel:
         """Lado a favor: el UL, que existe siempre porque todo ID tiene extremo.
 
-        El borde interior es la línea del extremo y no se mueve. El exterior es
-        la punta de la mecha de esa vela, estirada a la siguiente **si ya ha
-        cerrado** y llega más lejos. La comparación es estricta: con empate manda
-        la primera vela que llegó al nivel, igual que en la fase 2.0.
+        `index_extreme` es la vela del extremo **de la constitución**, no la del
+        extremo vigente: el UL se marca una vez y no se remarca. El borde interior
+        es la línea que el ID tenía al nacer; el exterior, la punta de la mecha de
+        esa vela, estirada a la siguiente **si ya ha cerrado** y llega más lejos.
+        La comparación es estricta: con empate manda la primera vela que llegó al
+        nivel, igual que en la fase 2.0.
         """
         self._require_visible(index_extreme, through, "la vela del extremo")
         inner = self._series.body_edge_towards(index_extreme, direction)

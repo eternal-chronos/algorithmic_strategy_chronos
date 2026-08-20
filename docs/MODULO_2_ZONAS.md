@@ -1,8 +1,9 @@
 # Módulo 2 — ZONAS UL Y OB (fase 2.0: sólo detección)
 
 Cada impulso dominante lleva asociadas dos zonas de precio, calculadas sobre
-velas de **su misma temporalidad** (D, H4, H1; en M15 no, porque no lleva
-detector). Esta fase las **detecta y las dibuja**. No hace nada más.
+velas de **su misma temporalidad** (D y H4, las dos únicas con detector; en H1 y
+en M15 no hay ID y por tanto tampoco zonas propias). Esta fase las **detecta y
+las dibuja**. No hace nada más.
 
 En la **fase 2.1** estas zonas pasaron a decidir la vida y la muerte de los
 impulsos, y esta fase existe por separado precisamente para que su detección
@@ -18,8 +19,8 @@ cambiado: la fase 2.1 no toca cómo se detecta una zona, sólo qué se hace con 
 - No genera señales, entradas, stops ni targets.
 - No optimiza ni busca parámetros.
 
-**Línea base preservada y verificada:** `config_hash = 8e51cd9140c8`,
-D 401 / H4 1.914 / H1 7.231 detectados, 392 / 1.910 / 7.224 publicados. Con las
+**Línea base preservada y verificada:** `config_hash = f2f2a87f8efe`,
+D 401 / H4 1.914 detectados, 392 / 1.910 publicados. Con las
 zonas encendidas salen exactamente los mismos números y el mismo hash; con
 `zones.enabled: false` la fase 1 sale además byte a byte —tabla, eventos, estado
 por barra y diagnósticos—. Los dos casos tienen test.
@@ -69,7 +70,8 @@ La vela donde arranca la pierna, la que fija `precio_ancla` (`ts_anchor`).
 
 **Un ID sin OB confirmado es un estado legítimo** y se registra. En la fase 2.1
 esos impulsos se rompen por línea, y son los **únicos** que lo hacen. Es la cifra
-que manda de esta fase: **5,4 % en D, 5,0 % en H4 y 4,4 % en H1**.
+que manda de esta fase: **5,4 % en D y 5,0 % en H4** (4,4 % en H1 cuando H1
+llevaba detector).
 
 ### Interior y exterior
 
@@ -84,7 +86,7 @@ allá del borde **exterior**.
 
 | Caso | Decisión | Recuento |
 |---|---|---|
-| UL de altura cero | Zona degenerada, no se descarta | 1 / 4 / 27 (D/H4/H1) |
+| UL de altura cero | Zona degenerada, no se descarta | 1 / 4 (D/H4; 27 en H1 cuando lo llevaba) |
 | ID que muere sin OB | Estado legítimo; consultarlo lanza `LookaheadError` | 21 / 95 / 316 |
 | La vela que confirma es la que constituye | **Imposible por construcción** | 0 |
 | Varias velas podrían confirmar | La primera cronológicamente | — |
@@ -121,6 +123,30 @@ quien mida o dibuje:
 Los tres tienen test que los provoca a propósito. Además, un test estructural
 comprueba sobre el histórico entero que `ts_outer_known <= ts_birth` y
 `ts_defining <= ts_birth` para todas las zonas.
+
+### El extremo se mueve, el UL no (fase 2.1, §3.2)
+
+Un ID vigente que se salva por el lado a favor **estira su extremo** hasta el
+cuerpo de la vela que lo salvó. **El UL se queda donde estaba:** lo fija la vela
+del extremo con la que el ID se constituyó y no se remarca en cada rechazo, así
+que un ID que se estiró dos veces sigue teniendo un solo UL —el primero— y ése es
+el que va a `zonas.csv`, el que se dibuja y el que decide su rotura a favor.
+
+Fue un ajuste posterior a la primera versión de la fase 2.1, que sí remarcaba la
+zona. Remarcándola, cada rechazo alejaba el borde exterior contra el que se
+juzgaba al ID y el ID podía ir subiendo escalón a escalón sin morirse; con la
+zona quieta el mismo borde juzga todas las velas de su vida y cada rechazo lo
+deja más cerca de romperlo.
+
+Dos consecuencias que se ven en el dibujo:
+
+- **El borde interior del UL deja de coincidir con la línea del extremo** a
+  partir de la primera extensión. La línea sigue yendo **en escalera** —eso no ha
+  cambiado, y pintarla recta desde la constitución enseñaría un precio al que el
+  mercado todavía no había llegado— así que en un ID estirado la línea va por
+  delante de su zona.
+- **El rectángulo del UL es uno y va entero de la constitución al fin del ID.**
+  No hay tramos ni escalones de zona que contar.
 
 ## Configuración
 

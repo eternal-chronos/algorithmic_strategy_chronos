@@ -21,11 +21,10 @@ class ExtremeExtension:
 
     Sólo se **registra**: ninguna regla del módulo 1 ni de la 2.1 lee esta lista,
     y el detector se comporta exactamente igual con ella dentro que sin ella. Lo
-    que habilita es la fase 3: el UL de un ID se mueve cada vez que el extremo se
-    extiende, así que preguntarle a `ImpulseZones` por el UL —que es el último—
-    en un instante anterior a la última extensión sería mirar al futuro. Con esta
-    traza el UL vigente en cada barra se reconstruye sin volver a ejecutar el
-    detector y sin adivinar qué velas lo movieron.
+    que habilita es el dibujo: la línea del extremo va en escalera, un tramo por
+    nivel, y pintarla recta con el valor final enseñaría desde la constitución un
+    precio al que el mercado todavía no había llegado. El UL **no** viaja con
+    ella: se marca una vez, al constituirse el ID, y no se remarca.
     """
 
     index: int
@@ -99,20 +98,30 @@ class DominantImpulse:
     #: El extremo con el que nació, antes de cualquier extensión. Se guarda para
     #: poder medir cuánto se movió sin reconstruirlo desde los eventos.
     extreme_at_constitution: float = field(default=float("nan"), init=False)
-    #: La vela que fijaba el extremo al nacer el ID. Sin ella, reconstruir el UL
-    #: vigente antes de la primera extensión obligaría a buscar qué cuerpo
-    #: coincide con `extreme_at_constitution`, que con empates no tiene respuesta
-    #: única. Mismo criterio que `index_extreme` en la fase 1: se guarda, no se
-    #: re-deriva.
+    #: La vela que fijaba el extremo al nacer el ID, y por tanto **la vela del
+    #: UL**: la zona se marca con ella y no se remarca aunque el extremo se
+    #: estire después, así que este índice hace falta durante toda la vida del
+    #: ID. Se guarda en vez de re-derivarlo porque buscar qué cuerpo coincide con
+    #: `extreme_at_constitution` no tiene respuesta única con empates. Mismo
+    #: criterio que `index_extreme` en la fase 1.
     index_extreme_at_constitution: int = field(default=-1, init=False)
-    #: Traza de esas extensiones, en orden. Material de auditoría: no la lee
-    #: ninguna regla de detección y no cambia ni un impulso. La fase 3 la usa
-    #: para saber qué UL estaba vigente en cada barra sin mirar al futuro.
+    #: La marca de tiempo y el color de esa misma vela. Se guardan por lo mismo
+    #: que el índice: quien dibuje la escalera del extremo necesita el primer
+    #: escalón entero, no sólo su precio.
+    ts_extreme_at_constitution: datetime | None = field(default=None, init=False)
+    extreme_bar_direction_at_constitution: BodyDirection | None = field(
+        default=None, init=False
+    )
+    #: Traza de esas extensiones, en orden. Material de auditoría y de dibujo:
+    #: no la lee ninguna regla de detección y no cambia ni un impulso. Es lo que
+    #: permite pintar la línea del extremo en escalera sin adelantar niveles.
     extension_trail: list[ExtremeExtension] = field(default_factory=list, init=False)
 
     def __post_init__(self) -> None:
         self.extreme_at_constitution = self.extreme
         self.index_extreme_at_constitution = self.index_extreme
+        self.ts_extreme_at_constitution = self.ts_extreme
+        self.extreme_bar_direction_at_constitution = self.extreme_bar_direction
 
     def close(
         self,
@@ -146,12 +155,12 @@ class DominantImpulse:
 
         Sólo lo llama el detector cuando una vela cierra más allá de la línea del
         extremo sin atravesar el UL entero: el ID sobrevive a lo que antes era
-        una rotura y su extremo pasa a ser lo que ha alcanzado esta vela. El UL se
-        recalcula solo, porque se deriva de `index_extreme`, y la zona nueva
-        sustituye a la anterior.
+        una rotura y su extremo pasa a ser lo que ha alcanzado esta vela.
 
-        El ancla **no** tiene equivalente: la fija la vela del arranque de la
-        pierna, que no cambia, y por eso el OB no se mueve nunca.
+        Lo que **no** se mueve es ninguna de las dos zonas. El UL lo fija la vela
+        del extremo de la constitución —`index_extreme_at_constitution`— y ahí se
+        queda: no se remarca en cada rechazo. El ancla ni siquiera se estira: la
+        fija la vela del arranque de la pierna, que no cambia.
         """
         if self.ts_end is not None:
             raise StructureError(
@@ -184,6 +193,28 @@ class DominantImpulse:
                 bar_direction=bar_direction,
             )
         )
+
+    @property
+    def extreme_steps(self) -> tuple[ExtremeExtension, ...]:
+        """El extremo vigente en cada tramo, en orden cronológico.
+
+        El primero es el de la constitución y los demás, cada extensión. Es lo
+        que hace falta para dibujar —o auditar— la línea del extremo **como la
+        vio el mercado**: un ID que estiró su extremo dos veces tuvo tres
+        niveles, y pintar sólo el último dice que el sistema conocía desde el
+        primer minuto un precio al que el precio aún no había llegado.
+
+        Sin extensiones devuelve un único escalón, que es exactamente la fase 1.
+        """
+        assert self.ts_extreme_at_constitution is not None  # lo fija __post_init__
+        assert self.extreme_bar_direction_at_constitution is not None
+        first = ExtremeExtension(
+            index=self.index_extreme_at_constitution,
+            timestamp=self.ts_extreme_at_constitution,
+            price=self.extreme_at_constitution,
+            bar_direction=self.extreme_bar_direction_at_constitution,
+        )
+        return (first, *self.extension_trail)
 
     @property
     def is_open(self) -> bool:

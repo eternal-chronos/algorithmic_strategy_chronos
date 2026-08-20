@@ -4,9 +4,9 @@ Dos cosas se fijan aquí y las dos son obligatorias.
 
 La primera es la **regresión** que exige el §3 del enunciado: con
 `BREAK_BY_ZONE = false` el sistema tiene que producir exactamente
-`config_hash = 8e51cd9140c8`, D 401 / H4 1.914 / H1 7.231 detectados y
-392 / 1.910 / 7.224 publicados. Si no sale idéntico hay un bug en la
-refactorización y no un resultado.
+`config_hash = f2f2a87f8efe`, D 401 / H4 1.914 detectados y 392 / 1.910
+publicados. Si no sale idéntico hay un bug en la refactorización y no un
+resultado.
 
 La segunda es la **línea base nueva**, la que produce `BREAK_BY_ZONE = true`.
 Se archiva igual que se archivó la de la fase 1 para que cualquier cambio futuro
@@ -33,18 +33,20 @@ from chronos.infrastructure.config.loader import load_impulse_config
 CONFIG = Path("config/impulse.yaml")
 
 #: Hash de la configuración con la rotura por zona y el orden `a_favor_primero`.
-PHASE21_HASH = "801951b9cc26"
+PHASE21_HASH = "00e7013d627b"
 
 #: El mismo con `en_contra_primero`. Produce la misma historia sobre este
 #: histórico —el conflicto de solape no se da ni una vez— pero el hash cambia
 #: igualmente: identifica los parámetros, no el resultado.
-PHASE21_HASH_EN_CONTRA = "f4714ba0b488"
+PHASE21_HASH_EN_CONTRA = "d54dd285c451"
 
-#: Impulsos **totales** (publicados o no) de la corrida con la regla nueva.
-PHASE21_BASELINE = {"D": 239, "H4": 1214, "H1": 4148}
+#: Impulsos **totales** (publicados o no) de la corrida con la regla nueva. Se
+#: movieron al congelar el UL: con la zona quieta el borde exterior a favor deja
+#: de alejarse en cada rechazo, así que los ID mueren antes por ese lado.
+PHASE21_BASELINE = {"D": 251, "H4": 1184}
 
 #: Los que salen del calentamiento y llegan a los informes y a las capturas.
-PHASE21_PUBLISHED = {"D": 233, "H4": 1211, "H1": 4141}
+PHASE21_PUBLISHED = {"D": 245, "H4": 1181}
 
 
 @pytest.fixture(scope="module")

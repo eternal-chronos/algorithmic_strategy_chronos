@@ -115,12 +115,12 @@ def test_cada_fila_es_trazable_a_su_configuracion(run: ImpulseRun) -> None:
 
 def test_solo_se_detecta_en_las_temporalidades_que_llevan_impulso(run: ImpulseRun) -> None:
     tabla = run.table()
-    # M15 se dibuja pero no lleva detector: sobre ella se ve el impulso de H1.
-    assert set(tabla["timeframe"]) == {H1, H4, DAILY}
+    # H1 y M15 se dibujan pero no llevan detector: no se les marca ID, y sobre
+    # las dos se ve el impulso de H4.
+    assert set(tabla["timeframe"]) == {H4, DAILY}
     assert set(run.chart_bars) == {M15, H1, H4, DAILY}
     # Un ID diario se rompe con cierres diarios: hay muchos menos que en H4.
     assert (tabla["timeframe"] == H4).sum() > (tabla["timeframe"] == DAILY).sum()
-    assert (tabla["timeframe"] == H1).sum() > (tabla["timeframe"] == H4).sum()
 
 
 def test_faltar_las_velas_de_una_temporalidad_detectada_es_un_error(

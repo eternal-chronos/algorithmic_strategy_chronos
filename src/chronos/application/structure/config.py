@@ -14,7 +14,6 @@ from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import time
 
-from chronos.application.entries.config import EntriesConfig
 from chronos.domain.errors import DomainError
 from chronos.domain.structure.enums import (
     AnchorMode,
@@ -25,7 +24,9 @@ from chronos.domain.structure.enums import (
 )
 
 #: Temporalidades del módulo. Un ID sólo se rompe con cierres de su propia
-#: temporalidad, así que cada una lleva su propio detector (§1.2, §2.4).
+#: temporalidad, así que la que lleve detector lo lleva propio (§1.2, §2.4).
+#: **El ID vive sólo en el Diario y en H4**: H1 y M15 son temporalidades de
+#: lectura y de ejecución, y sobre ellas se dibuja el ID de H4 como contexto.
 M15 = "M15"
 H1 = "H1"
 H4 = "H4"
@@ -40,13 +41,14 @@ TIMEFRAME_MINUTES: dict[str, int] = {M15: 15, H1: 60, H4: 240, DAILY: 1440}
 #: contexto de temporalidad superior.
 #:
 #: El reparto lo fija el propietario: es cómo lee él el mercado, no una decisión
-#: del motor. M15 es temporalidad de ejecución y no aporta estructura propia, así
-#: que sobre ella sólo se dibuja el impulso de H1.
+#: del motor. **Sólo el Diario y H4 tienen ID propio.** H1 y M15 no aportan
+#: estructura: son las temporalidades en las que se mira cómo llega el precio a
+#: la zona, así que sobre ellas se dibuja el ID de H4 y nada más.
 DEFAULT_CHARTS: dict[str, tuple[str, ...]] = {
     DAILY: (DAILY,),
     H4: (H4, DAILY),
-    H1: (H1, H4),
-    M15: (H1,),
+    H1: (H4,),
+    M15: (H4,),
 }
 
 
@@ -347,11 +349,6 @@ class ImpulseConfig:
     rules: ImpulseRulesConfig = field(default_factory=ImpulseRulesConfig)
     #: Fase 2.0. Apagadas por defecto: encenderlas no puede mover ni un impulso.
     zones: ZonesConfig = field(default_factory=ZonesConfig)
-    #: Fase 3.0. Apagada por defecto: con las señales apagadas la corrida
-    #: reproduce la línea base de la fase 2.1 exacta, y hay un test que lo fija.
-    #: Queda **fuera** de `fingerprint()` por la misma razón que las zonas: la
-    #: cascada lee la estructura y no puede mover ni un impulso.
-    entries: EntriesConfig = field(default_factory=EntriesConfig)
     timezone_audit: TimezoneAuditConfig = field(default_factory=TimezoneAuditConfig)
     reporting: StructureReportingConfig = field(default_factory=StructureReportingConfig)
 
@@ -368,7 +365,7 @@ class ImpulseConfig:
 
         Las zonas de la fase 2.0 tampoco entran, por la misma razón y con la
         misma consecuencia buscada: encenderlas no mueve un solo impulso, así
-        que la línea base `8e51cd9140c8` se conserva con las zonas puestas y las
+        que la línea base `f2f2a87f8efe` se conserva con las zonas puestas y las
         corridas de la fase 1 siguen siendo comparables con las de ahora.
         """
         rules = asdict(self.rules)
@@ -381,7 +378,7 @@ class ImpulseConfig:
         # Fase 2.1, mismo criterio y por la misma razón. `break_by_zone: false`
         # reproduce barra por barra lo que hacía el módulo antes de que el
         # parámetro existiera, así que se omite del hash y la línea base
-        # `8e51cd9140c8` se conserva. Con `true` el resultado cambia, entra en el
+        # `f2f2a87f8efe` se conserva. Con `true` el resultado cambia, entra en el
         # hash —y con él el orden de solape, que sólo decide algo ahí— y produce
         # uno distinto: ninguna salida de la regla nueva puede confundirse con la
         # de la vieja.

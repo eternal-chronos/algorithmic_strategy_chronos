@@ -36,8 +36,10 @@ PROVISIONAL_AGGREGATION = AggregationConfig(h4_offset_hours=0, d_session_start="
 #: Ancla con la que se publicaron los números provisionales.
 PROVISIONAL_ANCHOR = AnchorMode.A2_FIRST_LEG_BAR
 
-#: Hash de esa configuración, tal como quedó archivado en la corrida anterior.
-PROVISIONAL_HASH = "4c299bcf2fba"
+#: Hash de esa configuración. Era `4c299bcf2fba` cuando H1 llevaba detector: las
+#: temporalidades detectadas entran en el hash, así que quitar el ID de H1 lo
+#: mueve sin mover un solo impulso del diario ni de H4.
+PROVISIONAL_HASH = "e2e974c7704c"
 
 #: Métricas de la tabla de antes y después, en el orden en que se presentan.
 #: El texto es el que pidió el propietario; el formato dice cómo se imprime cada
@@ -53,9 +55,9 @@ METRICS: tuple[tuple[str, str, str], ...] = (
     ("extremo_color_contrario", "nº de ID con extremo sobre vela contraria", "count"),
 )
 
-#: La alineación no es de una temporalidad: es de las tres a la vez.
-ALIGNMENT_METRIC = "% de tiempo con las tres temporalidades alineadas"
-ALIGNMENT_LIVE_METRIC = "% de tiempo con las tres temporalidades vigentes"
+#: La alineación no es de una temporalidad: es de todas a la vez.
+ALIGNMENT_METRIC = "% de tiempo con las temporalidades detectadas alineadas"
+ALIGNMENT_LIVE_METRIC = "% de tiempo con las temporalidades detectadas vigentes"
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,7 +72,7 @@ class BaselineComparison:
     definitive_description: str
     #: Una tabla por temporalidad, con columnas métrica/provisional/definitivo/diferencia.
     per_timeframe: dict[str, pd.DataFrame]
-    #: La fila de alineación de las tres temporalidades, que no es de ninguna.
+    #: La fila de alineación de las temporalidades detectadas, que no es de ninguna.
     alignment: pd.DataFrame
 
 

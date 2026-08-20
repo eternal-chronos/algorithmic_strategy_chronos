@@ -271,12 +271,14 @@ def _zones_of_impulse(
         timeframe=impulse.timeframe,
         direction=impulse.direction,
         year=impulse.ts_constitution.year,
+        # El UL no se remarca: lo fija la vela del extremo con la que el ID se
+        # constituyó y ahí se queda, aunque el extremo se estire después.
         last=last_zone(
             series,
             id_num=impulse.id_num,
             timeframe=impulse.timeframe,
             direction=impulse.direction,
-            index_extreme=impulse.index_extreme,
+            index_extreme=impulse.index_extreme_at_constitution,
             ts_constitution=impulse.ts_constitution,
         ),
         order_block=order_block_zone(

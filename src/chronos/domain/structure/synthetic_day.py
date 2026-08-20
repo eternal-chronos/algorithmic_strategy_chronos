@@ -2,7 +2,7 @@
 
 Vive en el código y no sólo en los tests porque es un artefacto de la fase 1: el
 comando `chronos structure evidencia` lo vuelve a correr y enseña el resultado
-esperado al lado del obtenido, en las tres temporalidades. Los tests importan
+esperado al lado del obtenido, en cada temporalidad con detector. Los tests importan
 esta misma serie, así que no hay dos copias que puedan separarse.
 
 Los valores esperados **no** están aquí: están escritos a mano en

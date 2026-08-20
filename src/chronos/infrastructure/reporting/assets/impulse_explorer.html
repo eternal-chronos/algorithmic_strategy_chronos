@@ -114,10 +114,20 @@ encuadre automático. También con doble clic sobre el gráfico.">Ajustar</butto
       </div>
     </div>
     <div class="group">
+      <span title="Preset de capas. Limpio deja el ID actual y sus zonas en esta
+temporalidad, y nada más: fuera quedan limbo, contactos, 50 %, extremo contrario, zonas
+del contexto, roturas evitadas y escalera. Normal es lo que el explorador enseñaba hasta
+ahora. Todo lo enciende entero.
+No cambia la detección ni los informes: sólo cuántas cosas se dibujan a la vez.">
+        Ruido
+      </span>
+      <div class="buttons" id="noise-buttons"></div>
+    </div>
+    <div class="group">
       <span>Capas</span>
       <div style="display:flex; gap:16px; flex-wrap:wrap;">
         <span id="impulse-layers" style="display:flex; gap:16px; flex-wrap:wrap;"></span>
-        <label class="toggle"><input type="checkbox" id="layer-limbo" checked> Limbo</label>
+        <label class="toggle"><input type="checkbox" id="layer-limbo"> Limbo</label>
         <label class="toggle"><input type="checkbox" id="layer-marks" checked> Constituciones y roturas</label>
         <label class="toggle"><input type="checkbox" id="layer-contacts"> Contactos</label>
         <label class="toggle"><input type="checkbox" id="layer-mid"> Nivel 50 %</label>
@@ -130,64 +140,28 @@ Sólo se dibuja la del ID actual, mande lo que mande el selector de ID.">
 Punteada mientras no la confirma una vela del color del impulso.
 Sólo se dibuja la del ID actual, mande lo que mande el selector de ID.">
             <input type="checkbox" id="layer-zones-ob" checked> OB</label>
+          <label class="toggle" title="Las zonas de la temporalidad de CONTEXTO (el diario
+sobre un gráfico de H4). Son dos rectángulos del tamaño de la pantalla y tapan el precio:
+apagarlas deja verlo. Las del impulso principal siguen dibujándose.">
+            <input type="checkbox" id="layer-zones-context"> Zonas del contexto</label>
         </span>
         <span id="break-layers" style="display:flex; gap:16px; flex-wrap:wrap;">
-          <label class="toggle" title="Fase 2.1: velas que bajo la regla antigua habrían roto el ID
+          <span id="avoided-layer">
+            <label class="toggle" title="Fase 2.1: velas que bajo la regla antigua habrían roto el ID
 y con la nueva no. El segmento va del cierre a la línea que cruzó; el círculo con aspa
 marca el cierre. Un ID que se salva por el lado a favor extiende ahí su extremo.">
-            <input type="checkbox" id="layer-avoided" checked> Roturas evitadas</label>
+              <input type="checkbox" id="layer-avoided"> Roturas evitadas</label>
+          </span>
+          <span id="steps-layer">
+            <label class="toggle" title="Fase 2.1 (§3.2): cuando un ID vigente se salva por el lado
+a favor, su extremo SE ESTIRA hasta el cuerpo de esa vela. La línea del extremo por eso va en
+ESCALERA: cada tramo es el nivel que estaba puesto en ese momento, no el del final. Esta capa
+marca el salto —el tramo vertical punteado sobre la vela que lo estira— y pone un triángulo en
+el nivel nuevo. Apagarla deja la escalera, quita las marcas.">
+              <input type="checkbox" id="layer-steps"> Extremo estirado (escalera)</label>
+          </span>
         </span>
-        <span id="entry-layers" style="display:flex; gap:16px; flex-wrap:wrap;">
-          <label class="toggle" title="Fase 3.0: cada operación con su recorrido completo.
-Estrella = alcanzó el objetivo, aspa = saltó el stop. El trazo punteado va del contacto
-con la zona de H4 a la entrada y de ahí a la salida; las dos líneas discontinuas son el
-stop y el objetivo de 3,3 R. Se dibujan sobre las CUATRO temporalidades: una operación
-es un hecho en el tiempo y en el precio, no una propiedad de un gráfico.">
-            <input type="checkbox" id="layer-trades" checked> Operaciones</label>
-          <label class="toggle" title="Fase 3.0: las señales que NO llegaron a operación y el
-guardarraíl en que murieron. Sin ellas el explorador enseñaría sólo lo que sobrevivió,
-que es la mitad de la historia y justo la mitad que no permite juzgar un embudo.">
-            <input type="checkbox" id="layer-discarded" checked> Señales descartadas</label>
-          <label class="toggle" title="Fase 3.2: el RECHAZO EN H4, que es lo que abre la
-operación. Hasta la 3.1 bastaba TOCAR la zona. Relleno = forma A (la vela entra en la zona
-y cierra fuera, del lado por el que entró); hueco = forma B (turtle soup de H4); con punto
-= las dos en la misma vela. Borde grueso = la operación va EN CONTRA del ID de H4, que es
-la rama del UL rechazado y la población que antes no existía. La marca va sobre el borde
-interior de la zona, el nivel que la vela cruzó al entrar y dejó atrás al cerrar.">
-            <input type="checkbox" id="layer-h4" checked> Rechazo en H4 (abre operación)</label>
-          <label class="toggle" title="Fase 3.0 (§2): los rechazos marcados según las TRES
-definiciones candidatas, distinguibles entre sí. NINGUNA está adoptada. El símbolo dice
-cuántas coinciden: triángulo = una, rombo = dos, cuadrado = las tres. Apagada de salida
-porque son muchos y taparían el resto hasta que hagan falta.">
-            <input type="checkbox" id="layer-rejections"> Rechazos (R1 / R2 / R3)</label>
-          <label class="toggle" title="Fase 3.1, vía 1: los turtle soup que la cascada miró,
-CONFIRMEN O NO. Dos velas de H1 consecutivas: la primera deja mecha y la segunda llega a
-ese extremo y cierra sin superarlo. La marca va sobre el extremo rechazado. Relleno = fue
-la vía que confirmó; hueco = apareció y no confirmó, y el globo dice por qué. El patrón
-aparece muchas más veces en H1: aquí sólo salen los que la cascada llegó a mirar.">
-            <input type="checkbox" id="layer-turtle" checked> Turtle soup (vía 1)</label>
-          <label class="toggle" title="Las señales que la regla ANTERIOR tomaba y la de ahora
-descarta, con la vía por la que confirmaban antes y el guardarraíl en el que mueren. Van en
-el minuto en que la fase anterior confirmaba, que es donde habría entrado. Es lo primero
-que hay que auditar de cada cambio.">
-            <input type="checkbox" id="layer-lost" checked> Antes se entraba aquí · ahora no</label>
-          <label class="toggle" title="Fase 3.0, sólo durante el replay: la señal MIENTRAS está
-viva, del contacto con la zona de H4 hasta que entra o muere. Círculo azul = contacto,
-rombo azul = ya confirmó en H1. El globo no dice en qué acabará: es el tramo en el que
-tú decidirías, y es lo que el replay viene a comparar.">
-            <input type="checkbox" id="layer-signals" checked> Señal en curso (replay)</label>
-          <label class="toggle" title="Fase 3.0: deja a la vista sólo lo que sigue VIVO
-—operaciones abiertas y señales en observación— y la marca de lo ÚLTIMO que pasó, que
-desaparece en cuanto entra o cierra otra. Es un filtro de dibujo: no cambia la detección
-ni los informes, y el estado dice cuántas marcas esconde.">
-            <input type="checkbox" id="layer-recent"> Sólo lo reciente</label>
-          <label class="toggle" title="Fase 3.0, sólo durante el replay: arranca en blanco.
-Nada de lo que la cascada ya tenía en marcha en la fecha elegida se dibuja —ni la
-operación abierta en ese momento ni ninguna anterior—: sólo se buscan entradas hacia
-delante, desde el minuto en el que empieza el replay.">
-            <input type="checkbox" id="layer-fresh"> Sólo desde el arranque</label>
-        </span>
-        <label class="toggle"><input type="checkbox" id="layer-wrong" checked>
+        <label class="toggle"><input type="checkbox" id="layer-wrong">
           Extremo de color contrario (R-36)</label>
       </div>
     </div>
@@ -213,9 +187,6 @@ sólo se dibuja lo que el motor ya sabía a esa hora">
         <label class="toggle" title="Arma la vela en curso con las velas de la
 temporalidad inferior. El motor no la ve hasta que cierra.">
           <input type="checkbox" id="replay-forming" checked> Vela en formación</label>
-        <label class="toggle" title="Detiene la reproducción en el paso en que una operación
-se abre y en el que se cierra. El estado dice cuál y qué pasó.">
-          <input type="checkbox" id="replay-halt"> Parar en eventos</label>
         <label class="toggle">Velocidad
           <select id="replay-speed" aria-label="Velocidad del replay">
             <option value="1500">Lenta</option>
@@ -272,41 +243,10 @@ se abre y en el que se cierra. El estado dice cuál y qué pasó.">
       las zonas del anterior desaparecen del gráfico (siguen en los CSV)</span>
     <span>✕ grueso = extremo fijado por una vela del color contrario al impulso (R-36),
       sobre la vela que lo fijó</span>
-    <span>★ operación que alcanzó el OBJETIVO (fase 3.0) · ✕ operación en la que
-      saltó el STOP; el marcador va sobre el precio de entrada</span>
-    <span>trazo punteado gris = recorrido de la operación: del contacto con la zona
-      de H4 a la entrada, y de la entrada a la salida. Mientras sigue abierta en el
-      replay llega hasta el reloj y al precio de ahora</span>
-    <span><i style="background:#d03b3b"></i>stop de la operación ·
-      <i style="background:#2a78d6"></i>objetivo fijo de 3,3 R, los dos desde la
-      entrada hasta la salida</span>
-    <span><i style="background:#eda100"></i>◆ operación ABIERTA durante el replay:
-      ya entró y todavía no ha salido. El globo da la decisión entera y el flotante
-      al precio de ahora, nunca el desenlace: la estrella o el aspa aparecen en la
-      vela en que el precio toca el objetivo o el stop, ni un minuto antes</span>
-    <span><i style="background:#2a78d6"></i>○ señal EN CURSO (sólo replay): el precio
-      tocó la zona de H4 y la observación sigue viva · ◇ del mismo color = ya
-      confirmó en H1. Todavía no hay entrada y el globo no dice si la habrá</span>
-    <span>○ hueco = señal DESCARTADA, sobre el borde interior de su zona: el globo
-      dice en qué guardarraíl murió</span>
-    <span>△ ▽ ◇ □ = R1, R2 y R3 marcadas sobre la vela que confirmó. En la fase 3.1
-      YA NO CONFIRMAN NADA: se siguen calculando y se siguen dibujando porque se
-      siguen midiendo, y el globo dice cuáles marcan y cuáles no</span>
-    <span>✦ relleno = TURTLE SOUP (fase 3.1, vía 1) que confirmó la entrada ·
-      ✦ hueco = turtle soup detectado que NO confirmó; el globo dice por qué. La marca
-      va sobre el extremo de mecha rechazado, y el color es el de la dirección</span>
-    <span>✕ fino gris = la fase 3.0 CONFIRMABA aquí y la 3.1 no: el globo dice por qué
-      vía confirmaba antes —id_h1, ob_h1 o rechazo— y en qué guardarraíl muere ahora</span>
-    <span>«Sólo desde el arranque» empieza el replay en blanco: lo que la fase 3 ya
-      tenía en marcha en esa fecha —la operación abierta y todas las anteriores— no se
-      dibuja, y sólo se buscan entradas hacia delante</span>
-    <span>«Sólo lo reciente» deja lo que sigue vivo y la marca de lo último que pasó:
-      al entrar o cerrar otra operación, la anterior desaparece del dibujo (sigue en
-      los CSV y en los informes). Con los rechazos encendidos, quedan los de las
-      señales todavía vivas</span>
-    <span>las capas de la fase 3.0 se dibujan sobre las CUATRO temporalidades: una
-      operación es un hecho en el tiempo y en el precio, no una propiedad de un
-      gráfico</span>
+    <span>«Ruido» es un preset de las casillas de Capas: <b>Limpio</b> —el de salida—
+      deja el ID actual y sus zonas en esta temporalidad, y nada más; <b>Normal</b> es lo
+      de siempre; <b>Todo</b> lo enciende entero. Tocar una casilla a mano deja el nivel
+      «a mano» y ningún botón pulsado. El estado dice qué capas quedan apagadas</span>
     <span>vela hueca a la derecha = vela en formación durante el replay: el motor
       todavía no la ha visto cerrar</span>
     <span>arrastrando sobre el EJE DE PRECIOS se comprime o se estira la vertical, y

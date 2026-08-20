@@ -315,12 +315,12 @@ def _survival_note(timeframe: str) -> str:
     )
 
 
-# --- Las tres temporalidades a la vez ---------------------------------------
+# --- Las temporalidades detectadas a la vez ---------------------------------
 
 
 def _alignment_block(comparison: BreakRuleComparison) -> str:
     return (
-        f"{section('6.9 · Sesgos simultáneos de las tres temporalidades')}\n\n"
+        f"{section('6.9 · Sesgos simultáneos de las temporalidades detectadas')}\n\n"
         "Todo se lee sobre la rejilla de la temporalidad más fina con detector: en cada\n"
         "uno de sus cierres se mira el último cierre disponible de las mayores. Nunca al\n"
         "revés, que sería preguntarle a la vela diaria qué hará dentro de unas horas.\n\n"

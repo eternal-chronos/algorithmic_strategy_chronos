@@ -6,6 +6,11 @@ Todos los parámetros que el propietario tenía que cerrar están cerrados: ancl
 el recuento de impulsos y el `config_hash` de esa corrida para que cualquier
 cambio futuro que los mueva salte de inmediato.
 
+El ID vive sólo en el Diario y en H4: H1 dejó de llevar detector y sus 7.231
+impulsos ya no se comprueban. Los recuentos de D y de H4 no se han movido —cada
+temporalidad se detecta por su cuenta— pero el `config_hash` sí, porque las
+temporalidades detectadas entran en él.
+
 Las cifras anteriores quedan archivadas como provisionales y no se comprueban:
 `4c299bcf2fba` con 477 / 2.068 / 7.416 impulsos (ancla A2 y corte diario en
 00:00 UTC, con las velas fantasma del domingo dentro) y `368ad3617bd9` con
@@ -34,7 +39,7 @@ CONFIG = Path("config/impulse.yaml")
 BASELINE_IMPULSES = PHASE1_BASELINE
 
 #: Los que salen del calentamiento y llegan a los informes y a las capturas.
-BASELINE_PUBLISHED = {"D": 392, "H4": 1910, "H1": 7224}
+BASELINE_PUBLISHED = {"D": 392, "H4": 1910}
 
 #: La rejilla que produce esas velas. Sale del propietario, no del motor.
 BASELINE_SESSION_START = "NY_18:00"

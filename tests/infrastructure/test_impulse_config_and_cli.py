@@ -47,16 +47,19 @@ def test_el_yaml_del_proyecto_carga_y_declara_los_parametros_abiertos() -> None:
 
 
 def test_el_reparto_de_graficos_del_yaml_es_el_del_propietario() -> None:
-    """Diario solo, H4 con el diario, H1 con H4 y M15 solo con H1."""
+    """Diario solo, H4 con el diario, y H1 y M15 con el de H4.
+
+    El ID vive sólo en el Diario y en H4: a H1 y a M15 no se les marca ID.
+    """
     charts = load_impulse_config(Path("config/impulse.yaml")).charts
 
     assert charts.charts == ("D", "H4", "H1", "M15")
     assert charts.overlays("D") == ("D",)
     assert charts.overlays("H4") == ("H4", "D")
-    assert charts.overlays("H1") == ("H1", "H4")
-    assert charts.overlays("M15") == ("H1",)
-    # M15 se dibuja pero no lleva detector propio.
-    assert charts.detected == ("D", "H4", "H1")
+    assert charts.overlays("H1") == ("H4",)
+    assert charts.overlays("M15") == ("H4",)
+    # H1 y M15 se dibujan pero no llevan detector propio.
+    assert charts.detected == ("D", "H4")
 
 
 def test_un_reparto_invalido_se_rechaza_al_cargar(tmp_path: Path) -> None:
@@ -226,24 +229,29 @@ def test_detect_omite_el_grafico_que_el_historico_no_da_para_construir(
     assert "se omite el gráfico M15" in result.stdout
     carpeta = next(iter((tmp_path / "out").iterdir()))
     tabla = pd.read_csv(carpeta / "impulsos.csv")
-    assert set(tabla["timeframe"]) == {"D", "H4", "H1"}
+    # H1 se dibuja, pero el ID sólo se marca en el diario y en H4.
+    assert set(tabla["timeframe"]) == {"D", "H4"}
     assert "M15" in (carpeta / "reporte.txt").read_text(encoding="utf-8")
 
 
 def test_detect_no_omite_una_temporalidad_que_lleva_impulso(tmp_path: Path) -> None:
-    """Si falta H4, su impulso no se puede dibujar sobre H1: eso sí es fatal."""
-    four_hour = (
+    """Si falta H4, su impulso no se puede dibujar en ningún gráfico: eso sí es fatal."""
+    daily = (
         make_m1_history(weeks=10)
-        .resample("4h", label="left", closed="left")
+        .resample("1D", label="left", closed="left")
         .agg({"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"})
         .dropna(subset=["open"])
     )
-    config = _write_run(tmp_path, four_hour)
-    result = runner.invoke(app, ["structure", "detect", "--config", str(config)])
+    config = _write_run(tmp_path, daily)
+    # Con velas diarias la verificación horaria no puede pasar —no hay minutos
+    # que medir— y saltaría antes que lo que este test quiere comprobar.
+    result = runner.invoke(
+        app, ["structure", "detect", "--config", str(config), "--skip-tz-audit"]
+    )
 
     assert result.exit_code == 1
     # `rich` parte las líneas largas: se compara un fragmento que no se rompe.
-    assert "construir H1" in result.stdout
+    assert "construir H4" in result.stdout
     assert not (tmp_path / "out").exists()
 
 

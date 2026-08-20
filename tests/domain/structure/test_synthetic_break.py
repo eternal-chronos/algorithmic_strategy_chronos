@@ -72,21 +72,37 @@ def test_caso_2_cierre_dentro_del_ul_no_rompe_y_estira_el_extremo() -> None:
 
 
 def test_caso_1_mecha_que_perfora_el_ul_y_cierra_dentro_no_rompe() -> None:
-    """b5 perfora con la mecha (2014) el borde 2011.90 y cierra dentro, en 2011.50."""
+    """b5 perfora con la mecha (2014) el borde 2012 y cierra dentro, en 2011.50."""
     _, detector = run_break(SYNTHETIC_BREAK_UP)
     avoided = detector.avoided_breaks
 
     assert len(avoided) == 2
     assert avoided[1].index == 5
     assert avoided[1].close == pytest.approx(2011.50)
-    # El UL vigente en b5 es el que dejó b4: su cuerpo y su mecha, sin margen,
-    # porque la vela de margen es b5 y todavía no había cerrado.
-    assert avoided[1].zone_inner == pytest.approx(2011.00)
-    assert avoided[1].zone_outer == pytest.approx(2011.90)
+    # El UL sigue siendo el de la constitución: b4 estiró el extremo, no la zona.
+    assert avoided[1].zone_inner == pytest.approx(2010.00)
+    assert avoided[1].zone_outer == pytest.approx(2012.00)
+
+
+def test_el_ul_no_se_remarca_en_los_dos_rechazos() -> None:
+    """El mismo borde exterior juzga a b4, a b5 y a la vela que mata al ID.
+
+    Es la regla nueva: el extremo se estira con cada rechazo, la zona no. Antes
+    cada extensión marcaba un UL nuevo y el borde se iba con él —2012, luego
+    2011.90, luego 2014—, así que cada rechazo alejaba la muerte del ID.
+    """
+    _, detector = run_break(SYNTHETIC_BREAK_UP)
+    avoided = [item for item in detector.avoided_breaks if item.id_num == 1]
+
+    assert [item.zone_inner for item in avoided] == [pytest.approx(2010.00)] * 2
+    assert [item.zone_outer for item in avoided] == [pytest.approx(2012.00)] * 2
+    # Y la vela que rompe se juzga contra ese mismo borde, no contra 2014.
+    assert detector.events[0].level == pytest.approx(2012.00)
+    assert detector.events[0].index == 6
 
 
 def test_caso_3_cierre_mas_alla_del_borde_exterior_mata_el_id() -> None:
-    """b6 cierra en 2015, sobre el borde 2014 del UL que dejó b5."""
+    """b6 cierra en 2015, sobre el borde 2012 del UL de la constitución."""
     _, detector = run_break(SYNTHETIC_BREAK_UP)
     first = detector.impulses[0]
 
@@ -95,7 +111,7 @@ def test_caso_3_cierre_mas_alla_del_borde_exterior_mata_el_id() -> None:
     assert first.exit_level_source is BreakLevelSource.LAST
 
 
-def test_caso_7_el_extremo_se_extiende_y_el_ul_se_recalcula() -> None:
+def test_caso_7_el_extremo_se_extiende_pero_el_ul_se_queda() -> None:
     """El ID#1 nace con extremo 2010 y muere con 2011.50, tras dos extensiones."""
     _, detector = run_break(SYNTHETIC_BREAK_UP)
     first = detector.impulses[0]

@@ -34,7 +34,7 @@ from tests.conftest import make_m1_history
 def config() -> ImpulseConfig:
     return ImpulseConfig(
         data=StructureDataConfig(path="no-se-lee.parquet"),
-        charts=ChartsConfig({DAILY: (DAILY,), H4: (H4, DAILY), H1: (H1, H4)}),
+        charts=ChartsConfig({DAILY: (DAILY,), H4: (H4, DAILY), H1: (H4,)}),
         rules=ImpulseRulesConfig(warmup_bars=5),
     )
 

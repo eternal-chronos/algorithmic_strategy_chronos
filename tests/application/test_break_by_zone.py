@@ -268,18 +268,19 @@ def test_el_informe_se_renderiza_entero(
 def test_las_zonas_de_la_fase_20_siguen_saliendo_con_la_regla_nueva(
     zoned: ImpulseRun,
 ) -> None:
-    """La fase 2.0 se calcula sobre los impulsos finales, extremo extendido incluido."""
+    """El UL es el de la constitución, no el del extremo con el que el ID murió."""
     zones = detect_zones(zoned)
     assert zones.enabled
     for timeframe, item in zones.per_timeframe.items():
         published = {impulse.id_num for impulse in zoned.analyses[timeframe].published}
         assert {zoned_item.id_num for zoned_item in item.items} == published
-        # El UL se deriva de `index_extreme`, que ya es el extendido: su borde
-        # interior tiene que ser la línea del ID.
+        # El UL no se remarca: su borde interior es la línea que el ID tenía al
+        # nacer, y en los ID que estiraron el extremo ésa ya no es la final.
         for measured in item.items:
             impulse = next(
                 one
                 for one in zoned.analyses[timeframe].published
                 if one.id_num == measured.id_num
             )
-            assert measured.last.inner == pytest.approx(impulse.extreme)
+            assert measured.last.inner == pytest.approx(impulse.extreme_at_constitution)
+            assert measured.last.index_defining == impulse.index_extreme_at_constitution

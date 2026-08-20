@@ -45,9 +45,10 @@ posterior:
   historia posterior cambia: el ID sigue, el siguiente nace en otro sitio y con
   otra numeración. Por eso se re-ejecuta la detección y no se reetiqueta nada.
 - Si esa vela salvada iba a favor, **el extremo se estira** hasta lo que alcanzó
-  su cuerpo y el UL se recalcula sobre ella (§3.2). El ancla no tiene
-  equivalente: la fija la vela del arranque de la pierna, que no cambia, y por
-  eso el OB no se mueve nunca.
+  su cuerpo (§3.2). Las zonas no se van con él: el UL lo fija la vela del extremo
+  de la constitución y no se remarca, así que el borde exterior que juzga al ID
+  es el mismo toda su vida. El ancla ni siquiera se estira —la fija la vela del
+  arranque de la pierna— y por eso el OB no se mueve nunca.
 - Con las dos zonas solapadas en precio una misma vela puede cumplir las dos
   condiciones a la vez. `OverlapPriority` decide el orden de evaluación; el motor
   no elige por su cuenta y el informe cuenta cuántas veces decide.
@@ -566,7 +567,9 @@ class DominantImpulseDetector:
         return self._zones.levels(
             direction=impulse.direction,
             extreme=impulse.extreme,
-            index_extreme=impulse.index_extreme,
+            # El UL no se remarca: lo fija la vela del extremo de la
+            # constitución y ahí se queda, aunque el extremo siga estirándose.
+            index_extreme=impulse.index_extreme_at_constitution,
             anchor=impulse.anchor,
             index_anchor=impulse.index_anchor,
             through=through,
@@ -619,9 +622,10 @@ class DominantImpulseDetector:
             )
 
         if self._is_beyond(bar.close, levels.favor.line, impulse.direction):
-            # §3.2: el ID sigue vivo y sigue extendiendo su extremo. El UL se
-            # recalcula solo, porque se deriva de la vela del extremo, y la zona
-            # nueva sustituye a la anterior desde la barra siguiente.
+            # §3.2: el ID sigue vivo y sigue extendiendo su extremo. El UL no
+            # se va con él: se marcó al constituirse el ID y es el mismo hasta
+            # que muera, así que el cierre siguiente se juzga contra el mismo
+            # borde exterior y cada rechazo deja al ID más cerca de romperlo.
             self._diagnostics["roturas_evitadas_a_favor"] += 1
             self._record_avoided(
                 BreakKind.A_FAVOR, impulse, index, bar, levels.favor, extended=True

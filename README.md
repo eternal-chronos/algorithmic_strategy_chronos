@@ -62,24 +62,14 @@ chronos structure zonas --config config/impulse.yaml
 # verifica que con `break_by_zone: false` sale la línea base exacta; si no sale,
 # para y avisa.
 chronos structure rotura-por-zona --config config/impulse.yaml
-
-# Fase 3.0: la cascada de entrada (Diario → H4 → H1 → M15) y la PRIMERA medición
-# de resultados del proyecto. Se monta sobre la fase 2.1 y comprueba antes que
-# con las señales apagadas sale su línea base exacta.
-#
-# ⚠️ No hay fichero de ask: el §4 pide longs al ask y shorts al bid, y sólo está
-# descargado el M1 del lado bid. El comando SE DETIENE Y AVISA. Para correr
-# igualmente hay que autorizarlo, y entonces se usa el bid para los dos lados y
-# la asunción se declara en portada del informe.
-chronos structure entradas --config config/impulse.yaml
-chronos structure entradas --asumir-bid-en-los-dos-lados   # autoriza UNA corrida
 ```
 
-De la fase 1 a la 2.1 el módulo detecta estructura y **no emite señales**; la
-fase 3.0 es la primera que decide operar. Ver
-[`docs/MODULO_1_IMPULSO_DOMINANTE.md`](docs/MODULO_1_IMPULSO_DOMINANTE.md),
-[`docs/MODULO_2_ZONAS.md`](docs/MODULO_2_ZONAS.md) y
-[`docs/MODULO_3_ENTRADAS.md`](docs/MODULO_3_ENTRADAS.md).
+El módulo de estructura detecta **el impulso dominante del Diario y de H4** y
+**no emite señales**: sin entradas, sin stops, sin targets y sin medición de
+rentabilidad. H1 y M15 no llevan detector —no se les marca ID— y sobre ellas se
+dibuja el de H4 como contexto. Ver
+[`docs/MODULO_1_IMPULSO_DOMINANTE.md`](docs/MODULO_1_IMPULSO_DOMINANTE.md) y
+[`docs/MODULO_2_ZONAS.md`](docs/MODULO_2_ZONAS.md).
 
 Cada corrida de estructura deja una carpeta en `reports/` con `reporte.txt`,
 `explorador.html`, los CSV de impulsos, roturas, contactos y estado, y

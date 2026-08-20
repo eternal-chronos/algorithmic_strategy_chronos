@@ -6,7 +6,7 @@ los casos concretos que el propietario ha pedido ver de un vistazo:
   · los 20 ID más pequeños por rango en ATR, en Diario y en H4;
   · los 10 que mejor cumplen la firma de lateralización, en Diario y en H4;
   · los 10 latigazos más severos;
-  · un tramo con las tres temporalidades alineadas;
+  · un tramo con las temporalidades detectadas alineadas;
   · diciembre de 2025 en Diario con la capa de contactos encendida.
 
 Cada imagen lleva sobreimpreso lo que hace falta para juzgarla sin abrir ningún
@@ -366,7 +366,7 @@ def _aligned_requests(run: ImpulseRun) -> list[CaptureRequest]:
                 timeframe=timeframe,
                 first=first,
                 last=last,
-                title=f"{timeframe} · tramo con las tres temporalidades alineadas",
+                title=f"{timeframe} · tramo con las temporalidades detectadas alineadas",
                 context=CONTEXT_BARS if timeframe == "D" else 0,
                 subtitle=(
                     f"Tramo más largo del histórico con Diario, H4 y H1 en la misma "

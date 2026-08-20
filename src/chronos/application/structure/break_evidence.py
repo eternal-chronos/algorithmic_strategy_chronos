@@ -139,7 +139,7 @@ def _last_zone_cases() -> CheckGroup:
             ),
             Check(
                 "1. b5 perfora el UL con mecha y cierra dentro",
-                "cierre 2011.50 en [2011.00, 2011.90] -> sobrevive",
+                "cierre 2011.50 en [2010.00, 2012.00] -> sobrevive",
                 f"cierre {avoided[1].close:.2f} en "
                 f"[{avoided[1].zone_inner:.2f}, {avoided[1].zone_outer:.2f}] -> sobrevive",
             ),
@@ -149,7 +149,7 @@ def _last_zone_cases() -> CheckGroup:
                 f"muere en b{first.index_end} por {_exit(first)}",
             ),
             Check(
-                "7. el extremo se extiende y el UL se recalcula",
+                "7. el extremo se extiende y el UL NO se remarca",
                 "de 2010.00 a 2011.50 en 2 extensiones; ancla 1995.00 quieta",
                 f"de {first.extreme_at_constitution:.2f} a {first.extreme:.2f} en "
                 f"{first.extreme_extensions} extensiones; ancla {first.anchor:.2f} quieta",
@@ -394,7 +394,7 @@ def _lookahead() -> CheckGroup:
         checks=(
             Check("zona de una vela que aún no ha cerrado", "LookaheadError", frontier()),
             Check(
-                "el UL actualizado antes de que cierre la vela que extiende el extremo",
+                "el UL de una vela del extremo que todavía no había cerrado",
                 "LookaheadError",
                 updated_last(),
             ),
@@ -495,7 +495,7 @@ def _regression(config: ImpulseConfig, series: Mapping[str, pd.DataFrame]) -> Ch
 #: Los publicados de la línea base, que el §3 exige comprobar al lado de los
 #: detectados. Viven aquí y no en `evidence.py` porque es la fase 2.1 la que los
 #: pide; el test de la línea base fija los mismos números.
-PHASE1_BASELINE_PUBLISHED: dict[str, int] = {"D": 392, "H4": 1910, "H1": 7224}
+PHASE1_BASELINE_PUBLISHED: dict[str, int] = {"D": 392, "H4": 1910}
 
 
 def _count(detector: DominantImpulseDetector) -> str:

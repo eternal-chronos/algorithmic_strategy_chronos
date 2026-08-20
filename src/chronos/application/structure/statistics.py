@@ -76,7 +76,7 @@ class TimeframeStatistics:
 @dataclass(frozen=True, slots=True)
 class ImpulseStatistics:
     per_timeframe: dict[str, TimeframeStatistics]
-    #: C.4 — sesgos simultáneos de las tres temporalidades. Vacía si no hay al
+    #: C.4 — sesgos simultáneos de las temporalidades con detector. Vacía si no hay al
     #: menos dos con detector propio.
     alignment: pd.DataFrame = field(default_factory=pd.DataFrame)
 
@@ -450,18 +450,18 @@ def _safe_division(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
 
 
 def simultaneous_bias(run: ImpulseRun) -> pd.DataFrame:
-    """C.4 — qué hacen a la vez las tres temporalidades, por año.
+    """C.4 — qué hacen a la vez las temporalidades con detector, por año.
 
     Todo se lee sobre la rejilla de la temporalidad **más fina** con detector: en
     cada uno de sus cierres se mira el último cierre disponible de las mayores.
     Nunca al revés, que sería preguntarle a la vela diaria qué hará dentro de
     unas horas.
 
-    Es la métrica que acota cuántas oportunidades alineadas puede haber: si las
-    tres coinciden en dirección el 8 % del tiempo, no hay más de un 8 % del
-    histórico donde buscar una entrada alineada.
+    Es la métrica que acota cuántas oportunidades alineadas puede haber: si
+    coinciden en dirección el 8 % del tiempo, no hay más de un 8 % del histórico
+    donde buscar una entrada alineada.
     """
-    columns = ["anio", "barras", "pct_tres_vigentes", "pct_alguna_en_limbo", "pct_misma_direccion"]
+    columns = ["anio", "barras", "pct_todas_vigentes", "pct_alguna_en_limbo", "pct_misma_direccion"]
     alignment = align_timeframes(run)
     if alignment is None:
         return pd.DataFrame(columns=columns)
@@ -481,9 +481,9 @@ def align_timeframes(
 ) -> tuple[pd.DatetimeIndex, np.ndarray, np.ndarray, np.ndarray] | None:
     """Pone las temporalidades en una rejilla común y dice qué hacían a la vez.
 
-    Devuelve las marcas de tiempo y tres máscaras: las tres con ID vigente,
-    alguna en limbo, y las tres coincidiendo en dirección. `None` si no hay al
-    menos dos temporalidades con detector.
+    Devuelve las marcas de tiempo y tres máscaras: todas con ID vigente, alguna
+    en limbo, y todas coincidiendo en dirección. `None` si no hay al menos dos
+    temporalidades con detector.
     """
     detected = list(run.analyses)
     if len(detected) < 2:
@@ -500,7 +500,7 @@ def align_timeframes(
         combined = pd.DatetimeIndex(base.union(pd.DatetimeIndex(series.index)))
         frame[timeframe] = series.reindex(combined).ffill().reindex(base)
 
-    # Antes de que las tres hayan publicado su primer estado no hay nada que
+    # Antes de que todas hayan publicado su primer estado no hay nada que
     # comparar. Esas barras se descartan en vez de contarlas como limbo.
     known = frame.notna().all(axis=1).to_numpy()
     frame = frame[known]
@@ -514,7 +514,7 @@ def align_timeframes(
 
 
 def longest_aligned_stretch(run: ImpulseRun) -> tuple[pd.Timestamp, pd.Timestamp] | None:
-    """Tramo más largo con las tres temporalidades apuntando al mismo lado.
+    """Tramo más largo con todas las temporalidades apuntando al mismo lado.
 
     Es el que se exporta como captura: si existe un sitio donde mirar entradas
     alineadas, es éste.
@@ -569,7 +569,7 @@ def _alignment_row(
     return {
         "anio": label,
         "barras": bars,
-        "pct_tres_vigentes": share(all_live),
+        "pct_todas_vigentes": share(all_live),
         "pct_alguna_en_limbo": share(any_limbo),
         "pct_misma_direccion": share(aligned),
     }

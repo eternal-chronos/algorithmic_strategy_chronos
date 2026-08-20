@@ -175,12 +175,12 @@ def _baseline_block(baseline: BaselineComparison | None) -> str:
         lines += ["", f"--- {timeframe} ---", "", render_table(table), ""]
     lines += [
         "",
-        "--- Las tres temporalidades a la vez ---",
+        "--- Las temporalidades detectadas a la vez ---",
         "",
         render_table(baseline.alignment),
         "",
-        f"`{ALIGNMENT_METRIC}` se lee sobre la rejilla de H1, mirando en cada cierre el",
-        "último cierre ya publicado de H4 y del diario.",
+        f"`{ALIGNMENT_METRIC}` se lee sobre la rejilla de H4, mirando en cada cierre el",
+        "último cierre ya publicado del diario.",
     ]
     return "\n".join(lines) + "\n"
 
@@ -615,7 +615,7 @@ def _census_block(statistics: ImpulseStatistics) -> str:
                 },
             ),
         ),
-        section("C.4 Sesgos simultáneos de las tres temporalidades", level=2),
+        section("C.4 Sesgos simultáneos de las temporalidades detectadas", level=2),
         "",
         "Leído sobre la rejilla de la temporalidad más fina: en cada uno de sus cierres se",
         "mira el último cierre ya publicado de las mayores, nunca el que aún no ha llegado.",
@@ -625,7 +625,7 @@ def _census_block(statistics: ImpulseStatistics) -> str:
             statistics.alignment,
             formats={
                 "barras": _COUNT,
-                "pct_tres_vigentes": ".2%",
+                "pct_todas_vigentes": ".2%",
                 "pct_alguna_en_limbo": ".2%",
                 "pct_misma_direccion": ".2%",
             },

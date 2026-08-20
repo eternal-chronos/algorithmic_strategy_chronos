@@ -30,9 +30,6 @@ from typing import Any
 import pandas as pd
 import plotly.offline as pyo
 
-from chronos.application.entries.cascade import CascadeRun
-from chronos.application.entries.comparison import LostConfirmation
-from chronos.application.entries.execution import ExecutionRun
 from chronos.application.structure.detect_impulses import ImpulseRun, TimeframeAnalysis
 from chronos.application.structure.lateralization import (
     LateralizationStudy,
@@ -90,15 +87,10 @@ def render_explorer(
     lateralization: LateralizationStudy | None = None,
     variants: Sequence[ModeVariant] = (),
     zones: ZonesRun | None = None,
-    cascade: CascadeRun | None = None,
-    execution: ExecutionRun | None = None,
-    lost: Sequence[LostConfirmation] = (),
 ) -> str:
     """Devuelve el HTML completo del explorador."""
     generated_at = generated_at or SystemClock().now()
-    payload = build_payload(
-        run, max_bars, lateralization, variants, zones, cascade, execution, lost
-    )
+    payload = build_payload(run, max_bars, lateralization, variants, zones)
     # El JSON viaja dentro de un <script>: escapar `</` evita que un texto
     # cualquiera pueda cerrar la etiqueta antes de tiempo.
     data = json.dumps(payload, separators=(",", ":"), ensure_ascii=False, default=str).replace(
@@ -125,9 +117,6 @@ def build_payload(
     lateralization: LateralizationStudy | None = None,
     variants: Sequence[ModeVariant] = (),
     zones: ZonesRun | None = None,
-    cascade: CascadeRun | None = None,
-    execution: ExecutionRun | None = None,
-    lost: Sequence[LostConfirmation] = (),
 ) -> dict[str, Any]:
     """Serializa la corrida a la estructura que consume el explorador.
 
@@ -173,12 +162,6 @@ def build_payload(
             "limbo": LIMBO_FILL,
             "ink": theme.INK_PRIMARY,
             "muted": theme.INK_MUTED,
-            #: Fase 3.0 en replay: la operación abierta y la señal todavía en
-            #: observación. Van en dos colores propios porque son estados que
-            #: NO se pueden confundir con un desenlace: el verde y el rojo están
-            #: reservados a lo que ya se sabe cómo acabó.
-            "pending": theme.SERIES[3],
-            "signal": theme.SERIES[0],
             "grid": theme.GRIDLINE,
             "surface": theme.SURFACE,
             "font": theme.FONT_FAMILY,
@@ -198,28 +181,12 @@ def build_payload(
         #: Lo mismo para la capa de roturas evitadas de la fase 2.1: con la regla
         #: apagada no hay ni una y la casilla no se enseña.
         "hasAvoided": any(analysis.avoided for analysis in run.analyses.values()),
-        #: Fase 3.0. Las operaciones, las señales descartadas y los rechazos de
-        #: las tres definiciones. Van **fuera** de `impulses` a propósito: una
-        #: operación es un hecho en el tiempo y en el precio, así que se dibuja
-        #: igual sobre las cuatro temporalidades, que es lo que el §10 pide.
-        "entries": _entries_payload(cascade, execution, lost),
-        "hasEntries": bool(cascade is not None and cascade.enabled),
-        #: Fase 3.1: qué vías confirmaron esta corrida y con qué orden, y cuántos
-        #: turtle soup hay en TODA la serie de H1. El explorador dibuja los que la
-        #: cascada miró; sin el censo, su capa daría a entender que el patrón sólo
-        #: ocurre donde hay zona en observación.
-        "confirm": (
-            {
-                #: Fase 3.2: qué abre operación en H4. Sin esto el explorador no
-                #: podría decir si lo que dibuja sale de un rechazo o del simple
-                #: contacto, y son dos estrategias distintas.
-                "entryMode": cascade.config.entry_mode.value,
-                "mode": cascade.config.confirm_mode.value,
-                "priority": cascade.config.confirm_priority.value,
-                "census": dict(cascade.turtle_census),
-            }
-            if cascade is not None and cascade.enabled
-            else None
+        #: Y para la escalera del extremo (§3.2): sin una sola extensión, todas
+        #: las líneas son rectas y no hay ningún salto que marcar.
+        "hasSteps": any(
+            impulse.extreme_extensions
+            for analysis in run.analyses.values()
+            for impulse in analysis.published
         ),
         "modes": [_mode_summary(variant) for variant in variants],
         # El modo activo ya viaja en `impulses` y repetirlo aquí costaba 4,5 MB
@@ -231,222 +198,6 @@ def build_payload(
             for variant in variants
             if variant.mode != run.config.rules.leg_start_mode.value
         },
-    }
-
-
-def _entries_payload(
-    cascade: CascadeRun | None,
-    execution: ExecutionRun | None,
-    lost: Sequence[LostConfirmation] = (),
-) -> dict[str, Any]:
-    """La cascada navegable, con todo lo que la explica.
-
-    Seis capas y no una: las **operaciones**, las señales **descartadas** con el
-    guardarraíl que las mató, los **rechazos de H4** que son lo único que abre
-    operación desde la fase 3.2, los **rechazos R1/R2/R3** marcados sobre la vela
-    que confirmó —que ya no confirman nada y siguen dibujándose porque siguen
-    midiéndose—, los **turtle soup** de H1 detectados confirmen o no, y las
-    señales que **la fase anterior tomaba y ésta descarta**, con la vía por la que
-    confirmaban antes.
-
-    Cada operación viaja con sus hitos —contacto, rotura, retesteo, confirmación,
-    entrada y salida— para que el globo cuente la historia entera sin abrir el
-    CSV, y con los tres precios que la deciden: entrada, stop y objetivo.
-    """
-    empty: dict[str, Any] = {
-        "trades": [],
-        "discarded": [],
-        "h4": [],
-        "rejections": [],
-        "turtle": [],
-        "lost": [],
-    }
-    if cascade is None or not cascade.enabled:
-        return empty
-
-    trades = execution.trades if execution is not None else ()
-    dead = (*cascade.discarded, *(execution.discarded if execution is not None else ()))
-    return {
-        "trades": [_trade_record(trade) for trade in trades],
-        "discarded": [_discarded_record(item) for item in dead],
-        "h4": _h4_rejections_payload(cascade),
-        "rejections": [
-            record
-            for signal in cascade.signals
-            if (record := _rejection_record(signal)) is not None
-        ],
-        "turtle": [_turtle_record(item) for item in cascade.turtle_soups],
-        "lost": [_lost_record(item) for item in lost],
-    }
-
-
-def _h4_rejections_payload(cascade: CascadeRun) -> list[dict[str, Any]]:
-    """Los rechazos en H4 de la corrida, vivan o mueran después (fase 3.2).
-
-    Se recogen de las observaciones **y** de las descartadas: un rechazo que
-    después no confirma en H1 sigue siendo un rechazo, y esconderlo dejaría la
-    capa contando sólo la mitad que salió bien. Una observación descartada lleva
-    la misma marca que la viva, así que se deduplica por la vela que rechazó.
-
-    No se ordena por tiempo aquí: el explorador filtra por ventana y Plotly
-    dibuja marcas, no una línea, así que el orden no cambia nada de lo que se ve.
-    """
-    seen: set[tuple[int, str, int]] = set()
-    records: list[dict[str, Any]] = []
-    observations = (
-        *cascade.observations,
-        *(item.observation for item in cascade.discarded),
-    )
-    for observation in observations:
-        if observation.index_rejection is None:
-            continue
-        key = (observation.id_num, observation.zone.value, observation.index_rejection)
-        if key in seen:
-            continue
-        seen.add(key)
-        records.append(_h4_rejection_record(observation))
-    return records
-
-
-def _h4_rejection_record(observation: Any) -> dict[str, Any]:
-    """El rechazo en H4 que abrió la operación, con su forma y su lado.
-
-    Va sobre el borde **interior** de la zona, que es el nivel que la vela cruzó
-    al entrar y el que su cierre volvió a dejar atrás: es el precio del que habla
-    la regla. `ag` marca los rechazos que se operan **en contra** del ID de H4
-    —la rama del UL— porque es la población que no existía antes de la 3.2 y la
-    primera que hay que mirar.
-    """
-    return {
-        "x": _minute(pd.Timestamp(observation.ts_rejection)),
-        "y": round(observation.zone_inner, DECIMALS),
-        "d": observation.direction_of_trade.value,
-        "di": observation.direction.value,
-        "z": observation.zone.value,
-        "id": observation.id_num,
-        "f": None if observation.rejection_form is None else observation.rejection_form.value,
-        "fs": [form.value for form in observation.rejection_forms],
-        "ag": observation.against_the_id,
-        "xc": _minute(pd.Timestamp(observation.ts_contact)),
-        "zi": round(observation.zone_inner, DECIMALS),
-        "zo": round(observation.zone_outer, DECIMALS),
-    }
-
-
-def _turtle_record(item: Any) -> dict[str, Any]:
-    """Un turtle soup mirado por la cascada, con lo que le pasó (fase 3.1).
-
-    `y` es el extremo de la mecha de la primera vela: el nivel que la segunda va
-    a buscar y no consigue superar con el cierre. Es el precio sobre el que tiene
-    sentido dibujar la marca, y no el cierre ni el centro de la vela.
-    """
-    return {
-        "x": _minute(pd.Timestamp(item.timestamp)),
-        "y": round(item.extreme, DECIMALS),
-        "d": item.direction.value,
-        "r": item.reason.value,
-        "id": item.id_num,
-        "z": item.zone.value,
-    }
-
-
-def _lost_record(item: Any) -> dict[str, Any]:
-    """Una observación que la 3.0 confirmaba y la 3.1 ya no (fase 3.1).
-
-    Se dibuja en el minuto en que la 3.0 CONFIRMABA, que es el instante que el
-    propietario quiere mirar: ahí es donde la fase anterior habría entrado.
-    """
-    return {
-        "x": _minute(pd.Timestamp(item.ts_confirmation_before)),
-        "y": round(item.zone_inner, DECIMALS),
-        "d": item.direction.value,
-        "z": item.zone.value,
-        "id": item.id_num,
-        "oc": item.outcome.value,
-        "v30": item.via_before.value,
-        "rail": None if item.rail_after is None else item.rail_after.value,
-        "xc": _minute(pd.Timestamp(item.ts_contact)),
-        "zi": round(item.zone_inner, DECIMALS),
-        "zo": round(item.zone_outer, DECIMALS),
-    }
-
-
-def _trade_record(trade: Any) -> dict[str, Any]:
-    observation = trade.signal.observation
-    return {
-        "id": observation.id_num,
-        "d": observation.direction.value,
-        "z": observation.zone.value,
-        "oc": observation.outcome.value,
-        "dc": observation.daily.value,
-        "tf": trade.entry_timeframe.value,
-        "sz": trade.stop_zone.value,
-        "cf": trade.signal.confirmation.kind.value,
-        "xc": _minute(pd.Timestamp(observation.ts_contact)),
-        "xk": (
-            None if observation.ts_break is None else _minute(pd.Timestamp(observation.ts_break))
-        ),
-        "xr": (
-            None
-            if observation.ts_retest is None
-            else _minute(pd.Timestamp(observation.ts_retest))
-        ),
-        "xf": _minute(pd.Timestamp(trade.signal.confirmation.timestamp)),
-        "xe": _minute(pd.Timestamp(trade.ts_entry)),
-        "xx": None if trade.ts_exit is None else _minute(pd.Timestamp(trade.ts_exit)),
-        "pe": round(trade.entry_price, DECIMALS),
-        "ps": round(trade.stop_price, DECIMALS),
-        "pt": round(trade.target_price, DECIMALS),
-        "zi": round(observation.zone_inner, DECIMALS),
-        "zo": round(observation.zone_outer, DECIMALS),
-        "out": trade.outcome.value,
-        "win": trade.outcome.is_win,
-        "gr": round(trade.gross_r, 3),
-        "nr": round(trade.net_r, 3),
-        "ru": round(trade.risk_usd, DECIMALS),
-    }
-
-
-def _discarded_record(item: Any) -> dict[str, Any]:
-    observation = item.observation
-    return {
-        "id": observation.id_num,
-        "d": observation.direction.value,
-        "z": observation.zone.value,
-        "dc": observation.daily.value,
-        "rail": item.guard_rail.value,
-        "xc": _minute(pd.Timestamp(observation.ts_contact)),
-        "x": _minute(pd.Timestamp(item.timestamp)),
-        "zi": round(observation.zone_inner, DECIMALS),
-        "zo": round(observation.zone_outer, DECIMALS),
-        "cf": None if item.confirmation is None else item.confirmation.kind.value,
-        #: Cuándo confirmó, no sólo con qué: durante el replay la señal se dibuja
-        #: mientras está viva y la confirmación tiene que aparecer en su minuto,
-        #: no en el del contacto ni en el de la muerte.
-        "xf": (
-            None
-            if item.confirmation is None
-            else _minute(pd.Timestamp(item.confirmation.timestamp))
-        ),
-    }
-
-
-def _rejection_record(signal: Any) -> dict[str, Any] | None:
-    """Las **tres definiciones marcadas por separado** sobre la vela que confirmó.
-
-    En la fase 3.1 ya no confirman nada: se siguen calculando y se siguen
-    dibujando porque se siguen midiendo. Sólo salen las velas que confirmaron:
-    son las únicas que la cascada llegó a evaluar, porque en cuanto una vela
-    confirma la búsqueda se para.
-    """
-    if not signal.rejection_marks:
-        return None
-    return {
-        "x": _minute(pd.Timestamp(signal.confirmation.timestamp)),
-        "y": round(signal.observation.zone_inner, DECIMALS),
-        "id": signal.observation.id_num,
-        "d": signal.direction.value,
-        "m": dict(signal.rejection_marks),
     }
 
 
@@ -581,18 +332,29 @@ def _zones(
     es exactamente cuando la zona existe— y `xd` marca la vela que la define,
     para poder dibujar hasta ahí un contorno atenuado. Sin esa distinción el
     dibujo diría que la zona existía antes de tiempo.
+
+    El UL es **uno solo** por ID y no se remarca: lo fija la vela del extremo de
+    la constitución y no se mueve aunque el extremo se estire después (fase 2.1,
+    §3.2). Por eso su rectángulo va entero de la constitución al fin del ID,
+    mientras la línea del extremo puede seguir subiendo en escalera por encima.
     """
     if zones is None:
         return []
     ends = _impulse_ends(analysis, last)
-    return [
-        _zone_record(zoned, zone, ends[zoned.id_num])
-        for zoned in zones.items
-        for zone in zoned.zones()
-    ]
+    records: list[dict[str, Any]] = []
+    for zoned in zones.items:
+        # Un UL por ID y sólo uno: no se remarca aunque el extremo se estire.
+        records.append(_zone_record(zoned, zoned.last, ends[zoned.id_num]))
+        if zoned.order_block is not None:
+            records.append(_zone_record(zoned, zoned.order_block, ends[zoned.id_num]))
+    return records
 
 
-def _zone_record(zoned: ImpulseZones, zone: Zone, end: pd.Timestamp) -> dict[str, Any]:
+def _zone_record(
+    zoned: ImpulseZones,
+    zone: Zone,
+    end: pd.Timestamp,
+) -> dict[str, Any]:
     return {
         "id": zoned.id_num,
         "k": zone.kind.value,
@@ -701,6 +463,15 @@ def _impulse_list(impulses: list[Any], last: pd.Timestamp) -> list[dict[str, Any
     antes de que el ID existiera, y esa distinción es la que impide que el dibujo
     sugiera que el sistema conocía el nivel antes de tiempo. Son las marcas que
     el propio detector registró al constituir; aquí no se recalcula nada.
+
+    Con la rotura por zona (fase 2.1) el extremo **se mueve** estando el ID ya
+    vigente, así que `e` y `xe` son los del final y con ellos solos la línea se
+    dibujaría desde la constitución en un precio al que el mercado todavía no
+    había llegado: el mismo lookahead que B.1 evita por el otro lado. Por eso los
+    ID estirados llevan además `st`, la escalera entera —un par `[minuto, precio]`
+    por tramo, el primero el de la constitución—, y el explorador dibuja un
+    escalón por tramo. Los que nunca se estiraron no la llevan: son un solo
+    tramo y con `e`/`xe` basta.
     """
     return [
         {
@@ -719,9 +490,23 @@ def _impulse_list(impulses: list[Any], last: pd.Timestamp) -> list[dict[str, Any
             #: dominio al constituir; aquí sólo se transporta para poder marcarlo.
             "ec": impulse.extreme_bar_direction.value,
             "w": impulse.extreme_on_counter_bar,
+            **_extreme_steps(impulse),
         }
         for impulse in impulses
     ]
+
+
+def _extreme_steps(impulse: Any) -> dict[str, Any]:
+    """La escalera del extremo, sólo cuando hubo alguna extensión (§3.2)."""
+    steps = impulse.extreme_steps
+    if len(steps) < 2:
+        return {}
+    return {
+        "st": [
+            [_minute(pd.Timestamp(step.timestamp)), round(step.price, DECIMALS)]
+            for step in steps
+        ]
+    }
 
 
 def _constitutions(impulses: list[Any], bars: pd.DataFrame) -> list[dict[str, Any]]:
