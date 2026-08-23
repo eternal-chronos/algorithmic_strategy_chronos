@@ -257,7 +257,10 @@ hay que volver a fijar antes de escribir una línea de código. Lo que toca ahor
 y en este orden, es comprobar que la base se entiende:
 
 1. **el toque de una zona** —cuándo el precio toca un UL y cuándo toca un OB, y en
-   qué se distingue tocar de atravesar;
+   qué se distingue tocar de atravesar—. El explorador ya lo dibuja: la capa
+   «Señales de zona» marca el toque del OB, el rechazo del UL y la rotura del UL
+   sobre el Diario y H4. Son **dibujo**, no entradas
+   ([MODULO_2_ZONAS.md](MODULO_2_ZONAS.md#señales-de-zona-sólo-dibujo));
 2. **los ID** —qué ID está vigente en cada instante y con qué identificador;
 3. **la multitemporalidad** —qué dice el Diario mientras H4 dice otra cosa, y cómo
    se lee eso sobre H1 y M15, que ya no llevan ID propio.

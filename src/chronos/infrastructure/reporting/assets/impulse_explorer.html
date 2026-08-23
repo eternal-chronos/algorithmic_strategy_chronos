@@ -145,6 +145,15 @@ sobre un gráfico de H4). Son dos rectángulos del tamaño de la pantalla y tapa
 apagarlas deja verlo. Las del impulso principal siguen dibujándose.">
             <input type="checkbox" id="layer-zones-context"> Zonas del contexto</label>
         </span>
+        <span id="signal-layers" style="display:flex; gap:16px; flex-wrap:wrap;">
+          <label class="toggle" title="Las tres señales sobre las zonas de los ID, en Diario y H4:
+pentágono = el precio TOCA el OB; hexagrama = LLEGA al UL y lo RECHAZA (no pasa de su borde
+exterior); rombo-estrella = ROMPE el UL (cierra más allá del borde exterior).
+Son DIBUJO: se calculan sobre las zonas ya detectadas y no abren ni cierran ninguna
+operación. El proyecto sigue sin entradas, stops ni targets.
+Obedecen el selector de ID visibles: con «ID actual» se ven las del ID vigente y su zona.">
+            <input type="checkbox" id="layer-signals" checked> Señales de zona</label>
+        </span>
         <span id="break-layers" style="display:flex; gap:16px; flex-wrap:wrap;">
           <span id="avoided-layer">
             <label class="toggle" title="Fase 2.1: velas que bajo la regla antigua habrían roto el ID

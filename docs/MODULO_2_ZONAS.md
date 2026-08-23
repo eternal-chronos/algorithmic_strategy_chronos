@@ -16,7 +16,8 @@ cambiado: la fase 2.1 no toca cómo se detecta una zona, sólo qué se hace con 
 - No toca la lógica de detección del impulso dominante.
 - No cambia la regla de rotura del ID: sigue siendo **por línea**.
 - No implementa FVG.
-- No genera señales, entradas, stops ni targets.
+- No genera entradas, stops ni targets. Las «señales de zona» de más abajo son
+  marcas de dibujo para auditar el toque; no operan nada.
 - No optimiza ni busca parámetros.
 
 **Línea base preservada y verificada:** `config_hash = e27d20d0fa4e`,
@@ -147,6 +148,48 @@ Dos consecuencias que se ven en el dibujo:
   delante de su zona.
 - **El rectángulo del UL es uno y va entero de la constitución al fin del ID.**
   No hay tramos ni escalones de zona que contar.
+
+## Señales de zona (sólo dibujo)
+
+Tres marcas sobre las zonas ya detectadas, en el Diario y en H4 —las dos únicas
+temporalidades con ID y por tanto con zonas—. **No son señales operativas:** el
+proyecto sigue sin entradas, sin stops y sin targets, y ningún módulo del motor
+las lee. Existen para auditar el punto 1 de la lista de la fase 3, *cuándo el
+precio toca una zona y en qué se distingue tocar de atravesar*, sin tener que
+abrir un CSV.
+
+| Marca | Cuándo sale |
+|---|---|
+| `TOQUE_OB` (pentágono) | el rango de la vela corta la zona OB, bordes incluidos y cierre donde cierre |
+| `RECHAZO_UL` (hexagrama) | el rango corta la zona UL y el cierre **no** pasa de su borde exterior |
+| `ROTURA_UL` (rombo-estrella) | el cierre queda más allá del borde exterior del UL |
+
+Detalles que se decidieron y no se esconden:
+
+- **Tocar es cosa de mechas**, como en la sección D: basta con que `[low, high]`
+  corte la zona. **Romper es cerrar más allá del borde exterior**, con la misma
+  desigualdad estricta que la rotura de la fase 2.1 —cerrar justo en el borde es
+  cerrar dentro— así que rechazo y rotura se excluyen: la vela que rompe no
+  rechaza.
+- **No hay «rotura del OB».** Atravesar el OB es la rotura en contra que el
+  detector ya marca; duplicarla aquí sería contar dos veces lo mismo. Una vela
+  que se lleva el OB por delante sale como `TOQUE_OB`, con el marcador plantado
+  en el borde que cruzó.
+- **`ROTURA_UL` es geometría, no la regla de rotura.** Con `break_by_zone: true`
+  cae exactamente sobre las roturas a favor que el detector produjo —hay test que
+  lo comprueba sobre el histórico— y con la regla apagada sigue existiendo,
+  porque el UL sigue estando dibujado aunque no decida nada.
+- **Sin lookahead.** Cada señal se busca desde la vela **siguiente** al
+  nacimiento de su zona —igual que los contactos de la sección D— y hasta la
+  vela que mata al ID, incluida: es justo la que puede llevar la rotura.
+- **Se apagan.** Capa propia en el explorador, con su entrada en la leyenda y su
+  recuento en el texto de estado. Obedecen el selector de ID visibles; el filtro
+  de zonas no, porque son marcas puntuales y no rectángulos que tapen el precio.
+
+Viven en `domain/structure/zone_signals.py` (la geometría, pura) y en
+`application/structure/zone_signals.py` (el recorrido de la corrida). Un test de
+capas comprueba que **ningún** otro módulo de `domain/` ni de `application/` las
+importa: encenderlas no puede mover un impulso, ni una zona, ni una rotura.
 
 ## Configuración
 

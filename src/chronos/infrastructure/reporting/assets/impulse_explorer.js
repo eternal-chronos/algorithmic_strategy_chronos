@@ -72,19 +72,19 @@
     clean: {
       visible: "current",
       limbo: false, marks: true, contacts: false, mid: false, wrong: false,
-      zonesUl: true, zonesOb: true, zonesContext: false,
+      zonesUl: true, zonesOb: true, zonesContext: false, signals: true,
       avoided: false, steps: false
     },
     normal: {
       visible: "pair",
       limbo: true, marks: true, contacts: false, mid: false, wrong: true,
-      zonesUl: true, zonesOb: true, zonesContext: true,
+      zonesUl: true, zonesOb: true, zonesContext: true, signals: true,
       avoided: true, steps: true
     },
     all: {
       visible: "all",
       limbo: true, marks: true, contacts: true, mid: true, wrong: true,
-      zonesUl: true, zonesOb: true, zonesContext: true,
+      zonesUl: true, zonesOb: true, zonesContext: true, signals: true,
       avoided: true, steps: true
     }
   };
@@ -127,6 +127,10 @@
      * de la pantalla —el diario sobre H4— y no deciden nada de lo que se está
      * auditando en este gráfico: en el nivel «Limpio» se van. */
     zonesContext: true,
+    /* Señales de zona: toque del OB, rechazo del UL y rotura del UL. Nace
+     * encendida en los tres niveles de ruido —es lo que el propietario ha pedido
+     * ver— y sólo existe donde existen las zonas: Diario y H4. */
+    signals: true,
     /* Fase 2.1. Las roturas evitadas son lo primero que hay que auditar de la
      * regla nueva, así que la capa nace encendida cuando la corrida trae alguna.
      * Con `break_by_zone: false` no hay ninguna y la casilla ni se enseña. */
@@ -1243,6 +1247,103 @@
     ];
   }
 
+  /* --- Señales de zona (visual) ---------------------------------------------
+   *
+   * Las tres marcas que el propietario quiere ver sobre el Diario y H4 mientras
+   * audita el toque de una zona: el precio TOCA un OB, LLEGA a un UL y lo
+   * RECHAZA, o ROMPE un UL.
+   *
+   * DIBUJO Y NADA MÁS, como el resto del fichero. Vienen calculadas de Python
+   * sobre las zonas de la fase 2.0 y no producen entradas, ni stops, ni
+   * targets: el proyecto sigue sin señales operativas. Aquí no se decide cuál
+   * cuenta ni se agrupa nada; se elige qué se pinta.
+   *
+   * Van con el impulso PRINCIPAL del gráfico, igual que los demás marcadores: la
+   * señal de un ID de H4 sobre velas de H1 caería en un sitio que en ese gráfico
+   * no es el suyo. Y obedecen el filtro de ID visibles (B.2), no el de las
+   * zonas: son marcas puntuales, no rectángulos que tapen el precio, y el globo
+   * lleva los dos bordes de su zona, así que una señal de un ID cuyo rectángulo
+   * ya no se dibuja se sigue pudiendo juzgar. Con el filtro en «ID actual» se
+   * ven las del ID vigente y su zona a la vez.
+   */
+
+  function hasSignals() { return DATA.hasSignals === true; }
+
+  /* Se calcularon sobre las zonas del modo activo de R-36, así que desaparecen
+   * al cambiar de modo por la misma razón que las zonas. */
+  function signalsOf(timeframe) {
+    if (!zonesAvailable()) { return []; }
+    return impulsesOf(timeframe).signals || [];
+  }
+
+  /* Un símbolo por tipo, ninguno repetido de las capas que ya existían, y el
+   * color del ID al que pertenece la señal. */
+  var SIGNAL_STYLE = {
+    TOQUE_OB: { symbol: "pentagon", size: 12, title: "TOQUE DE OB" },
+    RECHAZO_UL: { symbol: "hexagram", size: 12, title: "RECHAZO DEL UL" },
+    ROTURA_UL: { symbol: "star-diamond", size: 13, title: "ROTURA DEL UL" }
+  };
+  var SIGNAL_KINDS = ["TOQUE_OB", "RECHAZO_UL", "ROTURA_UL"];
+
+  function visibleSignals(edges) {
+    if (blindfolded() || !state.signals || !hasSignals()) { return []; }
+    if (!zonesAvailable() || !isVisible(primary())) { return []; }
+    var allowed = visibleIds(primary(), edges);
+    return signalsOf(primary()).filter(function (item) {
+      return item.x >= edges.lo && item.x <= edges.hi &&
+        !pending(item.x, primary(), edges) && keeps(allowed, item.id);
+    });
+  }
+
+  function signalTraces(range) {
+    var visible = visibleSignals(window_(range));
+    if (!visible.length) { return []; }
+    return SIGNAL_KINDS.map(function (kind) {
+      return signalTrace(visible, kind);
+    }).filter(Boolean);
+  }
+
+  function signalTrace(signals, kind) {
+    var items = signals.filter(function (item) { return item.k === kind; });
+    if (!items.length) { return null; }
+    var style = SIGNAL_STYLE[kind];
+    return {
+      type: "scatter", mode: "markers",
+      name: kind + " " + label(primary()),
+      x: items.map(function (item) { return iso(item.x); }),
+      y: items.map(function (item) { return item.y; }),
+      text: items.map(signalCaption),
+      hoverinfo: "text", hoverlabel: { align: "left" },
+      marker: {
+        symbol: style.symbol, size: style.size,
+        color: items.map(function (item) {
+          return item.d === "alcista" ? COLORS.bullish : COLORS.bearish;
+        }),
+        line: { color: COLORS.surface, width: 1.2 }
+      }
+    };
+  }
+
+  function signalCaption(item) {
+    var style = SIGNAL_STYLE[item.k];
+    var text = style.title + " (" + primary() + ")<br>" + stamp(item.x) +
+      "<br>ID nº " + item.id + " (" + item.d + ") · zona " + item.z +
+      "<br>señal nº " + item.n + " de este tipo en este ID";
+    if (item.k === "ROTURA_UL") {
+      text += "<br>cierre " + price(item.c) + " más allá del borde exterior " +
+        price(item.lvl);
+    } else {
+      text += "<br>borde interior " + price(item.lvl) +
+        " · la mecha llegó a " + price(item.r) +
+        "<br>cierre " + price(item.c) +
+        (item["in"] ? " DENTRO de la zona" : " fuera de la zona");
+      if (item.k === "RECHAZO_UL") {
+        text += "<br>no pasó del borde exterior: el UL aguanta";
+      }
+    }
+    return text + "<br>SÓLO DIBUJO: no abre ni cierra ninguna operación";
+  }
+
   /* El sombreado es el del impulso principal: dos capas de limbo superpuestas
    * no se leen, y el limbo que importa al auditar un gráfico es el suyo. */
   function limboShapes(range) {
@@ -1512,6 +1613,7 @@
       .concat(midTraces(range))
       .concat(markerTraces(range))
       .concat(avoidedTraces(range))
+      .concat(signalTraces(range))
       .concat(confirmationTraces(range))
       .concat(contactTraces(range))
       .concat(wrongExtremeTraces(range));
@@ -1543,6 +1645,7 @@
     ["zonesContext", "zonas del contexto", function () {
       return zonesAvailable() && overlays().length > 1;
     }],
+    ["signals", "señales de zona", hasSignals],
     ["avoided", "roturas evitadas", hasAvoided],
     ["steps", "escalera del extremo", hasSteps]
   ];
@@ -1633,6 +1736,18 @@
         (DATA.meta.breakByZone
           ? " (fase 2.1: éstas SÍ deciden la rotura)"
           : " (fase 2.0: sólo se dibujan, no rompen nada)");
+    }
+    if (hasSignals() && state.signals && zonesAvailable()) {
+      var senales = visibleSignals(edges);
+      var porTipo = SIGNAL_KINDS.map(function (kind) {
+        return senales.filter(function (item) { return item.k === kind; }).length +
+          " " + kind;
+      }).join(", ");
+      // Una capa de señales que no dice cuántas hay se lee como que ahí no pasó
+      // nada; y una que no dice que es sólo dibujo se lee como una entrada.
+      text += " · señales de zona a la vista: " + senales.length.toLocaleString("es-ES") +
+        " (" + porTipo + ") de " + label(primary()) +
+        " · SON DIBUJO: no abren ni cierran nada, no hay entradas en el proyecto";
     }
     if (hasAvoided() && state.avoided && isVisible(primary())) {
       var allowedAvoided = visibleIds(primary(), edges);
@@ -1912,6 +2027,7 @@
    * de cada preset, porque el preset no sabe qué llevaba el payload. */
   function enforceAvailability() {
     if (!hasZones()) { state.zonesUl = state.zonesOb = false; }
+    if (!hasSignals()) { state.signals = false; }
     if (!hasSteps()) { state.steps = false; }
     if (!hasAvoided()) { state.avoided = false; }
   }
@@ -1921,6 +2037,13 @@
   function buildZoneLayers() {
     if (hasZones()) { return; }
     hide("zone-layers");
+  }
+
+  /* Mismo criterio para las señales: sin zonas no hay ni una, y una casilla que
+   * no puede dibujar nada sólo hace dudar de si está fallando. */
+  function buildSignalLayers() {
+    if (hasSignals()) { return; }
+    hide("signal-layers");
   }
 
   /* Fase 2.1, mismo criterio: con `break_by_zone: false` no hay ni una rotura
@@ -2107,6 +2230,12 @@
       document.getElementById("layer-zones-ob").checked = state.zonesOb;
       document.getElementById("layer-zones-context").checked = state.zonesContext;
     }
+    if (hasSignals()) {
+      // Se calcularon sobre las zonas del modo activo: en otro modo no hay nada
+      // que encender, igual que con las zonas.
+      document.getElementById("layer-signals").disabled = !zonesAvailable();
+      document.getElementById("layer-signals").checked = state.signals;
+    }
     if (hasAvoided()) {
       document.getElementById("layer-avoided").checked = state.avoided;
     }
@@ -2175,6 +2304,7 @@
       ["layer-zones-ul", "zonesUl"],
       ["layer-zones-ob", "zonesOb"],
       ["layer-zones-context", "zonesContext"],
+      ["layer-signals", "signals"],
       ["layer-avoided", "avoided"],
       ["layer-steps", "steps"]
     ].forEach(function (pair) {
@@ -2264,6 +2394,7 @@
   buildChartButtons();
   buildModeButtons();
   buildZoneLayers();
+  buildSignalLayers();
   buildBreakLayers();
   buildNoiseButtons();
   // El nivel de salida se aplica aquí, con el payload ya leído: así lo que no

@@ -35,17 +35,22 @@ from chronos.application.structure.lateralization import (
     LateralizationStudy,
     TimeframeLateralization,
 )
+from chronos.application.structure.zone_signals import (
+    TimeframeSignals,
+    detect_zone_signals,
+)
 from chronos.application.structure.zones import ImpulseZones, TimeframeZones, ZonesRun
 from chronos.domain.structure.enums import BreakKind, ContactKind, MachineState
+from chronos.domain.structure.zone_signals import ZoneSignalKind
 from chronos.domain.structure.zones import Zone
 from chronos.infrastructure.clock import SystemClock
 from chronos.infrastructure.reporting import theme
+from chronos.infrastructure.reporting.timezones import session_label
 
 ASSETS = Path(__file__).parent / "assets"
 _MARKER = re.compile(r"__[A-Z][A-Z_]*__")
 
 #: §5.3 fija los colores: verde alcista, rojo bajista. Se toman de la paleta del
-from chronos.infrastructure.reporting.timezones import session_label
 #: proyecto para no introducir hexadecimales sueltos.
 BULLISH = theme.SERIES[2]
 BEARISH = theme.NEGATIVE
@@ -133,6 +138,12 @@ def build_payload(
     charts = run.config.charts
     contacts = lateralization.per_timeframe if lateralization is not None else {}
     zoned = zones.per_timeframe if zones is not None and zones.enabled else {}
+    # Las señales de zona son una lectura de las zonas ya calculadas, sin
+    # parámetros ni configuración propia: donde hay zonas hay señales y donde no,
+    # no. Por eso se derivan aquí en vez de pedirse por argumento —no habría
+    # ninguna corrida en la que tuviera sentido dar unas sin las otras— y el
+    # cálculo sigue viviendo en `application`, no en el dibujo.
+    signals = detect_zone_signals(run, zones).per_timeframe if zoned else {}
     bars = {
         chart: _bars_payload(frame, max_bars) for chart, frame in run.chart_bars.items()
     }
@@ -146,6 +157,7 @@ def build_payload(
             "side": run.config.structure_side,
             "configHash": run.config_hash,
             "sessionTimezone": run.config.reporting.session_timezone,
+            "sessionTimezoneLabel": session_label(run.config.reporting.session_timezone),
             "anchorMode": run.config.rules.anchor_mode.value,
             "seedMode": run.config.rules.seed_mode.value,
             "dojiBreakMode": run.config.rules.doji_break_mode.value,
@@ -157,7 +169,6 @@ def build_payload(
             "dSessionStart": run.config.aggregation.d_session_start,
             "decimals": DECIMALS,
         },
-            "sessionTimezoneLabel": session_label(run.config.reporting.session_timezone),
         "colors": {
             "bullish": BULLISH,
             "bearish": BEARISH,
@@ -174,7 +185,12 @@ def build_payload(
         "spans": _spans(run),
         "bars": bars,
         "impulses": {
-            timeframe: _impulse_payload(analysis, contacts.get(timeframe), zoned.get(timeframe))
+            timeframe: _impulse_payload(
+                analysis,
+                contacts.get(timeframe),
+                zoned.get(timeframe),
+                signals.get(timeframe),
+            )
             for timeframe, analysis in run.analyses.items()
         },
         #: `False` cuando la corrida no llevaba zonas: el explorador esconde sus
@@ -183,6 +199,10 @@ def build_payload(
         #: Lo mismo para la capa de roturas evitadas de la fase 2.1: con la regla
         #: apagada no hay ni una y la casilla no se enseña.
         "hasAvoided": any(analysis.avoided for analysis in run.analyses.values()),
+        #: Capa de señales de zona: toques del OB y rechazos/roturas del UL. Sólo
+        #: dibujo, y sólo donde hay zonas. Sin una sola señal la casilla no se
+        #: enseña, igual que las demás capas que no pueden pintar nada.
+        "hasSignals": any(measurement.items for measurement in signals.values()),
         #: Y para la escalera del extremo (§3.2): sin una sola extensión, todas
         #: las líneas son rectas y no hay ningún salto que marcar.
         "hasSteps": any(
@@ -303,6 +323,7 @@ def _impulse_payload(
     analysis: TimeframeAnalysis,
     measurement: TimeframeLateralization | None,
     zones: TimeframeZones | None = None,
+    signals: TimeframeSignals | None = None,
 ) -> dict[str, Any]:
     bars = analysis.bars
     last = pd.Timestamp(pd.DatetimeIndex(bars.index)[-1])
@@ -321,6 +342,8 @@ def _impulse_payload(
         #: Velas de ancla de los ID que murieron sin OB. La zona no existe, pero
         #: el propietario necesita ver dónde estaba la candidata (§8).
         "obCandidates": _candidates(zones, analysis, last),
+        #: Toques del OB y rechazos/roturas del UL. Vacío sin zonas.
+        "signals": _zone_signals(signals),
     }
 
 
@@ -420,6 +443,43 @@ def _impulse_ends(analysis: TimeframeAnalysis, last: pd.Timestamp) -> dict[int, 
         )
         for impulse in analysis.impulses
     }
+
+
+def _zone_signals(signals: TimeframeSignals | None) -> list[dict[str, Any]]:
+    """Capa "Señales de zona". Puramente visual: no interviene en nada.
+
+    Las tres señales viajan en una sola lista y el explorador las separa por `k`:
+    son marcas del mismo tipo sobre las mismas velas y partirlas en tres arrays
+    sólo repetiría los ID y las direcciones.
+
+    `y` es dónde se planta el marcador: el punto de contacto con la zona en el
+    toque y en el rechazo —recortado a sus bordes, para que la marca caiga sobre
+    la zona y no flotando— y el cierre en la rotura, que por definición queda
+    fuera. La cuenta la hace el motor; aquí sólo se elige el campo.
+    """
+    if signals is None:
+        return []
+    return [
+        {
+            "x": _minute(pd.Timestamp(item.timestamp)),
+            "y": round(
+                item.signal.close
+                if item.kind is ZoneSignalKind.ROTURA_UL
+                else item.signal.touch,
+                DECIMALS,
+            ),
+            "k": item.kind.value,
+            "z": item.zone.value,
+            "id": item.id_num,
+            "d": item.direction.value,
+            "lvl": round(item.signal.level, DECIMALS),
+            "r": round(item.signal.reach, DECIMALS),
+            "c": round(item.signal.close, DECIMALS),
+            "in": item.signal.inside,
+            "n": item.signal.ordinal,
+        }
+        for item in signals.items
+    ]
 
 
 def _contacts(measurement: TimeframeLateralization | None) -> list[dict[str, Any]]:

@@ -60,6 +60,7 @@ function declare(id) {
  'prev', 'next',
  'from', 'to', 'layer-limbo', 'layer-marks', 'layer-contacts', 'layer-mid', 'layer-wrong',
  'zone-layers', 'layer-zones-ul', 'layer-zones-ob', 'layer-zones-context',
+ 'signal-layers', 'layer-signals',
  'break-layers', 'avoided-layer', 'layer-avoided', 'steps-layer', 'layer-steps',
  'blind-seed', 'blind-start', 'blind-reveal', 'blind-exit',
  'replay-group', 'replay-date', 'replay-start', 'replay-back', 'replay-step',
@@ -207,8 +208,8 @@ function snapshot(label) {
     // Las casillas que el preset mueve sin que nadie las toque: si el estado y
     // el control se separan, el explorador miente sobre lo que se está viendo.
     boxes: ['layer-limbo', 'layer-marks', 'layer-contacts', 'layer-mid', 'layer-wrong',
-      'layer-zones-ul', 'layer-zones-ob', 'layer-zones-context', 'layer-avoided',
-      'layer-steps']
+      'layer-zones-ul', 'layer-zones-ob', 'layer-zones-context', 'layer-signals',
+      'layer-avoided', 'layer-steps']
       .reduce(function (state, id) {
         state[id] = elements[id].checked === true;
         return state;
@@ -355,6 +356,14 @@ steps.push(snapshot('evitadas-por-defecto'));
 elements['layer-avoided'].fire('change', { target: { checked: false } });
 steps.push(snapshot('evitadas-apagadas'));
 elements['layer-avoided'].fire('change', { target: { checked: true } });
+
+// Señales de zona: el toque del OB y el rechazo/rotura del UL. Se encienden y se
+// apagan sobre las mismas velas; sin zonas en el payload los dos pasos salen
+// iguales, que es lo que comprueba el test de la corrida sin zonas.
+steps.push(snapshot('senales-por-defecto'));
+elements['layer-signals'].fire('change', { target: { checked: false } });
+steps.push(snapshot('senales-apagadas'));
+elements['layer-signals'].fire('change', { target: { checked: true } });
 
 // Fase 2.1 (§3.2): la escalera del extremo. Los saltos son una capa propia que se
 // apaga; los ESCALONES no, porque no son una capa sino la línea del ID dibujada
