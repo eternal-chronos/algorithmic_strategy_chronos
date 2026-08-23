@@ -150,13 +150,14 @@ El motor no ha elegido ninguno por criterio propio. El informe los imprime todos
 en cada corrida, cerrados y abiertos.
 
 **Cerrados por el propietario. Son los que definen la línea base definitiva
-(`f2f2a87f8efe`; era `8e51cd9140c8` con el detector de H1 puesto):**
+(`e27d20d0fa4e`; era `f2f2a87f8efe` con la sesión en `NY_18:00` y
+`8e51cd9140c8` con el detector de H1 puesto):**
 
 | Parámetro | Valor | Por qué |
 |---|---|---|
 | `anchor_mode` (R-02) | `A1_last_counter_body` | El ancla va en la última vela contraria previa a la pierna, nunca en la primera vela de la pierna. Lo cerró mirando sus capturas. `A2_first_leg_bar` queda para regresión |
 | `leg_start_mode` (R-36) | `L1_actual` | `L2` multiplicaba por diecisiete los extremos de color contrario y `L3` producía impulsos de rango negativo. Los tres siguen disponibles |
-| `d_session_start` y origen de H4 | `NY_18:00` | Única rejilla que reproduce sus velas. Los cuatro offsets fijos en UTC dan doce horas de apertura a lo largo del año en vez de seis |
+| `d_session_start` y origen de H4 | `NY_17:00` | Es la rejilla de **cTrader/Pepperstone**, la plataforma de ejecución en vivo, comprobada vela a vela contra el M1 (16-01-2023: su vela `02:00` en UTC-4 es 06:00-10:00 UTC). TradingView corta una hora después —`NY_18:00`, que fue la elección anterior— porque arma las velas con la sesión del símbolo y no con la hora del servidor del bróker; manda la de ejecución, porque la misma estrategia tiene que ver las mismas velas en backtest y en live. Los cuatro offsets fijos en UTC siguen descartados: dan doce horas de apertura a lo largo del año en vez de seis |
 | `structure_side` | `bid` | Hoy sólo hay M1 del lado bid descargado; pedir `ask` o `mid` falla con un error explícito en vez de inventarse el otro lado |
 
 **Abiertos todavía:**
@@ -165,12 +166,12 @@ en cada corrida, cerrados y abiertos.
 |---|---|---|
 | `seed_mode` | `S1_first_non_doji` · `S2_first_counter_bar` | Cómo arranca la máquina al principio del histórico, donde no hay pasado a la izquierda. Afecta sólo a los primeros impulsos |
 | `doji_break_mode` | `D1_doji_no_rompe` · `D2_doji_rompe_por_cierre` | §2.2 dice que el doji "no rompe nada"; §2.6 evalúa la rotura por cierre sin mirar el cuerpo. El informe cuenta cuántas barras distinguen una lectura de la otra |
-| `break_by_zone` (fase 2.1) | `false` · `true` | Si la rotura es por línea o por zona. `false` es esta línea base; `true` es la de la fase 2.1 (`00e7013d627b`) |
+| `break_by_zone` (fase 2.1) | `false` · `true` | Si la rotura es por línea o por zona. `false` es esta línea base; `true` es la de la fase 2.1 (`48138aa438f1`) |
 | `overlap_priority` (fase 2.1) | `a_favor_primero` · `en_contra_primero` | Qué lado se evalúa primero cuando una vela cumple las dos condiciones de rotura. Sobre este histórico no ocurre **ni una vez**, así que la elección es cosmética; los dos órdenes están implementados |
 
 `h4_offset_hours` sigue en el YAML pero **no pinta nada** mientras haya ancla de
 sesión: H4 arranca con la sesión y avanza de cuatro en cuatro dentro de ella
-(18/22/02/06/10/14 hora de Nueva York). Se conserva para las corridas de
+(17/21/01/05/09/13 hora de Nueva York). Se conserva para las corridas de
 regresión sobre la rejilla UTC.
 
 `seed_mode`, `doji_break_mode` y `leg_start_mode` **no estaban en el enunciado**:
@@ -181,7 +182,7 @@ parámetros en vez de resolverlos por cuenta propia.
 queda **fuera del hash de configuración**: las corridas ya archivadas siguen
 siendo comparables. `L2` y `L3` sí entran en el hash. `break_by_zone: false` se
 omite por la misma razón y con la misma consecuencia buscada —la línea base
-`f2f2a87f8efe` se conserva—, y con él se omite `overlap_priority`, que sólo puede
+`e27d20d0fa4e` se conserva—, y con él se omite `overlap_priority`, que sólo puede
 decidir algo con la regla nueva encendida.
 
 ### La línea base definitiva y lo que sustituye
@@ -195,13 +196,18 @@ de antes y después (`antes_y_despues.csv`), así que la comparación no envejec
 Las tres columnas de recuentos son D / H4 / H1: son de cuando H1 llevaba
 detector. Hoy sólo se comprueban las dos primeras.
 
-| | provisional `e2e974c7704c` | definitivo `f2f2a87f8efe` |
+| | provisional `e2e974c7704c` | definitivo `e27d20d0fa4e` |
 |---|---|---|
 | Ancla | `A2_first_leg_bar` | `A1_last_counter_body` |
-| Corte diario | `00:00` UTC | `NY_18:00` (DST real) |
-| Impulsos detectados | 477 / 2.068 / 7.416 | **401 / 1.914 / 7.231** |
-| Publicados | 469 / 2.065 / 7.409 | **392 / 1.910 / 7.224** |
-| Velas del histórico | 2.489 / 12.799 / 47.306 | 2.064 / 12.353 / 47.306 |
+| Corte diario | `00:00` UTC | `NY_17:00` (DST real) |
+| Impulsos detectados | 477 / 2.068 / 7.416 | **401 / 2.027 / 7.231** |
+| Publicados | 469 / 2.065 / 7.409 | **392 / 2.023 / 7.224** |
+| Velas del histórico | 2.489 / 12.799 / 47.306 | 2.064 / 12.366 / 47.306 |
+
+La columna definitiva traía D 401 / H4 1.914 (392 / 1.910 publicados) y 12.353
+velas H4 mientras la sesión fue `NY_18:00`. El diario no se movió al pasar a
+`NY_17:00` —el corte cae dentro de la parada diaria del oro con las dos anclas—
+y H4 sí, porque las velas son otras.
 
 En H1 las velas son las mismas —la rejilla de horas en punto no depende del
 corte— y todo lo que se mueve ahí es cosa del ancla.
@@ -231,15 +237,19 @@ temporalidad promete. Con la configuración definitiva:
 | | velas | cortas | qué son |
 |---|---|---|---|
 | Diario | 2.064 | **0** | la vela fantasma del domingo desaparece: la reapertura entra en la sesión del lunes |
-| H4 | 12.353 | 29 (0,23 %) | festivos de EE. UU. con cierre anticipado |
+| H4 | 12.366 | 15 (0,12 %) | festivos de EE. UU. con cierre anticipado |
 | H1 | 47.306 | 10 (0,02 %) | los mismos festivos |
 
-Las 29 de H4 son **siempre la vela de las 14:00 de Nueva York**, la última de la
-sesión, en días de cierre anticipado: 4 de julio, Día del Trabajo, Acción de
-Gracias y el día siguiente, Memorial Day, Presidentes, MLK y Juneteenth. Su
-reparto por año es 0 · 3 · 0 · 0 · 6 · 5 · 8 · 7 (2018→2025); antes de 2022 el
-histórico casi no las tiene porque el bróker no paraba esos días. Su papel en la
-estructura es residual: 8 anclas, 1 extremo, 6 constituciones y 1 rotura.
+Las 15 de H4 son **siempre la vela de las 13:00 de Nueva York**, la última de la
+sesión, en días de cierre anticipado: Nochebuena, Acción de Gracias y el día
+siguiente, 4 de julio, Día del Trabajo, Presidentes y MLK. Su reparto por año es
+4 · 4 · 2 · 1 · 1 · 1 · 1 · 1 (2018→2025).
+
+Con la rejilla anterior (`NY_18:00`) eran 29 sobre 12.353 velas, y caían en la
+vela de las 14:00: aquella vela terminaba en la parada diaria de las 17:00 y por
+eso cualquier cierre anticipado la dejaba corta. Con el corte en las 17:00 la
+última vela de la sesión es 13:00-17:00, que es horario de mercado completo, y
+sólo la recortan los festivos de verdad.
 
 Con el corte anterior en `00:00` el histórico tenía 2.489 velas diarias —5,95 por
 semana— y **425 de ellas eran cortas**, 413 domingos, con 106 anclas, 43 extremos,
@@ -254,22 +264,33 @@ detector con cada corte para poder compararlos:
 | 21:00 | 2.204 | 5,27 | 139 | 424 | 35,8 | 60 |
 | 22:00 | 2.064 | 4,94 | 0 | 392 | 36,0 | 55 |
 | 23:00 | 2.336 | 5,59 | 272 | 410 | 33,9 | 52 |
-| `NY_17:00` | 2.064 | 4,94 | 0 | 392 | 36,0 | 55 |
-| **`NY_18:00`** ← elegido | 2.064 | 4,94 | 0 | 392 | 36,0 | 55 |
+| **`NY_17:00`** ← elegido | 2.064 | 4,94 | 0 | 392 | 36,0 | 55 |
+| `NY_18:00` | 2.064 | 4,94 | 0 | 392 | 36,0 | 55 |
 
 El motor **no recomendó ninguno**: la salida incluye el OHLC a cuatro decimales
-de las velas en discusión, y el propietario eligió cotejándolo contra su
-TradingView.
+de las velas en discusión, y la elección se hizo cotejándolo contra la
+plataforma. En el diario los dos cortes son indistinguibles —la tabla lo
+enseña—, así que quien decide es H4: `NY_17:00` es la rejilla de cTrader, que es
+donde se ejecuta.
 
 ### Cortes anclados a la sesión de una plaza
 
 `d_session_start` admite dos formas: `HH:MM`, una hora fija en UTC, y
 `PLAZA_HH:MM`, la hora local de una plaza resuelta con su horario de verano real.
-Hoy la única plaza es `NY` (`America/New_York`), y `NY_17:00` / `NY_18:00`
-reproducen la hipótesis del propietario sobre su TradingView. Con el ancla, el
-corte se mueve solo dos veces al año —las 18:00 de Nueva York son las 23:00 UTC
-en invierno y las 22:00 en verano— y H4 deja de mirar `h4_offset_hours` para
-arrancar con la sesión.
+Hoy la única plaza es `NY` (`America/New_York`): `NY_17:00` es la rejilla de
+cTrader/Pepperstone —la de ejecución— y `NY_18:00` la de TradingView. Con el
+ancla, el corte se mueve solo dos veces al año —las 17:00 de Nueva York son las
+22:00 UTC en invierno y las 21:00 en verano— y H4 deja de mirar
+`h4_offset_hours` para arrancar con la sesión.
+
+**El horario de verano es el de EE. UU.**, comprobado dentro de la ventana en
+que los dos cambios de hora no coinciden (15-03-2023: EE. UU. ya cambió el 12,
+Europa cambia el 26). La vela `05:00` de cTrader en UTC−4 —09:00-13:00 UTC— da
+O 1887.51 / H 1930.22 / L 1886.65 / C 1927.77, contra 1887.43 / 1930.09 /
+1886.53 / 1927.71 del M1; la de las `06:00`, que sería la medianoche del
+servidor europeo, habría abierto nueve dólares más arriba. Concuerda con la
+apertura semanal del propio histórico, que se mueve en las fechas de EE. UU.
+(2023: 12-mar y 5-nov).
 
 El corte no se calcula restando horas en UTC sino comparando el reloj de la
 plaza. La diferencia importa dos días al año: en marzo la sesión dura 23 horas y
@@ -288,7 +309,7 @@ las fronteras caen dentro del horario de mercado.
 ## Lo que se mide y no se usa
 
 Dos bloques que **no tocan la detección**: la tabla de impulsos sale idéntica con
-ellos dentro que fuera, y la línea base D 401 / H4 1.914 / H1 7.231 sigue en pie.
+ellos dentro que fuera, y la línea base D 401 / H4 2.027 / H1 7.231 sigue en pie.
 
 ### Contactos con los límites del ID
 
@@ -534,7 +555,11 @@ autoescalan al tramo que estás auditando, así que un mes de 2018 se ve con el
 mismo detalle que un mes de 2025 aunque el oro haya triplicado su precio.
 
 Al pasar el ratón por cualquier punto salen los valores a cuatro decimales, la
-hora en UTC y la hora en la zona de tu sesión. Sobre el rombo de constitución
+hora en UTC y la hora en la zona de tu sesión (`reporting.session_timezone`,
+hoy `Etc/GMT+4`, que se escribe `UTC-4`: es el reloj fijo con el que dibuja
+cTrader, para poder leer el explorador y la plataforma sin traducir. TradingView
+y FXReplay usan Nueva York con horario de verano y en invierno van una hora por
+detrás de esa etiqueta; la vela es la misma). Sobre el rombo de constitución
 salen además el ancla, el extremo, **las dos candidaturas A1 y A2**, el tamaño
 del cuerpo de la vela contraria que creó el impulso y cuántas barras duró el
 limbo previo. Ese rombo es el sitio donde comprobar si una vela minúscula está
@@ -543,6 +568,11 @@ creando impulsos que tu ojo no marcaría.
 ## Lo que dicen los números (2018-2025, bid, sesión NY_18:00, hash `8e51cd9140c8`, con detector en H1)
 
 Ninguna de estas cifras es una recomendación. Son las que hay.
+
+**Tabla archivada.** Es la corrida de la sesión `NY_18:00` con detector en H1.
+La rejilla en uso es hoy `NY_17:00` (`e27d20d0fa4e`), con D 401 / H4 2.027
+detectados y 392 / 2.023 publicados; el resto de las filas se vuelven a medir en
+cada corrida y salen en `reports/`.
 
 | | Diario | H4 | H1 |
 |---|---|---|---|

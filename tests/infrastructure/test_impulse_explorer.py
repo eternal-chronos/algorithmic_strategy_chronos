@@ -48,6 +48,7 @@ from chronos.infrastructure.reporting.impulse_explorer import (
     render_explorer,
 )
 from chronos.infrastructure.structure.aggregation import aggregate_all
+from chronos.infrastructure.reporting.timezones import session_label
 from tests.conftest import make_m1_history
 
 
@@ -406,11 +407,29 @@ def test_el_detalle_muestra_utc_y_la_zona_de_la_sesion(
 ) -> None:
     detalle = _step(_draw(run, tmp_path), "todo")["plot"]["hover"]
     assert "UTC" in detalle
-    assert run.config.reporting.session_timezone in detalle
+    assert session_label(run.config.reporting.session_timezone) in detalle
     assert re.search(r"O \d+\.\d{4} · H \d+\.\d{4}", detalle)
 
 
 # --- Navegación por fechas ---------------------------------------------------
+@pytest.mark.parametrize(
+    ("timezone", "escrito"),
+    [("Etc/GMT+4", "UTC-4"), ("Etc/GMT-3", "UTC+3"), ("America/New_York", "America/New_York")],
+)
+def test_la_zona_de_desfase_fijo_se_escribe_con_su_signo(
+    run: ImpulseRun, timezone: str, escrito: str
+) -> None:
+    """`Etc/GMT+4` ES el UTC-4: el nombre IANA lleva el signo al revés y al lado
+    de una hora se leería justo como lo contrario. Las plazas van tal cual."""
+    reporting = replace(run.config.reporting, session_timezone=timezone)
+    otra = replace(run, config=replace(run.config, reporting=reporting))
+
+    meta = build_payload(otra)["meta"]
+
+    assert meta["sessionTimezone"] == timezone
+    assert meta["sessionTimezoneLabel"] == escrito
+
+
 
 
 def test_el_preset_recorta_la_ventana(run: ImpulseRun, tmp_path: Path) -> None:
@@ -1001,7 +1020,12 @@ def test_cambiar_de_temporalidad_no_mueve_el_reloj(run: ImpulseRun, tmp_path: Pa
     reloj = _clock(payload, origen)
     cierre = _clock(payload, destino)
     assert cierre <= reloj
-    assert cierre + payload["spans"][DAILY] > reloj, "la vela diaria siguiente aún no cerró"
+    # El histórico tiene hueco de fin de semana, así que la vela diaria de
+    # después puede empezar mucho más tarde que el cierre de ésta. Lo que se
+    # comprueba es que no haya ninguna posterior que ya hubiera cerrado.
+    span = payload["spans"][DAILY]
+    posteriores = [t for t in payload["bars"][DAILY]["t"] if cierre < t + span <= reloj]
+    assert not posteriores, "hay una vela diaria posterior que ya había cerrado"
 
 
 def test_durante_el_replay_los_controles_de_periodo_se_apagan(

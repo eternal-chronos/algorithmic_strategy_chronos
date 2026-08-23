@@ -48,9 +48,10 @@ class StructureDataSchema(_Strict):
 
 class AggregationSchema(_Strict):
     h4_offset_hours: int = Field(default=0, ge=0, le=23)
-    #: Decidido por el propietario. Ancla también el origen de H4: con un ancla de
-    #: sesión, `h4_offset_hours` no pinta nada.
-    d_session_start: str = "NY_18:00"
+    #: Decidido: la rejilla de cTrader/Pepperstone, donde se opera en vivo. Ancla
+    #: también el origen de H4: con un ancla de sesión, `h4_offset_hours` no pinta
+    #: nada.
+    d_session_start: str = "NY_17:00"
 
     def to_domain(self) -> AggregationConfig:
         return AggregationConfig(**self.model_dump())
@@ -104,7 +105,7 @@ class TimezoneAuditSchema(_Strict):
 
 class StructureReportingSchema(_Strict):
     output_dir: str = "reports"
-    session_timezone: str = "Europe/Athens"
+    session_timezone: str = "Etc/GMT+4"
     text_report: bool = True
     explorer_html: bool = True
     captures: bool = True

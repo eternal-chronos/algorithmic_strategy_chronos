@@ -74,9 +74,10 @@ Antes de pasar a la fase 2 hacen falta dos cosas del propietario:
 
 ### Cierre de la fase 1 — lo que ha salido de medirla
 
-**Línea base definitiva: `8e51cd9140c8` · D 401 / H4 1.914 / H1 7.231 impulsos**
-(A1 + L1 + sesión `NY_18:00` + bid). Sustituye a las anteriores: `4c299bcf2fba`
-con 477 / 2.068 / 7.416 (ancla A2 y día natural en UTC, con las velas fantasma
+**Línea base definitiva: `e27d20d0fa4e` · D 401 / H4 2.027 impulsos**
+(A1 + L1 + sesión `NY_17:00` + bid; era `f2f2a87f8efe` · D 401 / H4 1.914 con la
+sesión en `NY_18:00`, y `8e51cd9140c8` cuando H1 llevaba detector). Sustituye
+también a las anteriores: `4c299bcf2fba` con 477 / 2.068 / 7.416 (ancla A2 y día natural en UTC, con las velas fantasma
 del domingo dentro) y `368ad3617bd9` con 462 / 2.038 / 7.231 (ya con A1). Cada
 corrida publica la tabla de antes y después con las dos columnas calculadas en
 el momento, no copiadas.
@@ -91,9 +92,14 @@ Tres cosas cambian lo que había que dar por supuesto:
 - **R-02 cerrado: `A1_last_counter_body`.** No era cosmético: el ancla es uno de
   los dos niveles que rompen el ID, así que moverla adelanta o retrasa roturas
   en contra y cambia el recuento. A1 produce siempre menos impulsos.
-- **La rejilla cerrada: `NY_18:00`, para el diario y para H4.** Es la única que
-  reproduce las velas del propietario; los cuatro offsets fijos en UTC dan doce
-  horas de apertura a lo largo del año en vez de seis. Se lleva por delante las
+- **La rejilla cerrada: `NY_17:00`, para el diario y para H4.** Es la de
+  cTrader/Pepperstone, la plataforma de ejecución en vivo, comprobada vela a vela
+  contra el M1. TradingView corta una hora después (`NY_18:00`, la elección
+  anterior) porque arma las velas con la sesión del símbolo y no con la hora del
+  servidor del bróker; manda la de ejecución, porque la estrategia tiene que ver
+  las mismas velas en backtest y en live. En el diario los dos cortes son
+  indistinguibles; en H4 no. Los cuatro offsets fijos en UTC dan doce horas de
+  apertura a lo largo del año en vez de seis. Se lleva por delante las
   425 velas diarias fantasma del domingo: con el corte anclado, el diario no
   tiene ni una vela corta.
 - **Los ID enanos no son un síntoma de lateralización.** De los que tienen rango
@@ -121,7 +127,7 @@ completo —reglas, casos límite, garantía anti-lookahead y procedimiento— e
 [`MODULO_2_ZONAS.md`](MODULO_2_ZONAS.md).
 
 La línea base de la fase 1 se conserva intacta y verificada: mismo hash
-`f2f2a87f8efe` y mismos 401 / 1.914 impulsos con las zonas encendidas y
+`e27d20d0fa4e` y mismos 401 / 2.027 impulsos con las zonas encendidas y
 apagadas. Encenderlas no puede mover un impulso, y el comando lo comprueba antes
 de escribir nada.
 
@@ -184,8 +190,8 @@ La línea del extremo sigue yendo en escalera —eso no ha cambiado— y por eso
 partir de la primera extensión ya no coincide con el borde interior del UL.
 
 **Regresión verificada:** con `break_by_zone: false` el sistema reproduce
-`f2f2a87f8efe` con D 401 / H4 1.914 detectados y 392 / 1.910 publicados. **Línea
-base nueva: `00e7013d627b` · D 251 / H4 1.184 detectados y 245 / 1.181
+`e27d20d0fa4e` con D 401 / H4 2.027 detectados y 392 / 2.023 publicados. **Línea
+base nueva: `48138aa438f1` · D 251 / H4 1.268 detectados y 245 / 1.264
 publicados.**
 
 ⚠️ **Las cifras de abajo son de antes del ajuste del UL** —se midieron con la zona
@@ -220,7 +226,7 @@ Lo que salió de medirla (D / H4 / H1, totales de 2018–2025):
   cumple siempre `borde exterior del UL >= extremo > ancla >= borde exterior del
   OB` mientras el rango sea positivo, y con la regla nueva no queda ningún impulso
   de rango no positivo. Los dos órdenes quedan implementados y producen la misma
-  historia (hashes `00e7013d627b` y `d54dd285c451`).
+  historia (hashes `48138aa438f1` y `f51fb871d50a`).
 - **R-36 sigue abierto y cambia de puerta.** Extremos sobre vela de color contrario:
   4 → 3, 39 → 17, 146 → 22. Los que quedan ya no entran sólo por el arranque de la
   pierna: 3 / 4 / 9 de ellos entran por la vela que **extendió** el extremo con el

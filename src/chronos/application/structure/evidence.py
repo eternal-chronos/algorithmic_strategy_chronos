@@ -32,20 +32,25 @@ from chronos.domain.structure.synthetic_day import (
 )
 
 #: Línea base DEFINITIVA de la fase 1: ancla A1, arranque de pierna L1 y sesión
-#: anclada a las 18:00 de Nueva York. Cualquier cambio que la mueva es una
-#: regresión. Son impulsos **detectados**, publicados o no.
+#: anclada a las 17:00 de Nueva York —la rejilla de cTrader/Pepperstone, que es
+#: donde se ejecuta en vivo—. Cualquier cambio que la mueva es una regresión.
+#: Son impulsos **detectados**, publicados o no.
+#:
+#: Venía de `NY_18:00` (rejilla de TradingView) con D 401 / H4 1.914: el diario
+#: no se mueve —el corte cae en la parada diaria del oro con las dos anclas—
+#: pero H4 sí, porque las velas son otras.
 #:
 #: **Sólo el Diario y H4.** H1 dejó de llevar detector: los 7.231 impulsos de H1
 #: que traía esta línea base quedan archivados y ya no se comprueban. Los dos
-#: recuentos que quedan no se han movido ni un impulso, que es justo lo que
-#: garantiza la independencia entre temporalidades de G.5.
-PHASE1_BASELINE: dict[str, int] = {"D": 401, "H4": 1914}
+#: recuentos que quedan no se movieron ni un impulso al quitarlo, que es justo lo
+#: que garantiza la independencia entre temporalidades de G.5.
+PHASE1_BASELINE: dict[str, int] = {"D": 401, "H4": 2027}
 
 #: Hash de la configuración que produce esa línea base. Va en el mismo sitio que
 #: los recuentos: un recuento correcto con otra configuración no es la línea base.
-#: Era `8e51cd9140c8` cuando H1 llevaba detector: las temporalidades detectadas
-#: entran en el hash, así que quitar el ID de H1 lo mueve sin mover un impulso.
-BASELINE_HASH = "f2f2a87f8efe"
+#: Era `8e51cd9140c8` cuando H1 llevaba detector y `f2f2a87f8efe` con la sesión
+#: anclada a las 18:00 de Nueva York.
+BASELINE_HASH = "e27d20d0fa4e"
 
 #: Línea base anterior, con el ancla A2 y el corte diario en 00:00 UTC. Queda
 #: escrita para que quien lea un informe archivado sepa a qué corrida pertenece;

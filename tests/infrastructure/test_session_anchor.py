@@ -1,9 +1,10 @@
 """Corte diario anclado a la sesión de una plaza, con horario de verano real.
 
-La hipótesis del propietario es que su gráfico no corta a una hora fija de UTC
-sino cuando abre Nueva York. Si eso es cierto, el corte tiene que moverse solo
-dos veces al año, y eso es justo lo que se fija aquí: 17:00 de Nueva York son las
-22:00 UTC en invierno y las 21:00 en verano; las 18:00 son las 23:00 y las 22:00.
+El gráfico no corta a una hora fija de UTC sino cuando abre Nueva York, así que
+el corte se mueve solo dos veces al año. Eso es lo que se fija aquí: 17:00 de
+Nueva York son las 22:00 UTC en invierno y las 21:00 en verano; las 18:00 son
+las 23:00 y las 22:00. La rejilla en uso es la de las 17:00, que es la de
+cTrader/Pepperstone —donde se ejecuta— y no la de TradingView.
 """
 
 from __future__ import annotations
@@ -130,18 +131,24 @@ def test_h4_arranca_con_la_sesion_y_avanza_de_cuatro_en_cuatro() -> None:
     assert len(cuatro) == len(diario) * 6
 
 
-#: Rejilla H4 que el propietario ve en su TradingView (Pepperstone, zona América
-#: /Nueva York). La confirmó él mirando su pantalla; aquí sólo se fija.
-OWNER_H4_GRID = {22, 2, 6, 10, 14, 18}
+#: Rejilla H4 de **cTrader / Pepperstone**, la plataforma con la que se opera en
+#: vivo. Comprobada vela a vela contra el M1 de Dukascopy: la vela `02:00` del
+#: 16-01-2023 en UTC-4 es 06:00-10:00 UTC, o sea las 01:00 de Nueva York.
+CTRADER_H4_GRID = {17, 21, 1, 5, 9, 13}
+
+#: La de TradingView, que corta una hora después porque arma las velas con la
+#: sesión del símbolo y no con la hora del servidor del broker. Se deja escrita
+#: para que se vea que la diferencia es esa y no otra.
+TRADINGVIEW_H4_GRID = {18, 22, 2, 6, 10, 14}
 
 
 @pytest.mark.parametrize(
-    ("session", "matches"), [("NY_18:00", True), ("NY_17:00", False)]
+    ("session", "matches"), [("NY_17:00", True), ("NY_18:00", False)]
 )
-def test_solo_el_ancla_de_las_18_reproduce_la_rejilla_del_propietario(
+def test_solo_el_ancla_de_las_17_reproduce_la_rejilla_de_ctrader(
     session: str, matches: bool
 ) -> None:
-    """Las velas H4 del propietario abren a las 22, 02, 06, 10, 14 y 18 de Nueva York.
+    """Las velas H4 de cTrader abren a las 17, 21, 01, 05, 09 y 13 de Nueva York.
 
     Se comprueba en invierno y en verano a la vez: una rejilla fija en UTC puede
     acertar media year y fallar la otra, y eso es justo lo que hay que descartar.
@@ -153,11 +160,12 @@ def test_solo_el_ancla_de_las_18_reproduce_la_rejilla_del_propietario(
 
     hours = set(labels_of(cuatro).tz_convert("America/New_York").hour)
 
-    assert (hours == OWNER_H4_GRID) is matches
+    assert (hours == CTRADER_H4_GRID) is matches
+    assert (hours == TRADINGVIEW_H4_GRID) is not matches
 
 
 @pytest.mark.parametrize("offset", [0, 1, 2, 3])
-def test_ninguna_rejilla_fija_en_utc_reproduce_la_del_propietario(offset: int) -> None:
+def test_ninguna_rejilla_fija_en_utc_reproduce_la_de_ctrader(offset: int) -> None:
     """Un offset fijo se desplaza una hora al cambiar la hora: nunca son seis horas."""
     frame = pd.concat(
         [m1("2025-01-10", "2025-01-20"), m1("2025-07-10", "2025-07-20")]
@@ -168,7 +176,7 @@ def test_ninguna_rejilla_fija_en_utc_reproduce_la_del_propietario(offset: int) -
 
     hours = set(labels_of(cuatro).tz_convert("America/New_York").hour)
 
-    assert hours != OWNER_H4_GRID
+    assert hours != CTRADER_H4_GRID
     assert len(hours) == 12  # seis en invierno y otras seis en verano
 
 

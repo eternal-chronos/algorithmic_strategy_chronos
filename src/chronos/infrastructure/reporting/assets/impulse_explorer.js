@@ -35,6 +35,8 @@
   var COLORS = DATA.colors;
   var DECIMALS = DATA.meta.decimals;
   var SESSION_TZ = DATA.meta.sessionTimezone;
+  // El nombre con el que se escribe: `Etc/GMT+4` es el UTC-4 y se lee al revés.
+  var SESSION_TZ_LABEL = DATA.meta.sessionTimezoneLabel || SESSION_TZ;
   var DAY = 1440;
 
   var VISIBLE_MODES = [
@@ -199,7 +201,7 @@
 
   function stamp(minute) {
     return iso(minute).slice(0, 16) + " UTC · " +
-      sessionFormat.format(toDate(minute)).replace(",", "") + " " + SESSION_TZ;
+      sessionFormat.format(toDate(minute)).replace(",", "") + " " + SESSION_TZ_LABEL;
   }
 
   function price(value) { return value.toFixed(DECIMALS); }

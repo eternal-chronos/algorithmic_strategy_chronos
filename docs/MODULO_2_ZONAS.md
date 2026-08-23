@@ -19,8 +19,8 @@ cambiado: la fase 2.1 no toca cómo se detecta una zona, sólo qué se hace con 
 - No genera señales, entradas, stops ni targets.
 - No optimiza ni busca parámetros.
 
-**Línea base preservada y verificada:** `config_hash = f2f2a87f8efe`,
-D 401 / H4 1.914 detectados, 392 / 1.910 publicados. Con las
+**Línea base preservada y verificada:** `config_hash = e27d20d0fa4e`,
+D 401 / H4 2.027 detectados, 392 / 2.023 publicados. Con las
 zonas encendidas salen exactamente los mismos números y el mismo hash; con
 `zones.enabled: false` la fase 1 sale además byte a byte —tabla, eventos, estado
 por barra y diagnósticos—. Los dos casos tienen test.

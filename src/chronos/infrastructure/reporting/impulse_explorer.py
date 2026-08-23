@@ -45,6 +45,7 @@ ASSETS = Path(__file__).parent / "assets"
 _MARKER = re.compile(r"__[A-Z][A-Z_]*__")
 
 #: §5.3 fija los colores: verde alcista, rojo bajista. Se toman de la paleta del
+from chronos.infrastructure.reporting.timezones import session_label
 #: proyecto para no introducir hexadecimales sueltos.
 BULLISH = theme.SERIES[2]
 BEARISH = theme.NEGATIVE
@@ -156,6 +157,7 @@ def build_payload(
             "dSessionStart": run.config.aggregation.d_session_start,
             "decimals": DECIMALS,
         },
+            "sessionTimezoneLabel": session_label(run.config.reporting.session_timezone),
         "colors": {
             "bullish": BULLISH,
             "bearish": BEARISH,

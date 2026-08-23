@@ -4,7 +4,7 @@ Dos cosas se fijan aquí y las dos son obligatorias.
 
 La primera es la **regresión** que exige el §3 del enunciado: con
 `BREAK_BY_ZONE = false` el sistema tiene que producir exactamente
-`config_hash = f2f2a87f8efe`, D 401 / H4 1.914 detectados y 392 / 1.910
+`config_hash = e27d20d0fa4e`, D 401 / H4 2.027 detectados y 392 / 2.023
 publicados. Si no sale idéntico hay un bug en la refactorización y no un
 resultado.
 
@@ -33,20 +33,20 @@ from chronos.infrastructure.config.loader import load_impulse_config
 CONFIG = Path("config/impulse.yaml")
 
 #: Hash de la configuración con la rotura por zona y el orden `a_favor_primero`.
-PHASE21_HASH = "00e7013d627b"
+PHASE21_HASH = "48138aa438f1"
 
 #: El mismo con `en_contra_primero`. Produce la misma historia sobre este
 #: histórico —el conflicto de solape no se da ni una vez— pero el hash cambia
 #: igualmente: identifica los parámetros, no el resultado.
-PHASE21_HASH_EN_CONTRA = "d54dd285c451"
+PHASE21_HASH_EN_CONTRA = "f51fb871d50a"
 
 #: Impulsos **totales** (publicados o no) de la corrida con la regla nueva. Se
 #: movieron al congelar el UL: con la zona quieta el borde exterior a favor deja
 #: de alejarse en cada rechazo, así que los ID mueren antes por ese lado.
-PHASE21_BASELINE = {"D": 251, "H4": 1184}
+PHASE21_BASELINE = {"D": 251, "H4": 1268}
 
 #: Los que salen del calentamiento y llegan a los informes y a las capturas.
-PHASE21_PUBLISHED = {"D": 245, "H4": 1181}
+PHASE21_PUBLISHED = {"D": 245, "H4": 1264}
 
 
 @pytest.fixture(scope="module")
