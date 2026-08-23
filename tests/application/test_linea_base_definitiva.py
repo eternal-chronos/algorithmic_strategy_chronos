@@ -2,13 +2,20 @@
 
 Todos los parámetros que el propietario tenía que cerrar están cerrados: ancla
 `A1_last_counter_body`, arranque de pierna `L1_actual`, sesión anclada a las
-18:00 de Nueva York —para el diario y para H4— y lado `bid`. Este fichero fija
+17:00 de Nueva York —para el diario y para H4— y lado `bid`. Este fichero fija
 el recuento de impulsos y el `config_hash` de esa corrida para que cualquier
 cambio futuro que los mueva salte de inmediato.
 
+La sesión pasó de `NY_18:00` a `NY_17:00` al comprobar que la rejilla H4 de
+cTrader/Pepperstone —la plataforma de ejecución en vivo— corta una hora antes
+que la de TradingView. La misma estrategia tiene que ver las mismas velas en
+backtest y en live, así que manda la de ejecución. El diario no se movió (401 /
+392); H4 pasó de 1.914 / 1.910 a 2.027 / 2.023, y el hash de `f2f2a87f8efe` a
+`e27d20d0fa4e`.
+
 El ID vive sólo en el Diario y en H4: H1 dejó de llevar detector y sus 7.231
-impulsos ya no se comprueban. Los recuentos de D y de H4 no se han movido —cada
-temporalidad se detecta por su cuenta— pero el `config_hash` sí, porque las
+impulsos ya no se comprueban. Al quitarlo, los recuentos de D y de H4 no se
+movieron —cada temporalidad se detecta por su cuenta— pero el `config_hash` sí, porque las
 temporalidades detectadas entran en él.
 
 Las cifras anteriores quedan archivadas como provisionales y no se comprueban:
@@ -39,10 +46,11 @@ CONFIG = Path("config/impulse.yaml")
 BASELINE_IMPULSES = PHASE1_BASELINE
 
 #: Los que salen del calentamiento y llegan a los informes y a las capturas.
-BASELINE_PUBLISHED = {"D": 392, "H4": 1910}
+BASELINE_PUBLISHED = {"D": 392, "H4": 2023}
 
-#: La rejilla que produce esas velas. Sale del propietario, no del motor.
-BASELINE_SESSION_START = "NY_18:00"
+#: La rejilla que produce esas velas: la de cTrader/Pepperstone, comprobada
+#: vela a vela contra el M1 (16-01-2023, 06:00-10:00 UTC).
+BASELINE_SESSION_START = "NY_17:00"
 
 
 @pytest.fixture(scope="module")

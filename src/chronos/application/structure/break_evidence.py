@@ -495,7 +495,7 @@ def _regression(config: ImpulseConfig, series: Mapping[str, pd.DataFrame]) -> Ch
 #: Los publicados de la línea base, que el §3 exige comprobar al lado de los
 #: detectados. Viven aquí y no en `evidence.py` porque es la fase 2.1 la que los
 #: pide; el test de la línea base fija los mismos números.
-PHASE1_BASELINE_PUBLISHED: dict[str, int] = {"D": 392, "H4": 1910}
+PHASE1_BASELINE_PUBLISHED: dict[str, int] = {"D": 392, "H4": 2023}
 
 
 def _count(detector: DominantImpulseDetector) -> str:

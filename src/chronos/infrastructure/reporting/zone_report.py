@@ -121,7 +121,7 @@ def _header(run: ImpulseRun, zones: ZonesRun, generated_at: datetime) -> str:
         f"{counts}\n\n"
         "El `config_hash` es el mismo de la fase 1 y eso es deliberado: las zonas no\n"
         "mueven ni una vela ni un impulso, así que no entran en él. La línea base\n"
-        "f2f2a87f8efe — D 401 / H4 1.914 detectados — se conserva con las\n"
+        "e27d20d0fa4e — D 401 / H4 2.027 detectados — se conserva con las\n"
         "zonas puestas, y hay un test de regresión que lo comprueba en los dos casos.\n"
     )
 

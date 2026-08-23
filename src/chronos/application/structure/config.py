@@ -190,8 +190,9 @@ class AggregationConfig:
     #:   `HH:MM`      -> hora fija en UTC (`"00:00"`, `"22:00"`);
     #:   `PLAZA_HH:MM`-> hora local de una plaza con horario de verano real
     #:                   (`"NY_17:00"`, `"NY_18:00"`).
-    #: Decidido por el propietario: `NY_18:00`, que es además el origen de H4.
-    d_session_start: str = "NY_18:00"
+    #: Decidido: `NY_17:00`, que es además el origen de H4. Es la rejilla de
+    #: cTrader/Pepperstone, la plataforma con la que se opera en vivo.
+    d_session_start: str = "NY_17:00"
 
     def __post_init__(self) -> None:
         if not 0 <= self.h4_offset_hours <= 23:
@@ -325,7 +326,7 @@ class TimezoneAuditConfig:
 class StructureReportingConfig:
     output_dir: str = "reports"
     #: Zona horaria de la sesión del propietario; el explorador imprime ambas.
-    session_timezone: str = "Europe/Athens"
+    session_timezone: str = "Etc/GMT+4"
     text_report: bool = True
     explorer_html: bool = True
     #: Capturas PNG de F.4. Cuestan un par de minutos: se apagan para iterar.
@@ -365,7 +366,7 @@ class ImpulseConfig:
 
         Las zonas de la fase 2.0 tampoco entran, por la misma razón y con la
         misma consecuencia buscada: encenderlas no mueve un solo impulso, así
-        que la línea base `f2f2a87f8efe` se conserva con las zonas puestas y las
+        que la línea base `e27d20d0fa4e` se conserva con las zonas puestas y las
         corridas de la fase 1 siguen siendo comparables con las de ahora.
         """
         rules = asdict(self.rules)
@@ -378,7 +379,7 @@ class ImpulseConfig:
         # Fase 2.1, mismo criterio y por la misma razón. `break_by_zone: false`
         # reproduce barra por barra lo que hacía el módulo antes de que el
         # parámetro existiera, así que se omite del hash y la línea base
-        # `f2f2a87f8efe` se conserva. Con `true` el resultado cambia, entra en el
+        # `e27d20d0fa4e` se conserva. Con `true` el resultado cambia, entra en el
         # hash —y con él el orden de solape, que sólo decide algo ahí— y produce
         # uno distinto: ninguna salida de la regla nueva puede confundirse con la
         # de la vieja.

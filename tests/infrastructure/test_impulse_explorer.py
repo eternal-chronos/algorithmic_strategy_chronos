@@ -39,6 +39,7 @@ from chronos.application.structure.detect_impulses import DetectDominantImpulses
 from chronos.application.structure.lateralization import measure
 from chronos.application.structure.zones import ZonesRun, detect_zones
 from chronos.domain.structure.enums import LegStartMode
+from chronos.domain.structure.zone_signals import ZoneSignalKind
 from chronos.infrastructure.reporting.impulse_explorer import (
     ASSETS,
     ModeVariant,
@@ -47,6 +48,7 @@ from chronos.infrastructure.reporting.impulse_explorer import (
     payload_size,
     render_explorer,
 )
+from chronos.infrastructure.reporting.timezones import session_label
 from chronos.infrastructure.structure.aggregation import aggregate_all
 from tests.conftest import make_m1_history
 
@@ -406,8 +408,26 @@ def test_el_detalle_muestra_utc_y_la_zona_de_la_sesion(
 ) -> None:
     detalle = _step(_draw(run, tmp_path), "todo")["plot"]["hover"]
     assert "UTC" in detalle
-    assert run.config.reporting.session_timezone in detalle
+    assert session_label(run.config.reporting.session_timezone) in detalle
     assert re.search(r"O \d+\.\d{4} · H \d+\.\d{4}", detalle)
+
+
+@pytest.mark.parametrize(
+    ("timezone", "escrito"),
+    [("Etc/GMT+4", "UTC-4"), ("Etc/GMT-3", "UTC+3"), ("America/New_York", "America/New_York")],
+)
+def test_la_zona_de_desfase_fijo_se_escribe_con_su_signo(
+    run: ImpulseRun, timezone: str, escrito: str
+) -> None:
+    """`Etc/GMT+4` ES el UTC-4: el nombre IANA lleva el signo al revés y al lado
+    de una hora se leería justo como lo contrario. Las plazas van tal cual."""
+    reporting = replace(run.config.reporting, session_timezone=timezone)
+    otra = replace(run, config=replace(run.config, reporting=reporting))
+
+    meta = build_payload(otra)["meta"]
+
+    assert meta["sessionTimezone"] == timezone
+    assert meta["sessionTimezoneLabel"] == escrito
 
 
 # --- Navegación por fechas ---------------------------------------------------
@@ -1001,7 +1021,12 @@ def test_cambiar_de_temporalidad_no_mueve_el_reloj(run: ImpulseRun, tmp_path: Pa
     reloj = _clock(payload, origen)
     cierre = _clock(payload, destino)
     assert cierre <= reloj
-    assert cierre + payload["spans"][DAILY] > reloj, "la vela diaria siguiente aún no cerró"
+    # El histórico tiene hueco de fin de semana, así que la vela diaria de
+    # después puede empezar mucho más tarde que el cierre de ésta. Lo que se
+    # comprueba es que no haya ninguna posterior que ya hubiera cerrado.
+    span = payload["spans"][DAILY]
+    posteriores = [t for t in payload["bars"][DAILY]["t"] if cierre < t + span <= reloj]
+    assert not posteriores, "hay una vela diaria posterior que ya había cerrado"
 
 
 def test_durante_el_replay_los_controles_de_periodo_se_apagan(
@@ -1831,3 +1856,140 @@ def test_las_zonas_del_contexto_se_apagan_solas(
     assert _step(resultado, "ruido-de-salida")["boxes"]["layer-zones-context"] is False
     for casilla in ("layer-zones-ul", "layer-zones-ob"):
         assert _step(resultado, "ruido-de-salida")["boxes"][casilla] is True, casilla
+
+
+# --- Señales de zona · toque del OB, rechazo y rotura del UL -----------------
+#
+# Son DIBUJO: se calculan sobre las zonas de la fase 2.0 y no abren ni cierran
+# nada. Lo que se comprueba aquí es que viajan enteras, que se pueden apagar y
+# que el explorador dice cuántas hay y qué son.
+
+SIGNAL_KINDS = tuple(kind.value for kind in ZoneSignalKind)
+
+
+def _senales(step: dict) -> list[str]:
+    return [
+        nombre for nombre in _trace_names(step) if nombre.split(" ")[0] in SIGNAL_KINDS
+    ]
+
+
+def test_sin_zonas_el_payload_no_declara_senales(run: ImpulseRun) -> None:
+    """Sin zonas no hay señales: la casilla ni se enseña."""
+    payload = build_payload(run)
+
+    assert payload["hasSignals"] is False
+    assert payload["impulses"][H4]["signals"] == []
+
+
+def test_cada_senal_viaja_con_lo_que_hace_falta_para_juzgarla(
+    run: ImpulseRun, zones: ZonesRun
+) -> None:
+    """El globo tiene que poder leerse sin abrir ningún CSV."""
+    payload = build_payload(run, zones=zones)
+    registros = payload["impulses"][H4]["signals"]
+
+    assert payload["hasSignals"] is True
+    assert registros
+    for registro in registros:
+        assert registro["k"] in SIGNAL_KINDS
+        assert registro["z"] == ("OB" if registro["k"] == "TOQUE_OB" else "UL")
+        assert registro["d"] in ("alcista", "bajista")
+        assert registro["n"] >= 1
+        assert isinstance(registro["in"], bool)
+        # El marcador se planta en el contacto salvo en la rotura, donde el
+        # cierre ya está fuera de la zona y es lo que hay que enseñar.
+        if registro["k"] == "ROTURA_UL":
+            assert registro["y"] == registro["c"]
+
+
+def test_las_senales_son_de_los_id_de_su_temporalidad(
+    run: ImpulseRun, zones: ZonesRun
+) -> None:
+    """H1 y M15 no llevan detector: tampoco zonas propias ni señales propias."""
+    payload = build_payload(run, zones=zones)
+    ids = {impulse["id"] for impulse in payload["impulses"][H4]["list"]}
+
+    assert {item["id"] for item in payload["impulses"][H4]["signals"]} <= ids
+    # Los gráficos de H1 y M15 existen, pero no llevan bloque de impulsos: sin
+    # detector no hay ID, sin ID no hay zonas y sin zonas no hay señales.
+    assert set(payload["impulses"]) == {DAILY, H4}
+    assert H1 in payload["charts"]
+
+
+def test_la_capa_de_senales_se_dibuja_y_se_apaga(
+    run: ImpulseRun, zones: ZonesRun, tmp_path: Path
+) -> None:
+    resultado = _draw(run, tmp_path, zones=zones)
+    encendida = _senales(_step(resultado, "senales-por-defecto"))
+    apagada = _senales(_step(resultado, "senales-apagadas"))
+
+    assert encendida, _trace_names(_step(resultado, "senales-por-defecto"))
+    assert not apagada
+
+
+def test_sin_zonas_no_hay_ninguna_senal_que_dibujar(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    """La casilla se esconde, así que los dos pasos tienen que salir iguales."""
+    resultado = _draw(run, tmp_path)
+    encendida = _trace_names(_step(resultado, "senales-por-defecto"))
+    apagada = _trace_names(_step(resultado, "senales-apagadas"))
+
+    assert encendida == apagada
+    assert not _senales(_step(resultado, "senales-por-defecto"))
+
+
+def test_las_notas_dicen_cuantas_senales_hay_y_que_son_dibujo(
+    run: ImpulseRun, zones: ZonesRun, tmp_path: Path
+) -> None:
+    """Una capa de señales que no dice que no opera se lee como una entrada."""
+    notas = _step(_draw(run, tmp_path, zones=zones), "senales-por-defecto")["notes"]
+
+    assert "señales de zona a la vista" in notas
+    assert "no abren ni cierran nada" in notas
+    for kind in SIGNAL_KINDS:
+        assert kind in notas, kind
+
+
+def test_cada_tipo_de_senal_tiene_su_propia_marca(
+    run: ImpulseRun, zones: ZonesRun, tmp_path: Path
+) -> None:
+    """Lo nuevo tiene que distinguirse: una traza por tipo y su entrada propia
+    en la leyenda."""
+    nombres = _senales(_step(_draw(run, tmp_path, zones=zones), "senales-por-defecto"))
+
+    assert len(nombres) == len(set(nombres))
+    assert {nombre.split(" ")[0] for nombre in nombres} <= set(SIGNAL_KINDS)
+    assert all(nombre.endswith(" H4") for nombre in nombres), nombres
+
+
+def test_las_senales_no_se_dibujan_en_otro_modo_de_r36(
+    run: ImpulseRun,
+    zones: ZonesRun,
+    variants: tuple[ModeVariant, ...],
+    tmp_path: Path,
+) -> None:
+    """Salen de las zonas del modo activo: en otro serían señales de otros ID."""
+    resultado = _draw(run, tmp_path, variants, zones=zones)
+
+    assert not _senales(_step(resultado, "modo-L2_siguiente_barra"))
+
+
+def test_con_la_regla_de_la_fase_21_la_rotura_del_ul_se_dibuja(
+    zoned_run: ImpulseRun, tmp_path: Path
+) -> None:
+    """Con `break_by_zone` toda rotura a favor atraviesa el UL: hay que verla."""
+    zones = detect_zones(zoned_run, replace(zoned_run.config, zones=ZonesConfig(enabled=True)))
+    payload = build_payload(zoned_run, zones=zones)
+    roturas = [
+        item for item in payload["impulses"][H4]["signals"] if item["k"] == "ROTURA_UL"
+    ]
+    a_favor = [item for item in payload["impulses"][H4]["breaks"] if item["k"] == "favor"]
+
+    assert roturas
+    assert {item["x"] for item in roturas} == {item["x"] for item in a_favor}
+
+    nombres = _senales(
+        _step(_draw(zoned_run, tmp_path, zones=zones), "senales-por-defecto")
+    )
+    assert any(nombre.startswith("ROTURA_UL") for nombre in nombres), nombres

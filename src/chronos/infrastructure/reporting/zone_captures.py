@@ -34,6 +34,7 @@ from chronos.infrastructure.reporting.impulse_captures import (
     bar_labels,
     window_figure,
 )
+from chronos.infrastructure.reporting.timezones import session_label
 
 #: §8.1 pide ±20 barras de contexto.
 CONTEXT_BARS = 20
@@ -544,6 +545,7 @@ def _subtitle(zoned: ImpulseZones, session_timezone: str) -> str:
     """Todo lo que hace falta para juzgar la captura sin abrir ningún CSV."""
     stamp = pd.Timestamp(zoned.ts_constitution)
     local = stamp.tz_convert(session_timezone)
+    zona = session_label(session_timezone)
     block = zoned.order_block
     ob = (
         "sin OB confirmado"
@@ -557,7 +559,7 @@ def _subtitle(zoned: ImpulseZones, session_timezone: str) -> str:
         f"UL {zoned.last.height:,.2f} USD = {_ratio(zoned.last.height, zoned.atr):.3f} ATR"
         f"{' (extendido)' if zoned.last.extended else ''}"
         f"{' (altura cero)' if zoned.last.is_flat else ''} · {ob} · "
-        f"constituido {stamp:%Y-%m-%d %H:%M} UTC = {local:%Y-%m-%d %H:%M} {session_timezone} · "
+        f"constituido {stamp:%Y-%m-%d %H:%M} UTC = {local:%Y-%m-%d %H:%M} {zona} · "
         f"salida {zoned.exit_break.value if zoned.exit_break else 'sigue vigente'}"
     )
 

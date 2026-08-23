@@ -145,6 +145,7 @@ def test_romper_por_linea_solo_ocurre_sin_ob_confirmado(zoned: ImpulseRun) -> No
     """§6.7 — la única forma de morir por línea con la regla nueva."""
     zones = detect_zones(zoned)
     for timeframe, analysis in zoned.analyses.items():
+        measured = {item.id_num for item in zones.per_timeframe[timeframe].items}
         without_ob = {
             item.id_num
             for item in zones.per_timeframe[timeframe].without_order_block
@@ -153,6 +154,11 @@ def test_romper_por_linea_solo_ocurre_sin_ob_confirmado(zoned: ImpulseRun) -> No
             if event.level_source is not BreakLevelSource.LINE:
                 continue
             assert event.kind is BreakKind.EN_CONTRA
+            # Las zonas se miden sobre los ID publicados: los del calentamiento
+            # no tienen fila, así que su rotura no se puede contrastar contra
+            # ellas. El motor sí les aplica la regla; aquí no hay con qué verlo.
+            if event.broken_id_num not in measured:
+                continue
             assert event.broken_id_num in without_ob
 
 

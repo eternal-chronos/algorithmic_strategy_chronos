@@ -102,7 +102,7 @@ def test_la_regresion_compara_contra_la_linea_base_de_la_fase(
     grupo = next(g for g in collect(config, series).groups if g.title.startswith("G.6"))
     assert not grupo.ok, "la fixture no es el histórico real: no puede dar la línea base"
     assert "401" in grupo.checks[0].expected
-    assert PHASE1_BASELINE == {"D": 401, "H4": 1914}
+    assert PHASE1_BASELINE == {"D": 401, "H4": 2027}
     # La base provisional queda archivada en el texto, no comprobada.
     assert "477" in grupo.note
 

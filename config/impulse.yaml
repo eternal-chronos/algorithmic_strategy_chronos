@@ -11,8 +11,8 @@
 # CONFIGURACIÓN DEFINITIVA DE LA FASE 1 (decidida por el propietario):
 #   ANCHOR_MODE     = A1_last_counter_body
 #   LEG_START_MODE  = L1_actual
-#   D_SESSION_START = NY_18:00   (DST real de America/New_York)
-#   H4_ORIGIN       = NY_18:00   (misma sesión; rejilla 18/22/02/06/10/14 NY)
+#   D_SESSION_START = NY_17:00   (DST real de America/New_York)
+#   H4_ORIGIN       = NY_17:00   (misma sesión; rejilla 17/21/01/05/09/13 NY)
 #   STRUCTURE_SIDE  = bid
 # Los demás modos siguen disponibles por configuración, sólo para regresión.
 
@@ -51,14 +51,38 @@ data:
   end: null
 
 # DECIDIDO (§1.2). El resultado del módulo depende íntegramente de estos dos
-# valores: cambiarlos cambia las velas y, por tanto, los impulsos. El propietario
-# ha cerrado `NY_18:00`: es la única rejilla que reproduce sus velas. Los cuatro
-# offsets fijos en UTC dan doce horas de apertura distintas a lo largo del año en
-# vez de seis, porque no siguen el horario de verano de Nueva York.
+# valores: cambiarlos cambia las velas y, por tanto, los impulsos. Se cierra
+# `NY_17:00`: es la rejilla de **cTrader / Pepperstone**, que es donde se va a
+# ejecutar en vivo. La estrategia tiene que ver las mismas velas en backtest,
+# paper y live, así que manda la plataforma de ejecución, no la de dibujo.
+#
+# Comprobado vela a vela sobre el M1 de Dukascopy (bid), 16-01-2023:
+#   cTrader, vela `02:00` en UTC-4  -> 06:00-10:00 UTC
+#     O 1919.47  H 1920.78  L 1910.82  C 1917.54   (feed Pepperstone)
+#     O 1919.43  H 1920.74  L 1910.66  C 1917.47   (nuestro M1 Dukascopy)
+#   FXReplay con datos Dukascopy da esa misma ventana al 0,001.
+#   TradingView (Pepperstone) corta una hora después —07:00-11:00 UTC, o sea
+#   NY_18:00— porque arma las velas con la sesión del símbolo y no con la hora
+#   del servidor del broker. Es el único de los tres que se sale, y no es donde
+#   se opera, así que deja de ser la referencia.
+#
+# El horario de verano es el de EE. UU., no el europeo. Los dos sólo se
+# distinguen las ~3 semanas de marzo y la de noviembre en que los cambios de
+# hora no coinciden, así que se comprobó dentro de esa ventana, 15-03-2023:
+#   cTrader, vela `05:00` en UTC-4  -> 09:00-13:00 UTC
+#     O 1887.51  H 1930.22  L 1886.65  C 1927.77   (feed Pepperstone)
+#     O 1887.43  H 1930.09  L 1886.53  C 1927.71   (nuestro M1 Dukascopy)
+#   La vela de las `06:00` (10:00-14:00 UTC, medianoche del servidor europeo)
+#   habría abierto en 1896.18: nueve dólares de diferencia, no hay ambigüedad.
+# Concuerda con el propio histórico M1, cuya apertura semanal se mueve en las
+# fechas de EE. UU. (2023: 12-mar y 5-nov) y no en las europeas.
+#
+# Los cuatro offsets fijos en UTC quedan descartados igual que antes: dan doce
+# horas de apertura distintas a lo largo del año en vez de seis, porque no
+# siguen ningún horario de verano.
 #
 # En el diario los cortes 22:00, NY_17:00 y NY_18:00 producen velas idénticas —el
-# M1 ya trae la parada diaria del oro—, así que se adopta NY_18:00 por coherencia
-# con H4 y con la etiqueta que ve el propietario.
+# M1 ya trae la parada diaria del oro—, así que el cambio sólo mueve H4.
 #
 # Sólo H4 y el diario llevan desplazamiento: la rejilla de M15 y H1 —cuartos de
 # hora y horas en punto— es la misma en todas las plataformas. Y son justo las
@@ -66,17 +90,17 @@ data:
 aggregation:
   # Desplazamiento del inicio de las velas H4 respecto a 00:00 UTC. Se IGNORA
   # con el ancla de sesión de abajo: H4 arranca con la sesión y avanza de cuatro
-  # en cuatro dentro de ella (18/22/02/06/10/14 hora de Nueva York). Se conserva
+  # en cuatro dentro de ella (17/21/01/05/09/13 hora de Nueva York). Se conserva
   # para las corridas de regresión sobre la rejilla UTC.
   h4_offset_hours: 0
   # Inicio de la vela diaria. Dos formas:
   #   "HH:MM"       -> hora fija en UTC ("00:00", "22:00").
   #   "PLAZA_HH:MM" -> hora local de una plaza, con horario de verano real
   #                    ("NY_17:00", "NY_18:00" -> America/New_York). El corte se
-  #                    mueve solo dos veces al año: las 18:00 de Nueva York son
-  #                    las 23:00 UTC en invierno y las 22:00 en verano.
+  #                    mueve solo dos veces al año: las 17:00 de Nueva York son
+  #                    las 22:00 UTC en invierno y las 21:00 en verano.
   # `chronos structure auditoria-sesion` compara todas las formas de una corrida.
-  d_session_start: "NY_18:00"
+  d_session_start: "NY_17:00"
 
 # Qué impulso se dibuja en cada gráfico. La PRIMERA de cada lista es la
 # principal: de ella salen el sombreado del limbo y los marcadores de
@@ -231,8 +255,16 @@ timezone_audit:
 
 reporting:
   output_dir: reports
-  # Zona horaria de la sesión del propietario; el explorador imprime las dos.
-  session_timezone: Europe/Athens
+  # Reloj con el que se escribe la hora al lado de la UTC: el explorador imprime
+  # las dos. `Etc/GMT+4` es el UTC-4 FIJO —el signo va al revés, convención
+  # POSIX—, que es exactamente lo que dibuja cTrader todo el año, así que las
+  # horas del explorador y las de la plataforma de ejecución se leen iguales sin
+  # traducir. Se escribe `UTC-4` en el dibujo, no el identificador.
+  #
+  # Es sólo etiqueta: no entra en el cálculo ni en el `config_hash`. Ojo, no es
+  # el reloj de TradingView ni el de FXReplay, que sí siguen el horario de verano
+  # de Nueva York y en invierno van una hora por detrás de éste.
+  session_timezone: Etc/GMT+4
   text_report: true
   explorer_html: true
   # Capturas PNG de F.4: los 20 ID más pequeños de Diario y H4, los 10 que mejor
