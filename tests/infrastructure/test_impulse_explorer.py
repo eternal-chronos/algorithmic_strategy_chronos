@@ -1921,6 +1921,27 @@ def test_cada_senal_viaja_con_lo_que_hace_falta_para_juzgarla(
             assert registro["y"] == registro["c"]
 
 
+def test_el_toque_del_ob_viaja_con_la_vela_fina_que_lo_midio(
+    run: ImpulseRun, zones: ZonesRun
+) -> None:
+    """`src` es lo que le dice al replay cuándo se supo cada señal.
+
+    El toque del OB se mide en M15 y no espera al cierre de H4; el rechazo y la
+    rotura del UL necesitan un cierre y se quedan en la vela del ID.
+    """
+    payload = build_payload(run, zones=zones)
+    registros = payload["impulses"][H4]["signals"]
+    toques = [item for item in registros if item["k"] == "TOQUE_OB"]
+
+    assert toques
+    assert {item["src"] for item in toques} == {"M15"}
+    assert {item["src"] for item in registros if item["k"] != "TOQUE_OB"} == {H4}
+    assert payload["spans"]["M15"] < payload["spans"][H4]
+    # La marca cae DENTRO de la vela de H4: su minuto no es el de ninguna vela.
+    velas = set(payload["bars"][H4]["t"])
+    assert any(item["x"] not in velas for item in toques)
+
+
 def test_las_senales_son_de_los_id_de_su_temporalidad(
     run: ImpulseRun, zones: ZonesRun
 ) -> None:

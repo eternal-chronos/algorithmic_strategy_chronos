@@ -109,16 +109,67 @@ def test_ninguna_senal_se_adelanta_a_su_zona(
 
 
 def test_ninguna_senal_sobrevive_a_su_id(
-    zones: ZonesRun, signals: ZoneSignalsRun
+    run: ImpulseRun, zones: ZonesRun, signals: ZoneSignalsRun
 ) -> None:
+    """El límite es el CIERRE de la última vela del ID, no su apertura.
+
+    El toque del OB se fecha en la vela fina, así que cae dentro de la vela
+    grande que mata al ID —donde el ID todavía estaba vivo— y no después.
+    """
     for timeframe, medida in signals.per_timeframe.items():
+        velas = pd.DatetimeIndex(run.analyses[timeframe].bars.index)
         fin = {
             zoned.id_num: zoned.ts_end
             for zoned in zones.per_timeframe[timeframe].items
         }
         for item in medida.items:
             final = fin[item.id_num]
-            assert final is None or item.timestamp <= final
+            if final is None:
+                continue
+            siguiente = velas.searchsorted(pd.Timestamp(final), side="right")
+            assert siguiente >= len(velas) or pd.Timestamp(item.timestamp) < velas[siguiente]
+
+
+def test_el_ob_no_da_dos_toques_en_la_misma_vela_del_id(
+    run: ImpulseRun, signals: ZoneSignalsRun
+) -> None:
+    """Una señal por visita: la vela grande manda, la fina sólo pone el minuto.
+
+    Un paseo de quince minutos por encima del borde no es salir de la zona: si
+    la vela del ID cerró dentro, la siguiente empieza dentro y no toca nada.
+    """
+    for timeframe, medida in signals.per_timeframe.items():
+        velas = pd.DatetimeIndex(run.analyses[timeframe].bars.index)
+        vistas: set[tuple[int, int]] = set()
+        for item in medida.items:
+            if item.kind is not ZoneSignalKind.TOQUE_OB:
+                continue
+            vela = int(velas.searchsorted(pd.Timestamp(item.timestamp), side="right")) - 1
+            clave = (item.id_num, vela)
+            assert clave not in vistas, f"dos toques en la vela {velas[vela]}"
+            vistas.add(clave)
+
+
+def test_el_toque_del_ob_se_fecha_en_la_vela_fina(
+    run: ImpulseRun, signals: ZoneSignalsRun
+) -> None:
+    """No se espera al cierre de H4: el toque va en la vela de M15 que lo hizo.
+
+    El rechazo y la rotura del UL sí necesitan un cierre y se quedan en la
+    rejilla de la temporalidad del ID.
+    """
+    finas = pd.DatetimeIndex(run.chart_bars["M15"].index)
+    grandes = pd.DatetimeIndex(run.analyses[H4].bars.index)
+    items = signals.per_timeframe[H4].items
+    toques = [item for item in items if item.kind is ZoneSignalKind.TOQUE_OB]
+    del_ul = [item for item in items if item.kind is not ZoneSignalKind.TOQUE_OB]
+
+    assert toques, "el histórico de prueba tiene toques del OB"
+    assert all(pd.Timestamp(item.timestamp) in finas for item in toques)
+    assert any(pd.Timestamp(item.timestamp) not in grandes for item in toques), (
+        "alguno cae dentro de la vela de H4 y no en su apertura"
+    )
+    assert all(pd.Timestamp(item.timestamp) in grandes for item in del_ul)
 
 
 def test_los_ordinales_empiezan_en_uno_y_no_saltan(signals: ZoneSignalsRun) -> None:

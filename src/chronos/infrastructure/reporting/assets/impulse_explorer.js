@@ -1250,8 +1250,8 @@
   /* --- Señales de zona (visual) ---------------------------------------------
    *
    * Las tres marcas que el propietario quiere ver sobre el Diario y H4 mientras
-   * audita el toque de una zona: el precio TOCA un OB, LLEGA a un UL y lo
-   * RECHAZA, o ROMPE un UL.
+   * audita el toque de una zona: el precio TOCA un OB, LLEGA a un UL DESDE FUERA
+   * y lo RECHAZA, o ROMPE un UL.
    *
    * DIBUJO Y NADA MÁS, como el resto del fichero. Vienen calculadas de Python
    * sobre las zonas de la fase 2.0 y no producen entradas, ni stops, ni
@@ -1290,8 +1290,10 @@
     if (!zonesAvailable() || !isVisible(primary())) { return []; }
     var allowed = visibleIds(primary(), edges);
     return signalsOf(primary()).filter(function (item) {
+      // Cada señal se sabe cuando cierra LA VELA QUE LA MIDIÓ: el toque del OB
+      // va en la vela fina y no espera las cuatro horas de H4.
       return item.x >= edges.lo && item.x <= edges.hi &&
-        !pending(item.x, primary(), edges) && keeps(allowed, item.id);
+        !pending(item.x, item.src || primary(), edges) && keeps(allowed, item.id);
     });
   }
 
@@ -1338,7 +1340,10 @@
         "<br>cierre " + price(item.c) +
         (item["in"] ? " DENTRO de la zona" : " fuera de la zona");
       if (item.k === "RECHAZO_UL") {
-        text += "<br>no pasó del borde exterior: el UL aguanta";
+        text += "<br>llegó desde fuera y no pasó del borde exterior: el UL aguanta";
+      } else if (item.src && item.src !== primary()) {
+        text += "<br>entró en la zona en la vela de " + item.src +
+          ": el minuto del toque, sin esperar al cierre de " + primary();
       }
     }
     return text + "<br>SÓLO DIBUJO: no abre ni cierra ninguna operación";

@@ -456,6 +456,11 @@ def _zone_signals(signals: TimeframeSignals | None) -> list[dict[str, Any]]:
     toque y en el rechazo —recortado a sus bordes, para que la marca caiga sobre
     la zona y no flotando— y el cierre en la rotura, que por definición queda
     fuera. La cuenta la hace el motor; aquí sólo se elige el campo.
+
+    `src` es la temporalidad de la vela en la que se midió: la del ID salvo en el
+    toque del OB, que se mide en la serie fina y por eso cae **dentro** de la
+    vela grande. El replay lo necesita para saber cuándo se supo cada señal: el
+    toque, al cerrar su vela de M15; el rechazo, al cerrar la de H4.
     """
     if signals is None:
         return []
@@ -477,6 +482,7 @@ def _zone_signals(signals: TimeframeSignals | None) -> list[dict[str, Any]]:
             "c": round(item.signal.close, DECIMALS),
             "in": item.signal.inside,
             "n": item.signal.ordinal,
+            "src": item.source,
         }
         for item in signals.items
     ]
