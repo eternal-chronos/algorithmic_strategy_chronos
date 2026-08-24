@@ -176,9 +176,12 @@ Detalles que se decidieron y no se esconden:
   que se lleva el OB por delante sale como `TOQUE_OB`, con el marcador plantado
   en el borde que cruzó.
 - **`ROTURA_UL` es geometría, no la regla de rotura.** Con `break_by_zone: true`
-  cae exactamente sobre las roturas a favor que el detector produjo —hay test que
-  lo comprueba sobre el histórico— y con la regla apagada sigue existiendo,
-  porque el UL sigue estando dibujado aunque no decida nada.
+  cae exactamente sobre las roturas a favor de los ID **zonificados** —hay test
+  que lo comprueba— y con la regla apagada sigue existiendo, porque el UL sigue
+  estando dibujado aunque no decida nada. Los ID de calentamiento mueren igual y
+  su rotura sale en los eventos, pero la fase 2.0 no les calcula zonas, así que
+  no tienen UL que romper y no dejan señal: 2 en D y 1 en H4 sobre 2018–2025.
+  El explorador tampoco los dibuja.
 - **Sin lookahead.** Cada señal se busca desde la vela **siguiente** al
   nacimiento de su zona —igual que los contactos de la sección D— y hasta la
   vela que mata al ID, incluida: es justo la que puede llevar la rotura.

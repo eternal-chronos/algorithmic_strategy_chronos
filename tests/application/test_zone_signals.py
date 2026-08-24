@@ -135,14 +135,22 @@ def test_con_la_regla_de_la_fase_21_toda_rotura_a_favor_deja_su_senal() -> None:
     Es la comprobación que ata las señales a lo que el motor ya decidió, sin
     que las señales hayan decidido nada: se calculan aparte y tienen que caer
     exactamente donde el detector cerró el ID.
+
+    **Sobre los ID zonificados, que son los publicables.** Un ID de calentamiento
+    muere igual y su rotura sale en los eventos, pero la fase 2.0 no le calcula
+    zonas —no tendría con qué compararlas— así que no tiene UL que romper y no
+    puede dejar señal. En el histórico real son 2 en D y 1 en H4, y el
+    explorador tampoco los dibuja.
     """
     zoned = _run(zones=True, break_by_zone=True)
-    medida = detect_zone_signals(zoned, detect_zones(zoned))
+    zones = detect_zones(zoned)
+    medida = detect_zone_signals(zoned, zones)
+    zonificados = {item.id_num for item in zones.per_timeframe[H4].items}
 
     roturas = {
         (event.broken_id_num, pd.Timestamp(event.timestamp))
         for event in zoned.analyses[H4].events
-        if event.kind is BreakKind.A_FAVOR
+        if event.kind is BreakKind.A_FAVOR and event.broken_id_num in zonificados
     }
     senales = {
         (item.id_num, pd.Timestamp(item.timestamp))
@@ -152,6 +160,13 @@ def test_con_la_regla_de_la_fase_21_toda_rotura_a_favor_deja_su_senal() -> None:
 
     assert roturas
     assert senales == roturas
+    # Y al revés: ninguna señal de rotura que el detector no haya visto.
+    assert all(
+        not impulse.publishable
+        for impulse in zoned.analyses[H4].impulses
+        if impulse.exit_break_kind is BreakKind.A_FAVOR
+        and (impulse.id_num, pd.Timestamp(impulse.ts_end)) not in senales
+    )
 
 
 def test_medir_las_senales_no_mueve_ni_un_impulso(run: ImpulseRun) -> None:
