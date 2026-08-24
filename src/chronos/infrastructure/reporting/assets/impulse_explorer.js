@@ -1976,6 +1976,24 @@
 
   // --- Controles ------------------------------------------------------------
 
+  /* Atajos de temporalidad: una tecla por gráfico. Si la corrida no trae ese
+   * gráfico —un histórico H1 no da para M15— la tecla no hace nada. */
+  var CHART_KEYS = { "d": "D", "4": "H4", "1": "H1", "m": "M15" };
+  var CHART_SHORTCUTS = {};
+  Object.keys(CHART_KEYS).forEach(function (key) { CHART_SHORTCUTS[CHART_KEYS[key]] = key; });
+
+  /* Cambia el gráfico activo. Conserva el reloj canónico del replay, no el que
+   * se lee en este gráfico: si vienes de pasar por el diario, lo que allí no
+   * cabía sigue estando aquí. */
+  function selectChart(chart) {
+    if (DATA.charts.indexOf(chart) < 0) { return; }
+    var at = state.replay ? state.at : null;
+    state.chart = chart;
+    if (at !== null) { alignCursor(at); }
+    buildImpulseLayers();
+    draw();
+  }
+
   function buildChartButtons() {
     var container = document.getElementById("tf-buttons");
     DATA.charts.forEach(function (chart) {
@@ -1983,16 +2001,9 @@
       button.type = "button";
       button.textContent = label(chart);
       button.dataset.tf = chart;
-      button.title = "Dibuja el impulso de " + DATA.layout[chart].map(label).join(" y ");
-      button.addEventListener("click", function () {
-        // El reloj canónico, no el que se lee en este gráfico: si vienes de
-        // pasar por el diario, lo que allí no cabía sigue estando aquí.
-        var at = state.replay ? state.at : null;
-        state.chart = chart;
-        if (at !== null) { alignCursor(at); }
-        buildImpulseLayers();
-        draw();
-      });
+      button.title = "Dibuja el impulso de " + DATA.layout[chart].map(label).join(" y ") +
+        ". Atajo de teclado: " + (CHART_SHORTCUTS[chart] || "sin atajo");
+      button.addEventListener("click", function () { selectChart(chart); });
       container.appendChild(button);
     });
   }
@@ -2366,10 +2377,11 @@
     if (state.playing) { pauseReplay(); draw(); } else { playReplay(); }
   }
 
-  /* ◀ ▶ también con las flechas del teclado (B.3), y la barra espaciadora para
-   * arrancar y parar el replay. Se ignoran mientras el foco está en un campo de
-   * texto: ahí las flechas mueven el cursor y robarlas haría imposible escribir
-   * una fecha o una semilla.
+  /* ◀ ▶ también con las flechas del teclado (B.3), la barra espaciadora para
+   * arrancar y parar el replay, y una tecla por temporalidad (d/4/1/m) para
+   * saltar de gráfico. Se ignoran mientras el foco está en un campo de texto:
+   * ahí las teclas escriben y robarlas haría imposible poner una fecha o una
+   * semilla.
    *
    * En replay las flechas dan pasos en vez de mover la ventana: es el mismo
    * gesto —avanzar y retroceder en el tiempo— a la escala de lo que se mira. */
@@ -2378,13 +2390,18 @@
     document.addEventListener("keydown", function (event) {
       var arrow = event.key === "ArrowLeft" || event.key === "ArrowRight";
       var space = event.key === " " || event.key === "Spacebar";
-      if (!arrow && !space) { return; }
+      // Con Ctrl/Alt/Meta la tecla es del navegador (Ctrl+D marca la página):
+      // ahí no hay atajo de temporalidad.
+      var modified = event.ctrlKey || event.altKey || event.metaKey;
+      var chart = modified ? null : CHART_KEYS[String(event.key).toLowerCase()];
+      if (!arrow && !space && !chart) { return; }
       var focused = document.activeElement;
       var tag = focused && focused.tagName ? focused.tagName.toUpperCase() : "";
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") { return; }
       // La barra espaciadora sobre un botón lo pulsa: ahí no se roba.
       if (space && (tag === "BUTTON" || !state.replay)) { return; }
       if (event.preventDefault) { event.preventDefault(); }
+      if (chart) { selectChart(chart); return; }
       if (space) { toggleReplay(); return; }
       var back = event.key === "ArrowLeft" ? -1 : 1;
       if (state.replay) { stepReplay(back); } else { step(back); }

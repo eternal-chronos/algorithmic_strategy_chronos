@@ -321,8 +321,8 @@ def test_los_botones_dicen_que_impulso_dibuja_cada_grafico(
 ) -> None:
     resultado = _draw(run, tmp_path)
     titulos = dict(zip(resultado["chartTabs"], resultado["chartTitles"], strict=True))
-    assert titulos["H4"] == "Dibuja el impulso de H4 y Diario"
-    assert titulos["M15"] == "Dibuja el impulso de H4"
+    assert titulos["H4"] == "Dibuja el impulso de H4 y Diario. Atajo de teclado: 4"
+    assert titulos["M15"] == "Dibuja el impulso de H4. Atajo de teclado: m"
 
 
 def test_cada_grafico_dibuja_su_impulso_y_el_de_contexto(
@@ -647,6 +647,25 @@ def test_las_flechas_no_roban_el_teclado_a_los_campos(
     en_campo = _step(resultado, "teclado-en-un-campo")
 
     assert (en_campo["from"], en_campo["to"]) == (derecha["from"], derecha["to"])
+
+
+def test_las_teclas_d_4_1_m_cambian_la_temporalidad(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    """Una tecla por gráfico: d = Diario, 4 = H4, 1 = H1, m = M15."""
+    resultado = _draw(run, tmp_path)
+    assert _step(resultado, "teclado-tf-h4")["chart"] == H4
+    assert _step(resultado, "teclado-tf-m15")["chart"] == M15
+    assert _step(resultado, "teclado-tf-h1")["chart"] == H1
+    assert _step(resultado, "teclado-tf-diario")["chart"] == DAILY
+
+
+def test_las_teclas_de_temporalidad_no_roban_el_teclado_a_los_campos(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    """Con el foco en un campo, «d» escribe una letra: el gráfico no se mueve."""
+    resultado = _draw(run, tmp_path)
+    assert _step(resultado, "teclado-tf-en-un-campo")["chart"] == H1
 
 
 # --- R-36 · los tres modos dentro del mismo explorador ----------------------
