@@ -160,8 +160,8 @@ abrir un CSV.
 
 | Marca | Cuándo sale |
 |---|---|
-| `TOQUE_OB` (pentágono) | el rango de la vela corta la zona OB, bordes incluidos y cierre donde cierre |
-| `RECHAZO_UL` (hexagrama) | el rango corta la zona UL y el cierre **no** pasa de su borde exterior |
+| `TOQUE_OB` (pentágono) | el precio **venía de fuera** y el rango de la vela corta la zona OB, bordes incluidos y cierre donde cierre. Se mide en la **vela fina**, no al cierre de la del ID |
+| `RECHAZO_UL` (hexagrama) | el precio **venía de fuera**, el rango corta la zona UL y el cierre **no** pasa de su borde exterior |
 | `ROTURA_UL` (rombo-estrella) | el cierre queda más allá del borde exterior del UL |
 
 Detalles que se decidieron y no se esconden:
@@ -171,6 +171,34 @@ Detalles que se decidieron y no se esconden:
   desigualdad estricta que la rotura de la fase 2.1 —cerrar justo en el borde es
   cerrar dentro— así que rechazo y rotura se excluyen: la vela que rompe no
   rechaza.
+- **El toque del OB no espera al cierre de la vela grande.** Tocar es un asunto
+  de mechas: en cuanto el precio entra en la zona ya está tocada, y esperar
+  cuatro horas a que cierre la vela de H4 sería fechar la señal tarde —y, si
+  algún día hay entradas detrás, tarde de verdad—. Pero la vela del ID sigue
+  mandando, porque es la que dice si el precio había **salido** de la zona. Las
+  dos cosas: el toque se clasifica en la temporalidad del ID —una señal por vela
+  y sólo si el cierre anterior estaba fuera— y luego se **re-fecha** en la vela
+  de la serie más corta de la corrida (M15 en el reparto por defecto) en la que
+  el precio entró, con los números de esa vela, que son los que se conocen en
+  ese instante. La marca cae *dentro* de la vela grande, en el minuto en que
+  tocó, y un paseo de quince minutos por encima del borde no inventa una visita
+  nueva. El rechazo y la rotura del UL están definidos por dónde **cierra** la
+  vela, así que ésos se quedan enteros en la temporalidad del ID. El explorador
+  lo sabe —cada señal viaja con la temporalidad en la que se midió— y el replay
+  descubre el toque al cerrar su vela de M15, no la de H4.
+- **La señal se cobra desde fuera, en las dos zonas.** La vela que fija el UL cierra en su borde
+  interior —ese borde *es* su cuerpo—, así que el precio nace **dentro** de la
+  zona. Si la vela siguiente la toca no la está rechazando: sigue metida ahí y
+  nunca llegó desde fuera. Lo mismo en el OB: una vela que **abre dentro** de la
+  zona no la está tocando, ya estaba. Para que un `TOQUE_OB` o un `RECHAZO_UL`
+  cuenten, el cierre anterior tiene que estar fuera de la zona **y por el lado
+  por el que el precio la busca**: el UL se busca hacia donde va el ID y el OB
+  hacia el lado contrario, así que en un ID alcista se llega al UL desde abajo y
+  al OB desde arriba. Cerrar dentro de la zona desarma la señal hasta que el
+  precio vuelva a salir, y volver desde el otro lado del borde exterior tampoco
+  la arma: eso es un nivel ya roto, no un rechazo. Sólo se mira un cierre
+  anterior al tramo, el de la vela del nacimiento de la zona, que ya está en el
+  pasado.
 - **No hay «rotura del OB».** Atravesar el OB es la rotura en contra que el
   detector ya marca; duplicarla aquí sería contar dos veces lo mismo. Una vela
   que se lleva el OB por delante sale como `TOQUE_OB`, con el marcador plantado

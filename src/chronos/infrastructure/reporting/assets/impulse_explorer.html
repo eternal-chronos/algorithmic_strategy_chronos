@@ -148,8 +148,15 @@ apagarlas deja verlo. Las del impulso principal siguen dibujándose.">
         </span>
         <span id="signal-layers" style="display:flex; gap:16px; flex-wrap:wrap;">
           <label class="toggle" title="Las tres señales sobre las zonas de los ID, en Diario y H4:
-pentágono = el precio TOCA el OB; hexagrama = LLEGA al UL y lo RECHAZA (no pasa de su borde
-exterior); rombo-estrella = ROMPE el UL (cierra más allá del borde exterior).
+pentágono = el precio TOCA el OB DESDE FUERA; hexagrama = LLEGA al UL DESDE FUERA y lo
+RECHAZA (no pasa de su borde exterior); rombo-estrella = ROMPE el UL (cierra más allá del
+borde exterior).
+Venir de fuera es parte de la señal: mientras el precio no haya salido de la zona —la vela
+que crea el UL cierra dentro de él, y una vela que abre dentro del OB ya estaba ahí—
+tocarla no cuenta y no se marca.
+El toque del OB NO espera al cierre de la vela grande: la vela del ID dice si el precio
+venía de fuera —una señal por visita— y la marca se planta en la vela fina (M15) en que
+entró, así que cae DENTRO de la vela de H4 o del Diario, en el minuto en que tocó.
 Son DIBUJO: se calculan sobre las zonas ya detectadas y no abren ni cierran ninguna
 operación. El proyecto sigue sin entradas, stops ni targets.
 Obedecen el selector de ID visibles: con «ID actual» se ven las del ID vigente y su zona.">
