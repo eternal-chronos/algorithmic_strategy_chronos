@@ -61,6 +61,7 @@ function declare(id) {
  'from', 'to', 'layer-limbo', 'layer-marks', 'layer-contacts', 'layer-mid', 'layer-wrong',
  'zone-layers', 'layer-zones-ul', 'layer-zones-ob', 'layer-zones-context',
  'signal-layers', 'layer-signals',
+ 'cascade-layers', 'layer-cascade',
  'break-layers', 'avoided-layer', 'layer-avoided', 'steps-layer', 'layer-steps',
  'blind-seed', 'blind-start', 'blind-reveal', 'blind-exit',
  'replay-group', 'replay-date', 'replay-start', 'replay-back', 'replay-step',
@@ -209,7 +210,7 @@ function snapshot(label) {
     // el control se separan, el explorador miente sobre lo que se está viendo.
     boxes: ['layer-limbo', 'layer-marks', 'layer-contacts', 'layer-mid', 'layer-wrong',
       'layer-zones-ul', 'layer-zones-ob', 'layer-zones-context', 'layer-signals',
-      'layer-avoided', 'layer-steps']
+      'layer-cascade', 'layer-avoided', 'layer-steps']
       .reduce(function (state, id) {
         state[id] = elements[id].checked === true;
         return state;
@@ -417,6 +418,28 @@ visibles.forEach(function (button) {
   button.fire('click');
   steps.push(snapshot('ids-' + button.dataset.visible));
 });
+
+// La cascada H4 -> H1, con el Diario de veto. Se recorren los cuatro gráficos
+// porque cada paso se dibuja en el suyo: el tramo diario en el Diario, el toque
+// de H4 en H4 y la confirmación en H1, con su caja si es el OB de H1. Encendida
+// y apagada sobre las mismas velas; sin cascada en
+// el payload los dos pasos salen iguales, que es lo que comprueba el test de la
+// corrida sin ella. Va con el periodo completo y todos los ID a la vista, que es
+// como lo deja el bloque de arriba.
+tabs.forEach(function (tab) {
+  tab.fire('click');
+  // La capa cuelga del impulso principal del gráfico, y algún paso de más arriba
+  // pudo apagarlo: se encienden todas antes de mirar, que es lo que se quiere
+  // probar aquí.
+  elements['impulse-layers'].children.forEach(function (wrapper) {
+    wrapper.children[0].fire('change', { target: { checked: true } });
+  });
+  steps.push(snapshot('cascada-' + tab.dataset.tf));
+  elements['layer-cascade'].fire('change', { target: { checked: false } });
+  steps.push(snapshot('cascada-apagada-' + tab.dataset.tf));
+  elements['layer-cascade'].fire('change', { target: { checked: true } });
+});
+tabs[0].fire('click');
 
 // R-36 — alternar los tres LEG_START_MODE sobre las mismas velas, y apagar la
 // capa que marca los extremos de color contrario.

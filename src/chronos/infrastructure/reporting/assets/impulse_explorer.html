@@ -162,6 +162,33 @@ operación. El proyecto sigue sin entradas, stops ni targets.
 Obedecen el selector de ID visibles: con «ID actual» se ven las del ID vigente y su zona.">
             <input type="checkbox" id="layer-signals" checked> Señales de zona</label>
         </span>
+        <span id="cascade-layers" style="display:flex; gap:16px; flex-wrap:wrap;">
+          <label class="toggle" title="La cascada H4 → H1. Son DOS escalones: el Diario no es
+un paso, sólo veta. Cada marca va en el gráfico en el que se mira:
+  ✦ (H4) el precio TOCA el OB de un ID de H4 → se baja a H1. No hace falta nada del
+     Diario para que se abra esta búsqueda;
+  ◆ alto (H1) confirma por TURTLE SOUP: la vela va a buscar la mecha de la anterior y
+     cierra sin superarla;
+  ⋈ (H1) confirma por OB DE H1: la vela a favor supera con mecha el extremo de la
+     contraria anterior; hay dos oportunidades y las dos miden el mismo nivel. Su vela
+     de referencia se dibuja además como CAJA punteada gris, de su mínimo a su máximo;
+  ★ (Diario, gris) el precio está DENTRO del OB de un ID diario. No abre ninguna
+     búsqueda: mientras dure, prohíbe todo lo que vaya en contra de esa dirección;
+  ✕ fino (H4, gris) toque de un OB de H4 EN CONTRA de un OB diario vigente: se desecha
+     hasta que el precio salga de esa zona diaria;
+  ⧗ (H1, gris) el OB de H1 gastó sus dos velas sin superar el nivel: esa vía queda
+     cerrada y sólo sigue buscando el turtle soup. También lleva su caja.
+Una confirmación por ventana y ni una más: la primera cierra la búsqueda, así que lo que
+llegue después no se pinta aunque el motor lo vea.
+La raya punteada que sale de ✦ y de ★ es la VENTANA: hasta cuándo estuvo armada la
+búsqueda, o vigente el veto. Se cierra en la primera vela de esa temporalidad que cierra
+FUERA de la zona —el veto diario, en una vela DIARIA—, por el lado que sea, o con la
+muerte del ID. Cada visita nueva a la zona la rearma.
+SON SEÑALES, NO ENTRADAS: no hay orden, ni stop, ni target, ni resultado detrás de
+ninguna de estas marcas.
+Obedecen el selector de ID visibles, igual que las señales de zona.">
+            <input type="checkbox" id="layer-cascade" checked> Cascada de entrada</label>
+        </span>
         <span id="break-layers" style="display:flex; gap:16px; flex-wrap:wrap;">
           <span id="avoided-layer">
             <label class="toggle" title="Fase 2.1: velas que bajo la regla antigua habrían roto el ID
@@ -258,6 +285,20 @@ temporalidad inferior. El motor no la ve hasta que cierra.">
       la zona todavía no existía (el ID aún no se había constituido)</span>
     <span>UL y OB son siempre los del ID ACTUAL: en cuanto se constituye un ID nuevo,
       las zonas del anterior desaparecen del gráfico (siguen en los CSV)</span>
+    <span>✦ el precio toca el OB de un ID de H4: se baja a H1. La cascada empieza AQUÍ,
+      sin pedirle nada al Diario</span>
+    <span>◆ alto = confirma en H1 por TURTLE SOUP · ⋈ = confirma en H1 por OB DE H1</span>
+    <span>caja punteada gris en H1 = la vela de referencia del OB de H1, de su mínimo a su
+      máximo, desde que la define hasta la vela que lo resuelve</span>
+    <span>★ gris = el precio está DENTRO del OB de un ID DIARIO. No abre nada: sólo
+      prohíbe lo contrario a su dirección mientras dure</span>
+    <span>✕ fino gris = toque de un OB de H4 EN CONTRA de un OB diario vigente: desechado
+      sin mirarlo · ⧗ gris = el OB de H1 gastó sus dos velas y esa vía se cierra</span>
+    <span>raya punteada gris a la derecha de ✦ o de ★ = la VENTANA en la que la búsqueda
+      estuvo armada, o el veto diario vigente: termina cuando el precio cierra fuera de la
+      zona (en el veto, con una vela DIARIA)</span>
+    <span>la cascada son SEÑALES y nada más: no hay entradas, ni stops, ni targets, ni
+      resultados en el proyecto</span>
     <span>✕ grueso = extremo fijado por una vela del color contrario al impulso (R-36),
       sobre la vela que lo fijó</span>
     <span>«Ruido» es un preset de las casillas de Capas: <b>Limpio</b> —el de salida—

@@ -23,6 +23,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from chronos.application.entries.cascade import CascadeRun, CascadeStep, detect_cascade
 from chronos.application.structure.config import (
     DAILY,
     H1,
@@ -268,6 +269,7 @@ def _draw(
     tmp_path: Path,
     variants: Sequence[ModeVariant] = (),
     zones: ZonesRun | None = None,
+    cascade: CascadeRun | None = None,
 ) -> dict:
     node = shutil.which("node")
     if node is None:
@@ -281,6 +283,7 @@ def _draw(
                 lateralization=measure(run),
                 variants=variants,
                 zones=zones,
+                cascade=cascade,
             ),
             default=str,
         ),
@@ -2033,3 +2036,181 @@ def test_con_la_regla_de_la_fase_21_la_rotura_del_ul_se_dibuja(
         _step(_draw(zoned_run, tmp_path, zones=zones), "senales-por-defecto")
     )
     assert any(nombre.startswith("ROTURA_UL") for nombre in nombres), nombres
+
+
+# --- La cascada H4 → H1, con el Diario de veto ------------------------------
+#
+# Son SEÑALES: se calculan sobre los toques que la fase 2.0 ya medía y no abren
+# ni cierran nada. Lo que se comprueba aquí es que cada paso viaja al gráfico en
+# el que se mira, que el OB de H1 llega con su caja, que la capa se puede apagar
+# y que el explorador dice cuántos pasos hay a la vista y qué son.
+
+CASCADE_STEPS = tuple(step.value for step in CascadeStep)
+
+
+@pytest.fixture
+def cascade(run: ImpulseRun, zones: ZonesRun) -> CascadeRun:
+    return detect_cascade(run, zones)
+
+
+def _pasos(step: dict) -> list[str]:
+    return [
+        nombre for nombre in _trace_names(step) if nombre.split(" ")[0] in CASCADE_STEPS
+    ]
+
+
+def test_sin_cascada_el_payload_no_la_declara(run: ImpulseRun) -> None:
+    """Sin ella la casilla ni se enseña: una capa vacía sólo hace dudar."""
+    payload = build_payload(run)
+
+    assert payload["hasCascade"] is False
+    assert payload["cascade"] == {}
+    assert payload["cascadeChain"] == {}
+
+
+def test_la_cascada_viaja_por_grafico_y_no_por_temporalidad(
+    run: ImpulseRun, zones: ZonesRun, cascade: CascadeRun
+) -> None:
+    """La confirmación nace de un ID de H4 y se dibuja sobre las velas de H1."""
+    payload = build_payload(run, zones=zones, cascade=cascade)
+
+    assert payload["hasCascade"] is True
+    assert set(payload["cascade"]) <= {DAILY, H4, H1}
+    assert {item["k"] for item in payload["cascade"][DAILY]} == {"ZONA_DIARIA"}
+    assert {item["k"] for item in payload["cascade"][H4]} <= {"BUSCAR_H1", "H4_DESCARTADO"}
+    confirmaciones = payload["cascade"].get(H1, [])
+    assert confirmaciones
+    assert {item["k"] for item in confirmaciones} <= {
+        "CONFIRMA_TURTLE", "CONFIRMA_OB_H1", "OB_H1_DESECHADO"
+    }
+    # Los pasos de H1 cuelgan de un ID de H4: es el impulso principal de ese
+    # gráfico, y por eso la capa puede obedecer el filtro de ID visibles.
+    assert {item["tf"] for item in confirmaciones} == {H4}
+
+
+def test_cada_paso_viaja_con_lo_que_hace_falta_para_juzgarlo(
+    run: ImpulseRun, zones: ZonesRun, cascade: CascadeRun
+) -> None:
+    payload = build_payload(run, zones=zones, cascade=cascade)
+    pasos = [item for marcas in payload["cascade"].values() for item in marcas]
+
+    for item in pasos:
+        assert {"x", "y", "k", "d", "tf", "id", "src", "seq", "lvl", "r", "c"} <= set(item)
+        assert item["d"] in ("alcista", "bajista")
+    # Las dos raíces no cuelgan de nada: el toque de H4 porque la cascada
+    # empieza ahí, y el tramo diario porque no es un escalón sino un veto.
+    conocidos = {item["seq"] for item in pasos}
+    for item in pasos:
+        if item["k"] in ("ZONA_DIARIA", "BUSCAR_H1"):
+            assert "p" not in item
+        else:
+            assert item["p"] in conocidos
+
+
+def test_la_cadena_deja_remontar_hasta_el_toque_de_h4(
+    run: ImpulseRun, zones: ZonesRun, cascade: CascadeRun
+) -> None:
+    """El padre de una marca de H1 se dibuja en otro gráfico: sin la cadena no
+    habría forma de contar de dónde viene."""
+    payload = build_payload(run, zones=zones, cascade=cascade)
+    chain = payload["cascadeChain"]
+
+    for item in payload["cascade"][H1]:
+        assert chain[str(item["p"])][1] == "BUSCAR_H1"
+    # Y el descarte remonta al tramo diario que le prohibió mirar, que es lo
+    # único que el Diario aporta a la cascada.
+    for item in payload["cascade"][H4]:
+        if item["k"] == "H4_DESCARTADO":
+            assert chain[str(item["p"])][1] == "ZONA_DIARIA"
+
+
+def test_el_ob_de_h1_viaja_con_su_vela_de_referencia(
+    run: ImpulseRun, zones: ZonesRun, cascade: CascadeRun
+) -> None:
+    """La caja se dibuja sobre una vela ANTERIOR a la marca: sin ese extremo el
+    rectángulo no se puede pintar y el globo no puede decir cuál es."""
+    payload = build_payload(run, zones=zones, cascade=cascade)
+    cajas = [
+        item
+        for item in payload["cascade"].get(H1, [])
+        if item["k"] in ("CONFIRMA_OB_H1", "OB_H1_DESECHADO")
+    ]
+
+    assert cajas
+    for item in cajas:
+        assert item["x0"] < item["x"]
+        assert item["lo"] <= item["lvl"] <= item["hi"]
+
+
+def test_las_marcas_no_llevan_el_texto_ya_montado(
+    run: ImpulseRun, zones: ZonesRun, cascade: CascadeRun
+) -> None:
+    """Igual que el resto del payload: el globo se compone en el navegador."""
+    payload = build_payload(run, zones=zones, cascade=cascade)
+    pasos = [item for marcas in payload["cascade"].values() for item in marcas]
+
+    assert all(not isinstance(valor, str) or len(valor) <= 16
+               for item in pasos for valor in item.values())
+
+
+def test_la_capa_de_cascada_se_dibuja_y_se_apaga(
+    run: ImpulseRun, zones: ZonesRun, cascade: CascadeRun, tmp_path: Path
+) -> None:
+    resultado = _draw(run, tmp_path, zones=zones, cascade=cascade)
+
+    for grafico in (DAILY, H4, H1):
+        encendida = _pasos(_step(resultado, f"cascada-{grafico}"))
+        apagada = _pasos(_step(resultado, f"cascada-apagada-{grafico}"))
+        assert encendida, _trace_names(_step(resultado, f"cascada-{grafico}"))
+        assert not apagada
+
+
+def test_la_ventana_de_busqueda_se_dibuja_con_los_pasos(
+    run: ImpulseRun, zones: ZonesRun, cascade: CascadeRun, tmp_path: Path
+) -> None:
+    """Una marca que dice cuándo se empezó a buscar pero no hasta cuándo no
+    permite auditar la regla de la ventana."""
+    resultado = _draw(run, tmp_path, zones=zones, cascade=cascade)
+    encendida = _trace_names(_step(resultado, f"cascada-{DAILY}"))
+    apagada = _trace_names(_step(resultado, f"cascada-apagada-{DAILY}"))
+
+    assert "ventana de búsqueda" in encendida
+    assert "ventana de búsqueda" not in apagada
+
+
+def test_el_ob_de_h1_se_dibuja_como_caja(
+    run: ImpulseRun, zones: ZonesRun, cascade: CascadeRun, tmp_path: Path
+) -> None:
+    """El OB de H1 es una vela entera y como zona se pinta, igual que el del
+    módulo 2: el marcador dice cuándo se resolvió y la caja, sobre qué."""
+    resultado = _draw(run, tmp_path, zones=zones, cascade=cascade)
+
+    assert "OB de H1" in _trace_names(_step(resultado, f"cascada-{H1}"))
+    assert "OB de H1" not in _trace_names(_step(resultado, f"cascada-apagada-{H1}"))
+
+
+def test_sin_cascada_en_el_payload_la_capa_no_dibuja_nada(
+    run: ImpulseRun, zones: ZonesRun, tmp_path: Path
+) -> None:
+    resultado = _draw(run, tmp_path, zones=zones)
+
+    assert not _pasos(_step(resultado, f"cascada-{DAILY}"))
+    assert not _pasos(_step(resultado, f"cascada-apagada-{DAILY}"))
+
+
+def test_las_notas_dicen_cuantos_pasos_hay_y_que_son_senales(
+    run: ImpulseRun, zones: ZonesRun, cascade: CascadeRun, tmp_path: Path
+) -> None:
+    notas = _step(_draw(run, tmp_path, zones=zones, cascade=cascade), f"cascada-{DAILY}")["notes"]
+
+    assert "cascada a la vista" in notas
+    assert "SON SEÑALES" in notas
+    assert "no hay entradas" in notas
+
+
+def test_la_cascada_no_se_dibuja_en_la_auditoria_ciega(
+    run: ImpulseRun, zones: ZonesRun, cascade: CascadeRun, tmp_path: Path
+) -> None:
+    ciega = _step(_draw(run, tmp_path, zones=zones, cascade=cascade), "ciega")
+
+    assert len(ciega["plot"]["traces"]) == 1

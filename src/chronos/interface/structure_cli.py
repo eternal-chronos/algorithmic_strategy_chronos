@@ -18,6 +18,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from chronos.application.entries.cascade import CascadeRun, detect_cascade
 from chronos.application.structure import (
     baseline_comparison,
     break_comparison,
@@ -599,6 +600,95 @@ def break_by_zone_command(
             written = write_break_captures(baseline, zoned, alternative, output)
             console.print(f"  [dim]{len(written)} capturas en {output}[/dim]")
             console.print(f"Índice de capturas: [bold]{output / 'LEEME.txt'}[/bold]")
+
+
+@structure_app.command("entradas")
+def entries_command(
+    config: Annotated[Path, typer.Option("--config", "-c")] = DEFAULT_CONFIG,
+    output: Annotated[Path, typer.Option("--salida", "-o")] = Path("now/fase30"),
+    skip_tz_audit: Annotated[bool, typer.Option("--skip-tz-audit")] = False,
+) -> None:
+    """Cascada H4 → H1, con el Diario de veto. **Señales, todavía no entradas.**
+
+    No abre ninguna operación: no hay orden, ni stop, ni target, ni resultado en R.
+    Lo único que produce es el explorador con la capa de la cascada encendida,
+    para que el propietario mire si la máquina está viendo lo que ve él.
+
+    La búsqueda arranca en el toque del OB de un ID de H4 y baja a H1; el Diario
+    no es un escalón, sólo prohíbe lo que vaya en contra de su OB mientras el
+    precio esté dentro de él.
+
+    Corre el módulo con las zonas encendidas y con la rotura por zona —que es la
+    regla vigente de la fase 2.1—, porque la cascada se apoya en los toques del OB
+    y ésos son los que la fase 2.0 ya calcula.
+    """
+    with _handled():
+        run_config = load_impulse_config(config)
+        if not run_config.enabled:
+            console.print(
+                "[yellow]El módulo de impulso dominante está desactivado "
+                "(`enabled: false`). No hay nada que buscar.[/yellow]"
+            )
+            return
+
+        history = load_history(run_config.data, run_config.structure_side)
+        audit = _audit_or_stop(run_config, history, skip_tz_audit)
+        series, skipped = _aggregate_available(history, run_config)
+        aggregated = {tf: item.frame for tf, item in series.items()}
+        notes = [item.description for item in series.values()] + skipped
+        provenance = f"{history.provenance} · lado efectivo: {history.side}"
+
+        cascade_config = replace(
+            run_config,
+            rules=replace(run_config.rules, break_by_zone=True),
+            zones=ZonesConfig(enabled=True),
+        )
+        console.print("[dim]Corrida con la rotura por ZONA y las zonas encendidas...[/dim]")
+        run = DetectDominantImpulses(cascade_config).execute(
+            aggregated, audit=audit, provenance=provenance, aggregation_notes=notes
+        )
+        zones = detect_zones(run)
+        cascade = detect_cascade(run, zones)
+        _print_cascade(cascade)
+
+        output.mkdir(parents=True, exist_ok=True)
+        explorer = output / "explorador_entradas.html"
+        explorer.write_text(
+            render_explorer(
+                run,
+                run_config.reporting.max_explorer_bars,
+                lateralization=measure(run),
+                zones=zones,
+                cascade=cascade,
+            ),
+            encoding="utf-8",
+        )
+        console.print(f"\nExplorador: [bold]{explorer}[/bold]")
+
+
+def _print_cascade(cascade: CascadeRun) -> None:
+    """Cuántos pasos de cada tipo. Ni porcentajes ni verdictos: sólo el recuento.
+
+    Lo que se audita se mira en el gráfico, no en una tabla. Esto está para saber
+    que la corrida ha producido algo y dónde buscarlo.
+    """
+    if not cascade.enabled:
+        console.print(
+            "[yellow]La cascada no se ha podido calcular: hacen falta las zonas, "
+            "el ID de H4 y las velas de H1.[/yellow]"
+        )
+        return
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Paso")
+    table.add_column("Marcas", justify="right")
+    for step, count in cascade.counts().items():
+        table.add_row(step, f"{count:,}")
+    console.print("\n[bold]Cascada H4 → H1 (el Diario sólo veta):[/bold]")
+    console.print(table)
+    console.print(
+        "[dim]SON SEÑALES: no hay entradas, ni stops, ni targets, ni resultados. "
+        "Se auditan en el explorador, capa «Cascada de entrada».[/dim]"
+    )
 
 
 def _print_break_regression(baseline: ImpulseRun) -> tuple[bool, str]:

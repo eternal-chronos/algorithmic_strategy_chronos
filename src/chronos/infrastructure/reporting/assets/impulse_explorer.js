@@ -73,19 +73,19 @@
       visible: "current",
       limbo: false, marks: true, contacts: false, mid: false, wrong: false,
       zonesUl: true, zonesOb: true, zonesContext: false, signals: true,
-      avoided: false, steps: false
+      cascade: true, avoided: false, steps: false
     },
     normal: {
       visible: "pair",
       limbo: true, marks: true, contacts: false, mid: false, wrong: true,
       zonesUl: true, zonesOb: true, zonesContext: true, signals: true,
-      avoided: true, steps: true
+      cascade: true, avoided: true, steps: true
     },
     all: {
       visible: "all",
       limbo: true, marks: true, contacts: true, mid: true, wrong: true,
       zonesUl: true, zonesOb: true, zonesContext: true, signals: true,
-      avoided: true, steps: true
+      cascade: true, avoided: true, steps: true
     }
   };
 
@@ -131,6 +131,10 @@
      * encendida en los tres niveles de ruido —es lo que el propietario ha pedido
      * ver— y sólo existe donde existen las zonas: Diario y H4. */
     signals: true,
+    /* La cascada H4 -> H1, con el Diario de veto. Nace encendida en los tres
+     * niveles de ruido: es lo que se está auditando en esta fase. Son SEÑALES,
+     * no entradas: el proyecto sigue sin abrir ni cerrar nada. */
+    cascade: true,
     /* Fase 2.1. Las roturas evitadas son lo primero que hay que auditar de la
      * regla nueva, así que la capa nace encendida cuando la corrida trae alguna.
      * Con `break_by_zone: false` no hay ninguna y la casilla ni se enseña. */
@@ -1349,6 +1353,206 @@
     return text + "<br>SÓLO DIBUJO: no abre ni cierra ninguna operación";
   }
 
+  /* --- La cascada H4 -> H1, con el Diario de veto -----------------------------
+   *
+   * SON SEÑALES, NO ENTRADAS. No hay orden, ni stop, ni target, ni resultado
+   * detrás de ninguna de estas marcas: lo único que enseñan es dónde la máquina
+   * ha bajado de temporalidad y qué ha visto al llegar.
+   *
+   * La cascada son DOS escalones: el toque del OB de H4 y la confirmación en H1.
+   * El Diario no es un paso —no hay que tocar su OB para poder mirar H4—: lo que
+   * hace es prohibir, y su tramo se dibuja en gris para que se vea de dónde viene
+   * cada descarte.
+   *
+   * Se dibujan por GRÁFICO y no por temporalidad de impulso, que es la
+   * diferencia con todas las capas anteriores: el tramo diario se mira en el
+   * Diario, el toque de H4 en H4 y la confirmación en H1, que no lleva impulso
+   * propio. Por eso el payload trae `cascade` indexado por gráfico y aquí se lee
+   * el del gráfico que se está mirando, sin pasar por `impulsesOf`.
+   *
+   * El ID del que cuelga cada marca es siempre el PRINCIPAL de su gráfico —el
+   * diario en el Diario, el de H4 en H4 y también en H1—, así que la capa
+   * obedece el selector de ID visibles igual que las señales de zona.
+   */
+
+  function hasCascade() { return DATA.hasCascade === true; }
+
+  /* Se calculó sobre las zonas del modo activo de R-36: en otro modo son pasos
+   * de impulsos que no existen, igual que las zonas y las señales. */
+  function cascadeOf(chart) {
+    if (!zonesAvailable()) { return []; }
+    return (DATA.cascade || {})[chart] || [];
+  }
+
+  /* Un símbolo por paso, ninguno repetido de las capas que ya existían. Los tres
+   * pasos que NO abren nada —el tramo diario, que sólo prohíbe; el toque de H4
+   * desechado por ir en contra de él; y el OB de H1 que gasta sus dos velas— van
+   * en gris: se ven, pero no compiten con lo que sí siguió adelante. */
+  var CASCADE_STYLE = {
+    ZONA_DIARIA: {
+      symbol: "star", size: 13, muted: true,
+      title: "DENTRO DEL OB DIARIO -> nada en contra se mira"
+    },
+    BUSCAR_H1: { symbol: "star-square", size: 13, title: "TOCA EL OB DE H4 -> buscar en H1" },
+    CONFIRMA_TURTLE: { symbol: "diamond-tall", size: 13, title: "CONFIRMA en H1: turtle soup" },
+    CONFIRMA_OB_H1: { symbol: "bowtie", size: 14, title: "CONFIRMA en H1: OB de H1" },
+    H4_DESCARTADO: { symbol: "x-thin", size: 11, muted: true, title: "H4 EN CONTRA: desechado" },
+    OB_H1_DESECHADO: { symbol: "hourglass", size: 12, muted: true, title: "OB de H1 DESECHADO" }
+  };
+  var CASCADE_KINDS = [
+    "ZONA_DIARIA", "BUSCAR_H1", "CONFIRMA_TURTLE", "CONFIRMA_OB_H1",
+    "H4_DESCARTADO", "OB_H1_DESECHADO"
+  ];
+  /* Los dos pasos de H1 que llevan zona propia: se dibujan además como caja. */
+  var CASCADE_BOXES = ["CONFIRMA_OB_H1", "OB_H1_DESECHADO"];
+
+  function visibleCascade(edges) {
+    if (blindfolded() || !state.cascade || !hasCascade()) { return []; }
+    if (!zonesAvailable() || !isVisible(primary())) { return []; }
+    var allowed = visibleIds(primary(), edges);
+    return cascadeOf(state.chart).filter(function (item) {
+      // Cada paso se sabe cuando cierra la vela que lo midió: el toque va en la
+      // vela fina y no espera las cuatro horas de H4.
+      return item.x >= edges.lo && item.x <= edges.hi &&
+        !pending(item.x, item.src || primary(), edges) && keeps(allowed, item.id);
+    });
+  }
+
+  function cascadeTraces(range) {
+    var edges = window_(range);
+    var visible = visibleCascade(edges);
+    if (!visible.length) { return []; }
+    var traces = CASCADE_KINDS.map(function (kind) {
+      return cascadeTrace(visible, kind);
+    }).filter(Boolean);
+    var windows = cascadeWindowTrace(visible, edges);
+    var boxes = cascadeBoxTrace(visible, edges);
+    // El tramo y la caja van DEBAJO de las marcas: son el sitio, no el suceso.
+    return [boxes, windows].filter(Boolean).concat(traces);
+  }
+
+  /* El OB de H1 es una vela entera, igual que el del módulo 2, y como zona se
+   * dibuja: rectángulo de `lo` a `hi` desde la vela de REFERENCIA —que es la que
+   * lo define y queda detrás de la marca— hasta la vela que lo resolvió. El
+   * marcador dice cuándo se resolvió; la caja, sobre qué. Es DIBUJO: el
+   * rectángulo no decide nada, viene ya calculado del motor.
+   *
+   * No hay caja para el turtle soup: ése no es una zona sino un nivel, y ya lo
+   * lleva el globo de su marca. */
+  function cascadeBoxTrace(marks, edges) {
+    var bucket = { x: [], y: [], text: [] };
+    marks.forEach(function (item) {
+      if (CASCADE_BOXES.indexOf(item.k) < 0) { return; }
+      if (item.x0 === undefined || item.lo === undefined) { return; }
+      var a = iso(item.x0);
+      var b = iso(clip(item.x, edges));
+      var caption = cascadeCaption(item);
+      bucket.x.push(a, b, b, a, a, null);
+      bucket.y.push(item.lo, item.lo, item.hi, item.hi, item.lo, null);
+      bucket.text.push(caption, caption, caption, caption, caption, "");
+    });
+    if (!bucket.x.length) { return null; }
+    return {
+      type: "scatter", mode: "lines", name: "OB de H1",
+      x: bucket.x, y: bucket.y, text: bucket.text,
+      hoverinfo: "text", hoverlabel: { align: "left" }, connectgaps: false,
+      fill: "toself", fillcolor: rgba(COLORS.muted, 0.14), opacity: 0.9,
+      line: { color: COLORS.muted, width: 1.2, dash: "dash" }
+    };
+  }
+
+  function cascadeTrace(marks, kind) {
+    var items = marks.filter(function (item) { return item.k === kind; });
+    if (!items.length) { return null; }
+    var style = CASCADE_STYLE[kind];
+    return {
+      type: "scatter", mode: "markers",
+      name: kind + " " + label(state.chart),
+      x: items.map(function (item) { return iso(item.x); }),
+      y: items.map(function (item) { return item.y; }),
+      text: items.map(cascadeCaption),
+      hoverinfo: "text", hoverlabel: { align: "left" },
+      marker: {
+        symbol: style.symbol, size: style.size,
+        color: items.map(function (item) {
+          if (style.muted) { return COLORS.muted; }
+          return item.d === "alcista" ? COLORS.bullish : COLORS.bearish;
+        }),
+        line: { color: COLORS.surface, width: 1.2 }
+      }
+    };
+  }
+
+  /* El tramo en el que la búsqueda estuvo ARMADA, del toque al momento en que el
+   * precio abandonó la zona. Sin él la marca dice que se empezó a buscar pero no
+   * hasta cuándo, que es justo la regla que hay que auditar. Una sola traza con
+   * huecos: una por marca serían cientos de trazas para dibujar rayas. */
+  function cascadeWindowTrace(marks, edges) {
+    var x = [], y = [];
+    marks.forEach(function (item) {
+      if (item.k !== "ZONA_DIARIA" && item.k !== "BUSCAR_H1") { return; }
+      // Sin `end` la ventana seguía armada al acabarse el histórico; en replay,
+      // además, no se estira más allá del presente.
+      var stop = item.end === undefined ? edges.hi : clip(item.end, edges);
+      if (stop <= item.x) { return; }
+      x.push(iso(item.x), iso(stop), null);
+      y.push(item.y, item.y, null);
+    });
+    if (!x.length) { return null; }
+    return {
+      type: "scatter", mode: "lines", name: "ventana de búsqueda",
+      x: x, y: y, hoverinfo: "skip",
+      line: { color: COLORS.muted, width: 1, dash: "dot" }
+    };
+  }
+
+  function cascadeCaption(item) {
+    var style = CASCADE_STYLE[item.k];
+    var text = style.title + "<br>" + stamp(item.x) +
+      "<br>ID nº " + item.id + " de " + label(item.tf) + " (" + item.d + ")";
+    var parent = (DATA.cascadeChain || {})[item.p];
+    if (parent) {
+      text += "<br>viene de " + parent[1] + " · ID nº " + parent[3] + " de " +
+        label(parent[2]) + " · " + iso(parent[0]).slice(0, 16) + " UTC";
+    }
+    if (item.k === "ZONA_DIARIA" || item.k === "BUSCAR_H1" || item.k === "H4_DESCARTADO") {
+      text += "<br>zona OB [" + price(item.lo) + ", " + price(item.hi) +
+        "] · borde interior " + price(item.lvl) +
+        "<br>la mecha llegó a " + price(item.r) + " · cierre " + price(item.c);
+    }
+    if (item.k === "H4_DESCARTADO") {
+      text += "<br>va EN CONTRA del OB diario vigente: mientras el precio no salga " +
+        "de esa zona no se mira ninguna confirmación contraria";
+    } else if (item.k === "ZONA_DIARIA") {
+      text += "<br>el precio está DENTRO del OB diario: no abre ninguna búsqueda, " +
+        "sólo prohíbe lo contrario a esta dirección" +
+        "<br>vigente hasta " +
+        (item.end === undefined
+          ? "el final del histórico: el precio no llegó a abandonar la zona"
+          : iso(item.end).slice(0, 16) + " UTC, cuando una vela DIARIA cerró fuera");
+    } else if (item.k === "BUSCAR_H1") {
+      text += "<br>búsqueda armada hasta " +
+        (item.end === undefined
+          ? "el final del histórico: el precio no llegó a abandonar la zona"
+          : iso(item.end).slice(0, 16) + " UTC, cuando el precio cerró fuera de la zona");
+    } else if (item.k === "CONFIRMA_TURTLE") {
+      text += "<br>la vela fue a buscar " + price(item.lvl) +
+        " —la mecha de la de " + stamp(item.x0) + "— y cerró en " + price(item.c) +
+        " sin superarlo";
+    } else if (item.k === "CONFIRMA_OB_H1") {
+      text += "<br>OB de H1 [" + price(item.lo) + ", " + price(item.hi) +
+        "] · la vela de referencia es la de " + stamp(item.x0) +
+        "<br>superó " + price(item.lvl) + " con la mecha en " + price(item.r) +
+        "<br>lo consiguió la vela nº " + item.a + " a favor de las dos que había";
+    } else if (item.k === "OB_H1_DESECHADO") {
+      text += "<br>OB de H1 [" + price(item.lo) + ", " + price(item.hi) +
+        "] · la vela de referencia es la de " + stamp(item.x0) +
+        "<br>las DOS velas a favor se quedaron sin superar " + price(item.lvl) +
+        "<br>esta vía queda cerrada; el turtle soup sigue buscando";
+    }
+    return text + "<br>SÓLO SEÑAL: no abre ni cierra ninguna operación";
+  }
+
   /* El sombreado es el del impulso principal: dos capas de limbo superpuestas
    * no se leen, y el limbo que importa al auditar un gráfico es el suyo. */
   function limboShapes(range) {
@@ -1619,6 +1823,7 @@
       .concat(markerTraces(range))
       .concat(avoidedTraces(range))
       .concat(signalTraces(range))
+      .concat(cascadeTraces(range))
       .concat(confirmationTraces(range))
       .concat(contactTraces(range))
       .concat(wrongExtremeTraces(range));
@@ -1651,6 +1856,7 @@
       return zonesAvailable() && overlays().length > 1;
     }],
     ["signals", "señales de zona", hasSignals],
+    ["cascade", "cascada de entrada", hasCascade],
     ["avoided", "roturas evitadas", hasAvoided],
     ["steps", "escalera del extremo", hasSteps]
   ];
@@ -1753,6 +1959,24 @@
       text += " · señales de zona a la vista: " + senales.length.toLocaleString("es-ES") +
         " (" + porTipo + ") de " + label(primary()) +
         " · SON DIBUJO: no abren ni cierran nada, no hay entradas en el proyecto";
+    }
+    if (hasCascade() && state.cascade && zonesAvailable()) {
+      var pasos = visibleCascade(edges);
+      var porPaso = CASCADE_KINDS.filter(function (kind) {
+        return pasos.some(function (item) { return item.k === kind; });
+      }).map(function (kind) {
+        return pasos.filter(function (item) { return item.k === kind; }).length + " " + kind;
+      }).join(", ");
+      // La cascada es lo que se está auditando en esta fase: si la capa no dice
+      // cuántos pasos hay a la vista, un gráfico sin marcas se lee como que la
+      // regla no encontró nada cuando puede ser que no haya velas de ese paso.
+      text += " · cascada a la vista en " + label(state.chart) + ": " +
+        pasos.length.toLocaleString("es-ES") +
+        (porPaso ? " (" + porPaso + ")" : "") +
+        " · SON SEÑALES: no hay entradas, ni stops, ni targets" +
+        (state.visible === "all"
+          ? ""
+          : " · obedecen el filtro de ID visibles, igual que las señales de zona");
     }
     if (hasAvoided() && state.avoided && isVisible(primary())) {
       var allowedAvoided = visibleIds(primary(), edges);
@@ -2044,6 +2268,7 @@
   function enforceAvailability() {
     if (!hasZones()) { state.zonesUl = state.zonesOb = false; }
     if (!hasSignals()) { state.signals = false; }
+    if (!hasCascade()) { state.cascade = false; }
     if (!hasSteps()) { state.steps = false; }
     if (!hasAvoided()) { state.avoided = false; }
   }
@@ -2060,6 +2285,14 @@
   function buildSignalLayers() {
     if (hasSignals()) { return; }
     hide("signal-layers");
+  }
+
+  /* Mismo criterio para la cascada: sin zonas no hay toques, y sin toques no hay
+   * ni un paso que dibujar. Una casilla que no puede pintar nada sólo hace dudar
+   * de si está fallando. */
+  function buildCascadeLayers() {
+    if (hasCascade()) { return; }
+    hide("cascade-layers");
   }
 
   /* Fase 2.1, mismo criterio: con `break_by_zone: false` no hay ni una rotura
@@ -2252,6 +2485,10 @@
       document.getElementById("layer-signals").disabled = !zonesAvailable();
       document.getElementById("layer-signals").checked = state.signals;
     }
+    if (hasCascade()) {
+      document.getElementById("layer-cascade").disabled = !zonesAvailable();
+      document.getElementById("layer-cascade").checked = state.cascade;
+    }
     if (hasAvoided()) {
       document.getElementById("layer-avoided").checked = state.avoided;
     }
@@ -2321,6 +2558,7 @@
       ["layer-zones-ob", "zonesOb"],
       ["layer-zones-context", "zonesContext"],
       ["layer-signals", "signals"],
+      ["layer-cascade", "cascade"],
       ["layer-avoided", "avoided"],
       ["layer-steps", "steps"]
     ].forEach(function (pair) {
@@ -2417,6 +2655,7 @@
   buildModeButtons();
   buildZoneLayers();
   buildSignalLayers();
+  buildCascadeLayers();
   buildBreakLayers();
   buildNoiseButtons();
   // El nivel de salida se aplica aquí, con el payload ya leído: así lo que no

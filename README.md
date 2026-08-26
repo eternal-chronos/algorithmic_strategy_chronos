@@ -62,6 +62,10 @@ chronos structure zonas --config config/impulse.yaml
 # verifica que con `break_by_zone: false` sale la línea base exacta; si no sale,
 # para y avisa.
 chronos structure rotura-por-zona --config config/impulse.yaml
+
+# Fase 3.0: la cascada H4 -> H1 (el Diario sólo veta), sólo señales: ni entradas
+# ni métricas
+chronos structure entradas --config config/impulse.yaml
 ```
 
 El módulo de estructura detecta **el impulso dominante del Diario y de H4** y

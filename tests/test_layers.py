@@ -94,10 +94,15 @@ def test_nadie_del_motor_lee_las_senales_de_zona() -> None:
     Se comprueba sobre `domain/` y `application/` enteros y no sólo sobre el
     detector: la promesa hecha al propietario es que encenderlas no mueve un
     impulso, ni una zona, ni una rotura.
+
+    La cascada de `entries/` las lee y está permitida por la misma razón por la
+    que lo están ellas: tampoco decide nada. Que eso siga siendo cierto lo fija
+    el test de abajo, que prohíbe el camino de vuelta.
     """
     permitido = {
         SRC / "domain" / "structure" / "zone_signals.py",
         SRC / "application" / "structure" / "zone_signals.py",
+        SRC / "application" / "entries" / "cascade.py",
     }
     for layer in ("domain", "application"):
         for path in _modules(layer):
@@ -105,4 +110,20 @@ def test_nadie_del_motor_lee_las_senales_de_zona() -> None:
                 continue
             assert not any("zone_signals" in name for name in _imports(path)), (
                 f"{path.relative_to(SRC)} importa las señales de zona"
+            )
+
+
+def test_el_motor_no_sabe_que_existen_las_entradas() -> None:
+    """La cascada lee la estructura; la estructura no puede leer la cascada.
+
+    Es la misma promesa de una fase más arriba: el ID, las zonas y la rotura
+    salen exactamente iguales con la cascada dentro que fuera, porque ni un solo
+    módulo de `structure/` puede llegar a `entries/`.
+    """
+    for layer in ("domain", "application"):
+        for path in _modules(layer):
+            if "entries" in path.parts:
+                continue
+            assert not any("entries" in name for name in _imports(path)), (
+                f"{path.relative_to(SRC)} importa las entradas"
             )

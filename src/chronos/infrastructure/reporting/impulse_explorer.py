@@ -30,6 +30,7 @@ from typing import Any
 import pandas as pd
 import plotly.offline as pyo
 
+from chronos.application.entries.cascade import CascadeMark, CascadeRun
 from chronos.application.structure.detect_impulses import ImpulseRun, TimeframeAnalysis
 from chronos.application.structure.lateralization import (
     LateralizationStudy,
@@ -93,10 +94,11 @@ def render_explorer(
     lateralization: LateralizationStudy | None = None,
     variants: Sequence[ModeVariant] = (),
     zones: ZonesRun | None = None,
+    cascade: CascadeRun | None = None,
 ) -> str:
     """Devuelve el HTML completo del explorador."""
     generated_at = generated_at or SystemClock().now()
-    payload = build_payload(run, max_bars, lateralization, variants, zones)
+    payload = build_payload(run, max_bars, lateralization, variants, zones, cascade)
     # El JSON viaja dentro de un <script>: escapar `</` evita que un texto
     # cualquiera pueda cerrar la etiqueta antes de tiempo.
     data = json.dumps(payload, separators=(",", ":"), ensure_ascii=False, default=str).replace(
@@ -123,6 +125,7 @@ def build_payload(
     lateralization: LateralizationStudy | None = None,
     variants: Sequence[ModeVariant] = (),
     zones: ZonesRun | None = None,
+    cascade: CascadeRun | None = None,
 ) -> dict[str, Any]:
     """Serializa la corrida a la estructura que consume el explorador.
 
@@ -203,6 +206,14 @@ def build_payload(
         #: dibujo, y sólo donde hay zonas. Sin una sola señal la casilla no se
         #: enseña, igual que las demás capas que no pueden pintar nada.
         "hasSignals": any(measurement.items for measurement in signals.values()),
+        #: La cascada Diario → H4 → H1. Va **por gráfico** y no por temporalidad
+        #: de ID: la confirmación nace de un ID de H4 y se dibuja sobre las velas
+        #: de H1, que no lleva impulso propio, así que no cabe en `impulses`.
+        "cascade": _cascade(cascade),
+        #: La cadena entera por número de paso, para que una marca pueda contar de
+        #: dónde viene aunque su padre se dibuje en otro gráfico.
+        "cascadeChain": _cascade_chain(cascade),
+        "hasCascade": cascade is not None and not cascade.empty,
         #: Y para la escalera del extremo (§3.2): sin una sola extensión, todas
         #: las líneas son rectas y no hay ningún salto que marcar.
         "hasSteps": any(
@@ -486,6 +497,70 @@ def _zone_signals(signals: TimeframeSignals | None) -> list[dict[str, Any]]:
         }
         for item in signals.items
     ]
+
+
+def _cascade(cascade: CascadeRun | None) -> dict[str, list[dict[str, Any]]]:
+    """Capa "Cascada de entrada". Puramente visual: no abre ni cierra nada.
+
+    Cada marca va en el gráfico en el que se mira ese paso —el toque diario en el
+    Diario, el de H4 en H4, la confirmación en H1— porque es donde el propietario
+    la busca. Van juntas en una lista por gráfico y el explorador las separa por
+    `k`, igual que las señales de zona.
+
+    `y` es el punto de contacto con la zona en los toques y el cierre de la vela
+    en lo que ocurre en H1: son marcas sobre velas, no sobre niveles.
+    """
+    if cascade is None or cascade.empty:
+        return {}
+    return {
+        chart: [_cascade_mark(mark) for mark in marks]
+        for chart, marks in cascade.per_chart().items()
+    }
+
+
+def _cascade_mark(mark: CascadeMark) -> dict[str, Any]:
+    record: dict[str, Any] = {
+        "x": _minute(pd.Timestamp(mark.timestamp)),
+        "y": round(mark.price, DECIMALS),
+        "k": mark.step.value,
+        "d": mark.direction.value,
+        "tf": mark.timeframe,
+        "id": mark.id_num,
+        "src": mark.source,
+        "seq": mark.seq,
+        "lvl": round(mark.level, DECIMALS),
+        "r": round(mark.reach, DECIMALS),
+        "c": round(mark.close, DECIMALS),
+    }
+    if mark.parent is not None:
+        record["p"] = mark.parent
+    if mark.low is not None and mark.high is not None:
+        record["lo"] = round(mark.low, DECIMALS)
+        record["hi"] = round(mark.high, DECIMALS)
+    if mark.window_end is not None:
+        record["end"] = _minute(pd.Timestamp(mark.window_end))
+    if mark.attempts is not None:
+        record["a"] = mark.attempts
+    if mark.zone_start is not None:
+        # La zona del OB de H1 se mide sobre una vela anterior a la de la marca:
+        # sin este extremo el rectángulo no se puede dibujar.
+        record["x0"] = _minute(pd.Timestamp(mark.zone_start))
+    return record
+
+
+def _cascade_chain(cascade: CascadeRun | None) -> dict[str, list[Any]]:
+    """Paso → `[minuto, tipo, temporalidad del ID, nº de ID]`, para remontar el árbol."""
+    if cascade is None or cascade.empty:
+        return {}
+    return {
+        str(mark.seq): [
+            _minute(pd.Timestamp(mark.timestamp)),
+            mark.step.value,
+            mark.timeframe,
+            mark.id_num,
+        ]
+        for mark in cascade.marks
+    }
 
 
 def _contacts(measurement: TimeframeLateralization | None) -> list[dict[str, Any]]:
