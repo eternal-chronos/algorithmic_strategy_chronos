@@ -15,19 +15,33 @@ Lo que hace el Diario es prohibir, y sólo eso.
    calcula y el propietario ya ha auditado; aquí no se vuelve a definir.
    → **BUSCAR_H1**: se abre la ventana de búsqueda en H1.
 
-2. **Al tocar el OB de H4 se baja a H1**, y ahí confirma lo primero que aparezca
-   de estas dos, que no son intercambiables sino dos formas distintas de ver lo
-   mismo:
-   - **turtle soup** (`domain/entries/turtle_soup.py`): dos velas, la segunda va a
-     buscar la mecha de la primera y cierra sin superarla;
-   - **OB de H1** (`domain/entries/hourly_order_block.py`): la vela verde que
-     supera con mecha el máximo de la roja anterior, con dos oportunidades.
-   → **CONFIRMA_TURTLE** o **CONFIRMA_OB_H1**. Empate en la misma vela: manda el
-   turtle soup. **Una confirmación por ventana y ni una más**: la primera cierra
-   la búsqueda, y lo que llegue después ya no se marca aunque el motor lo vea.
-   La vía del OB puede además cerrarse sola cuando gasta sus dos oportunidades
-   sin superar el nivel, y eso se marca (**OB_H1_DESECHADO**) porque el
-   propietario quiere ver dónde miró la máquina y no le valió.
+2. **Al tocar el OB de H4 se baja a H1 y se espera a que el ID de H1 se ponga en
+   la dirección del de H4.** No se busca ningún patrón de velas: en H1 hay ID
+   propio —el mismo detector del Diario y de H4, con las mismas reglas— y lo que
+   se espera es justo eso, que el ID vigente en H1 deje de ir en contra. Con el
+   OB de un ID **alcista** de H4 tocado, si en H1 manda un ID bajista hay que
+   esperar a que se rompa y se constituya el alcista; y en cuanto ese ID de H1
+   tiene **OB confirmado**, ése es el OB que se marca.
+   → **CONFIRMA_OB_H1**, con la zona del OB de ese ID de H1.
+
+   Da igual que el ID de H1 ya estuviera alineado al llegar el toque: lo que se
+   pide es que lo esté, no que gire. Lo que sí hace falta es el OB, porque es lo
+   que se marca: un ID de H1 alineado sin OB confirmado no señala nada y la
+   espera sigue con el siguiente. **Una confirmación por ventana y ni una más.**
+
+3. **El precio toca ese OB de H1 y ahí salta la señal.** Es el mismo `TOQUE_OB`
+   de la fase 2.0 que ya se cobra en H4 y en el Diario, leído sobre el OB de H1 y
+   sin redefinir nada: basta con que el rango entre en la zona viniendo de fuera.
+   **No se espera al cierre de la vela de H1**, igual que no se espera al de la
+   de H4 ni al de la diaria: la señal se fecha en la vela fina —M15 en el reparto
+   por defecto— en la que el precio entró en la zona, con los números de esa vela.
+   → **TOQUE_OB_H1**, que es la señal que cierra la cascada.
+
+   **Se espera mientras dure la ventana de H4**, y ni un minuto más. Cerrada la
+   búsqueda, el OB de H1 que estaba marcado deja de valer: no hay señal tardía
+   que salte cuando el movimiento que la justificaba ya pasó. Muerto el ID de H1
+   muere además su OB, así que manda la que llegue antes. **Un toque por
+   confirmación y ni uno más.**
 
 **El veto del Diario.** Mientras el precio esté dentro del OB de un ID diario
 **no se mira ninguna confirmación que vaya en contra de él**: en el OB de un ID
@@ -38,22 +52,49 @@ y arranca en el `TOQUE_OB` diario porque el precio no está dentro de la zona
 hasta que entra en ella. Fuera de esos tramos, **todo toque de H4 vale, alcista o
 bajista**: el Diario no autoriza nada, sólo prohíbe.
 
-**Hasta cuándo se busca: mientras el precio no abandone la zona.** Lo decide el
-propietario y es lo que ata la búsqueda al sitio en el que empezó. La ventana se
-abre en el instante del toque y se cierra en la primera vela **de la temporalidad
-de esa zona** que cierre fuera de ella —da igual por qué lado: irse hacia arriba
-es quedarse sin entrada, e irse hacia abajo es romper el OB—, o con la muerte del
-ID si llega antes. Cada visita nueva a la zona vuelve a armarla, porque un
-`TOQUE_OB` exige venir de fuera y por tanto hay uno por visita. El mismo criterio
-mide las dos cosas: la ventana de H4 que busca en H1 y el tramo diario que veta,
-que por tanto se levanta con el cierre de una vela **diaria** fuera de la zona y
-no antes.
+**Hasta cuándo se busca: hasta romper el OB o hasta llegar al UL.** Lo decide el
+propietario. La ventana se abre en el instante del toque y se cierra con lo
+primero de estas tres cosas:
+
+1. **se rompe el OB** — una vela de H4 cierra más allá de su borde **exterior**,
+   es decir lo atraviesa entero. Por ahí abajo se acabó: la zona que mandó buscar
+   ya no está;
+2. **el precio llega al UL** del mismo ID de H4, y basta con **tocarlo**: en
+   cuanto el rango entra en la zona, sin esperar al cierre de la vela de H4, igual
+   que el toque del OB. El UL es el extremo del impulso, o sea el sitio al que se
+   iba: llegar ahí es haberse quedado sin viaje, y es lo que impide seguir
+   buscando indefinidamente cuando H1 no llega a girar o gira tarde;
+3. **muere el ID de H4**, si llega antes que las dos anteriores.
+
+**Salir del OB hacia arriba ya no cierra nada.** El precio puede abandonar la zona
+a favor y la búsqueda sigue viva hasta el UL, que es lo que hace falta para que el
+segundo escalón tenga sitio donde ocurrir. Cada visita nueva a la zona vuelve a
+armar la búsqueda —un `TOQUE_OB` exige venir de fuera, así que hay uno por visita—
+y **la búsqueda anterior queda anulada**: si al volver no ha nacido ningún ID de
+H1 nuevo se vuelve a coger el mismo, con su mismo OB.
+
+El UL que se mira es el que se dibuja, el de la vela del extremo con la que el ID
+se constituyó, y no se remarca aunque el extremo se estire después. Por eso se
+conoce entero desde que nace el ID y mirarlo no adelanta nada.
+
+**El tramo diario del veto se mide distinto, y es a propósito**: ahí la pregunta
+no es hasta cuándo se busca sino mientras el precio esté **dentro** del OB diario,
+así que ese tramo se levanta con el cierre de una vela **diaria** fuera de la
+zona, por el lado que sea.
+
+**El UL de H1 no interviene.** El ID de H1 trae sus dos zonas, como cualquier
+otro, y las dos se dibujan; pero la cascada sólo lee el OB. Lo que decide en H1
+es la dirección del ID y la existencia de su OB, nada más.
 
 **Causalidad.** Que la ventana se cierre en una vela futura no adelanta nada: para
 saber si sigue abierta en el instante `t` sólo hacen falta los cierres anteriores
-a `t`, que es exactamente lo que se comprueba. Las velas de H1 que se miran son
-las que cierran después del toque de H4, y la vela de referencia del OB de H1
-—la que trajo el precio— puede ser anterior, que es su definición.
+a `t`, que es exactamente lo que se comprueba. Y el OB de H1 se marca en la vela
+en la que ya se sabía que existía —la de la constitución del ID o la de la
+confirmación del OB, la que llegue más tarde—, nunca antes; su vela definitoria,
+la del ancla, queda detrás, que es su definición. Y el toque de ese OB llega
+todavía más tarde: la fase 2.0 sólo lo busca a partir de la vela **siguiente** al
+nacimiento de la zona, así que cuando el precio entra en ella hace ya una vela de
+H1 que se sabía que existía.
 """
 
 from __future__ import annotations
@@ -63,9 +104,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 
+import numpy as np
 import pandas as pd
 
-from chronos.application.structure.config import DAILY, H1, H4
+from chronos.application.structure.config import DAILY, H1, H4, TIMEFRAME_MINUTES
 from chronos.application.structure.detect_impulses import ImpulseRun
 from chronos.application.structure.zone_signals import (
     ImpulseSignal,
@@ -73,8 +115,6 @@ from chronos.application.structure.zone_signals import (
     detect_zone_signals,
 )
 from chronos.application.structure.zones import ImpulseZones, ZonesRun
-from chronos.domain.entries.hourly_order_block import HourlyOrderBlock, find_hourly_order_block
-from chronos.domain.entries.turtle_soup import TurtleSoup, find_turtle_soup
 from chronos.domain.structure.enums import ImpulseDirection
 from chronos.domain.structure.zone_signals import ZoneSignalKind
 from chronos.domain.structure.zones import CandleSeries, Zone
@@ -90,12 +130,23 @@ class CascadeStep(StrEnum):
     H4_DESCARTADO = "H4_DESCARTADO"
     #: El precio toca el OB de un ID de H4: se baja a H1.
     BUSCAR_H1 = "BUSCAR_H1"
-    #: Confirmación en H1 por turtle soup.
-    CONFIRMA_TURTLE = "CONFIRMA_TURTLE"
-    #: Confirmación en H1 por OB de H1.
+    #: El ID de H1 va ya en la dirección del de H4 y tiene OB: se marca ese OB.
     CONFIRMA_OB_H1 = "CONFIRMA_OB_H1"
-    #: El OB de H1 gastó sus dos oportunidades sin superar el nivel.
-    OB_H1_DESECHADO = "OB_H1_DESECHADO"
+    #: El precio toca ese OB de H1: la señal, en el instante del toque.
+    TOQUE_OB_H1 = "TOQUE_OB_H1"
+
+
+class WindowEnd(StrEnum):
+    """Por qué se cerró una ventana. Se dibuja: es la regla que se audita."""
+
+    #: Una vela de H4 cerró más allá del borde exterior del OB: lo atravesó.
+    ROTURA_OB = "ROTURA_OB"
+    #: El precio llegó al UL del ID de H4, que es el sitio al que se iba.
+    TOQUE_UL = "TOQUE_UL"
+    #: Se acabó el ID antes que las otras dos.
+    MUERTE_ID = "MUERTE_ID"
+    #: Sólo del tramo diario: una vela diaria cerró fuera de la zona.
+    SALIDA_ZONA = "SALIDA_ZONA"
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,8 +160,8 @@ class CascadeMark:
     """
 
     step: CascadeStep
-    #: Gráfico en el que se dibuja. No es la temporalidad del ID: la confirmación
-    #: de H1 nace de un ID de H4 y se dibuja sobre las velas de H1.
+    #: Gráfico en el que se dibuja. No siempre es la temporalidad del ID: el
+    #: toque de H4 se mide en la vela fina y se dibuja sobre H4.
     chart: str
     #: Temporalidad de la vela en la que se midió. El toque va en la vela fina;
     #: lo demás, en la vela de su propio gráfico.
@@ -119,14 +170,15 @@ class CascadeMark:
     #: Dónde se planta el marcador.
     price: float
     direction: ImpulseDirection
-    #: Temporalidad y número del ID del que cuelga el paso.
+    #: Temporalidad y número del ID del que cuelga el paso. En la confirmación es
+    #: el ID de **H1**, que es el que se ha esperado; de qué toque de H4 viene lo
+    #: dice `parent`.
     timeframe: str
     id_num: int
     seq: int
     parent: int | None
-    #: Nivel al que se refiere el paso: el borde interior de la zona en los
-    #: toques, el extremo rechazado en el turtle soup y el máximo a superar en el
-    #: OB de H1.
+    #: Nivel al que se refiere el paso: el borde interior de la zona, que es el
+    #: que el precio encuentra primero.
     level: float
     reach: float
     close: float
@@ -136,10 +188,10 @@ class CascadeMark:
     #: Hasta cuándo quedó armada la ventana que abre este paso. `None` = seguía
     #: armada al final del histórico.
     window_end: datetime | None = None
-    #: OB de H1: cuál de las dos oportunidades confirmó, o cuántas se gastaron.
-    attempts: int | None = None
+    #: Qué la cerró. `None` cuando el histórico se acabó antes.
+    window_reason: WindowEnd | None = None
     #: Vela en la que empieza la zona del paso, cuando no es la de la marca: el
-    #: OB de H1 se mide sobre su vela de referencia, que queda detrás.
+    #: OB de H1 se dibuja sobre la vela del ancla de su ID, que queda detrás.
     zone_start: datetime | None = None
 
 
@@ -187,13 +239,17 @@ class _DailyVeto:
 def detect_cascade(run: ImpulseRun, zones: ZonesRun | None) -> CascadeRun:
     """La cascada de una corrida. Sin zonas no hay toques y no hay nada que buscar.
 
-    Hacen falta el ID de H4 y las velas de H1: son los dos escalones. El Diario
-    sólo aporta vetos, así que si el reparto de gráficos no lo trae la cascada
-    corre igual y no prohíbe nada.
+    Hacen falta los **dos ID**, el de H4 y el de H1: son los dos escalones, y el
+    de H1 es estructura de verdad, no un patrón de velas. Sin detector en H1 —el
+    reparto por defecto de las fases 1 y 2— no hay cascada que calcular: la fase
+    3.0 lo enciende con `with_hourly_structure`. El Diario sólo aporta vetos, así
+    que si el reparto no lo trae la cascada corre igual y no prohíbe nada.
     """
     if zones is None or not zones.enabled:
         return CascadeRun(enabled=False, marks=())
-    if H4 not in run.analyses or H1 not in run.chart_bars:
+    if H4 not in run.analyses or H1 not in run.analyses:
+        return CascadeRun(enabled=False, marks=())
+    if H4 not in zones.per_timeframe or H1 not in zones.per_timeframe:
         return CascadeRun(enabled=False, marks=())
 
     signals = detect_zone_signals(run, zones)
@@ -207,26 +263,42 @@ class _Cascade:
     def __init__(self, run: ImpulseRun, zones: ZonesRun, signals: ZoneSignalsRun) -> None:
         self._series = {
             H4: CandleSeries.of(run.analyses[H4].bars),
-            H1: CandleSeries.of(run.chart_bars[H1]),
+            H1: CandleSeries.of(run.analyses[H1].bars),
         }
         if DAILY in run.analyses:
             self._series[DAILY] = CandleSeries.of(run.analyses[DAILY].bars)
+        #: La serie de vela más corta de la corrida —M15 en el reparto por
+        #: defecto—: es donde se mide el toque del UL, que no espera al cierre de
+        #: la vela de H4 igual que no lo espera el del OB. Si el reparto no trae
+        #: ninguna más fina, se mide en la del propio ID y funciona igual.
+        self._fine = _finest(run, self._series[H4])
         self._zoned = {
             timeframe: {item.id_num: item for item in measurement.items}
             for timeframe, measurement in zones.per_timeframe.items()
         }
+        #: Los ID de H1 en orden cronológico: es la fila en la que se espera.
+        self._hourly_ids = zones.per_timeframe[H1].items
         self._touches = {
-            timeframe: tuple(
-                item
-                for item in signals.per_timeframe[timeframe].items
-                if item.kind is ZoneSignalKind.TOQUE_OB
-            )
-            if timeframe in signals.per_timeframe and timeframe in self._series
-            else ()
+            timeframe: self._touches_of(signals, timeframe)
             for timeframe in (DAILY, H4)
         }
+        #: Los toques del OB de H1 por ID: la señal que cierra la cascada. Es el
+        #: mismo `TOQUE_OB` de la fase 2.0, ya fechado en la vela fina.
+        self._hourly_touches: dict[int, list[ImpulseSignal]] = {}
+        for touch in self._touches_of(signals, H1):
+            self._hourly_touches.setdefault(touch.id_num, []).append(touch)
         self._marks: list[CascadeMark] = []
         self._seq = 0
+
+    def _touches_of(self, signals: ZoneSignalsRun, timeframe: str) -> tuple[ImpulseSignal, ...]:
+        """Los `TOQUE_OB` de una temporalidad, en orden. Vacío si no se dibuja."""
+        if timeframe not in signals.per_timeframe or timeframe not in self._series:
+            return ()
+        return tuple(
+            item
+            for item in signals.per_timeframe[timeframe].items
+            if item.kind is ZoneSignalKind.TOQUE_OB
+        )
 
     # --- Recorrido ----------------------------------------------------------
 
@@ -264,13 +336,14 @@ class _Cascade:
             zoned = self._zoned.get(DAILY, {}).get(touch.id_num)
             if zoned is None or zoned.order_block is None:
                 continue
-            end = self._window_end(DAILY, zoned, zoned.order_block, touch.timestamp)
+            end, why = self._veto_end(zoned, zoned.order_block, touch.timestamp)
             seq = self._mark(
                 step=CascadeStep.ZONA_DIARIA,
                 chart=DAILY,
                 touch=touch,
                 zone=zoned.order_block,
                 window_end=end,
+                window_reason=why,
                 parent=None,
             )
             vetoes.append(
@@ -294,99 +367,179 @@ class _Cascade:
         return None
 
     def _hourly_window(self, touch: ImpulseSignal, zoned: ImpulseZones, zone: Zone) -> None:
-        """Se abre la ventana del toque de H4 y se busca la confirmación en H1."""
-        end = self._window_end(H4, zoned, zone, touch.timestamp)
+        """Se abre la ventana del toque de H4 y se espera al ID de H1 que confirma."""
+        end, why = self._search_end(zoned, zone, touch.timestamp)
         origin = self._mark(
             step=CascadeStep.BUSCAR_H1,
             chart=H4,
             touch=touch,
             zone=zone,
             window_end=end,
+            window_reason=why,
             parent=None,
         )
         span = self._hourly_span(touch.timestamp, end)
         if span is None:
             return
-        first, last = span
-        hourly = self._series[H1]
-
-        turtle = _first_turtle_soup(hourly, first, last, touch.direction)
-        block = find_hourly_order_block(
-            hourly, first=first, last=last, direction=touch.direction
+        found = self._aligned_hourly_id(span[0], span[1], touch.direction)
+        if found is None:
+            return
+        index, hourly, block = found
+        confirmed = self._hourly_mark(
+            step=CascadeStep.CONFIRMA_OB_H1,
+            index=index,
+            direction=touch.direction,
+            zoned=hourly,
+            parent=origin,
+            level=block.inner,
+            low=block.low,
+            high=block.high,
+            zone_start=block.ts_defining,
         )
-        confirmation = _winner(turtle, block)
+        self._hourly_touch(
+            parent=confirmed,
+            id_num=hourly.id_num,
+            zone=block,
+            # Ni antes de que se marcara el OB ni antes de que hubiera nada que
+            # buscar: el toque que cuenta es el primero que llega después de las
+            # dos cosas.
+            since=max(self._series[H1].at(index), touch.timestamp),
+            until=end,
+        )
 
-        # El descarte del OB sólo se enseña si llegó a ocurrir: una confirmación
-        # anterior cierra la búsqueda y con ella la vía del OB, que entonces no
-        # se ha desechado sino que se ha quedado sin turno.
-        if (
-            block is not None
-            and block.exhausted
-            and block.index_second_attempt is not None
-            and (confirmation is None or block.index_second_attempt <= confirmation)
-        ):
-            self._hourly_mark(
-                step=CascadeStep.OB_H1_DESECHADO,
-                index=block.index_second_attempt,
-                direction=touch.direction,
-                zoned=zoned,
-                parent=origin,
-                level=block.level,
-                low=block.low,
-                high=block.high,
-                attempts=2,
-                zone_start=hourly.at(block.index),
-            )
-        if confirmation is None:
-            return
-        if turtle is not None and turtle.index == confirmation:
-            self._hourly_mark(
-                step=CascadeStep.CONFIRMA_TURTLE,
-                index=turtle.index,
-                direction=touch.direction,
-                zoned=zoned,
-                parent=origin,
-                level=turtle.extreme,
-                zone_start=hourly.at(turtle.index_first),
+    def _hourly_touch(
+        self, *, parent: int, id_num: int, zone: Zone, since: datetime, until: datetime | None
+    ) -> None:
+        """El primer toque del OB de ese ID de H1 dentro de `[since, until)`.
+
+        Por abajo lo ata el OB —no se toca lo que todavía no se había marcado— y
+        por arriba, la ventana de H4: cerrada la búsqueda no hay señal, aunque el
+        ID de H1 siga vivo y su zona siga en el gráfico. Los toques que la fase
+        2.0 calcula ya mueren con el ID de H1, así que de las dos manda la que
+        llegue antes. Y no se espera al cierre de la vela de H1: el toque ya viene
+        fechado en la vela fina en la que el precio entró en la zona.
+
+        `until` es `None` sólo cuando el histórico se acabó con la ventana abierta.
+        """
+        for touch in self._hourly_touches.get(id_num, ()):
+            if touch.timestamp < since:
+                continue
+            if until is not None and touch.timestamp >= until:
+                return
+            self._mark(
+                step=CascadeStep.TOQUE_OB_H1,
+                chart=H1,
+                touch=touch,
+                zone=zone,
+                window_end=None,
+                parent=parent,
             )
             return
-        if block is not None and block.index_confirmation == confirmation:
-            self._hourly_mark(
-                step=CascadeStep.CONFIRMA_OB_H1,
-                index=block.index_confirmation,
-                direction=touch.direction,
-                zoned=zoned,
-                parent=origin,
-                level=block.level,
-                low=block.low,
-                high=block.high,
-                attempts=block.attempt,
-                zone_start=hourly.at(block.index),
-            )
+
+    def _aligned_hourly_id(
+        self, first: int, last: int, direction: ImpulseDirection
+    ) -> tuple[int, ImpulseZones, Zone] | None:
+        """La primera vela de `[first, last]` con el ID de H1 alineado y con OB.
+
+        Se recorren los ID de H1 en orden y se devuelve el primero que va en
+        `direction` y está vivo dentro del tramo, junto con la vela en la que se
+        supo: la de su constitución o la que confirmó su OB —la que llegue más
+        tarde—, o la primera del tramo si las dos quedaron detrás, que es el caso
+        de un ID de H1 que ya venía alineado cuando el precio tocó la zona de H4.
+
+        `None` cuando en toda la ventana no manda ningún ID de H1 en esa
+        dirección con OB confirmado: no hay nada que marcar.
+        """
+        series = self._series[H1]
+        for zoned in self._hourly_ids:
+            block = zoned.order_block
+            if zoned.direction is not direction or block is None:
+                continue
+            known = zoned.index_constitution
+            if block.index_confirmation is not None:
+                known = max(known, block.index_confirmation)
+            death = zoned.index_end if zoned.index_end is not None else len(series) - 1
+            index = max(known, first)
+            if index <= min(death, last):
+                return index, zoned, block
+        return None
 
     # --- Ventanas -----------------------------------------------------------
 
-    def _window_end(
-        self,
-        timeframe: str,
-        zoned: ImpulseZones,
-        zone: Zone,
-        touch: datetime,
-    ) -> datetime | None:
-        """Cuándo deja de estar armada la ventana que abre este toque.
+    def _veto_end(
+        self, zoned: ImpulseZones, zone: Zone, touch: datetime
+    ) -> tuple[datetime | None, WindowEnd | None]:
+        """Cuándo deja de estar el precio dentro del OB diario, y por tanto el veto.
 
-        Es el **cierre** de la primera vela de `timeframe` que, desde la del
-        toque en adelante, cierra fuera de la zona; o el de la última vela con el
-        ID vivo si nunca la abandona. `None` cuando el histórico se acaba antes,
-        que es la única forma de que la ventana siga abierta.
+        Es el **cierre** de la primera vela diaria que, desde la del toque en
+        adelante, cierra fuera de la zona —por el lado que sea, que aquí la
+        pregunta es estar dentro o no estarlo—; o el de la última vela con el ID
+        vivo si nunca la abandona. `None` cuando el histórico se acaba antes, que
+        es la única forma de que el tramo siga abierto.
         """
-        series = self._series[timeframe]
+        series = self._series[DAILY]
         limit = zoned.index_end if zoned.index_end is not None else len(series) - 1
         start = _bar_of(series, touch)
         for index in range(max(start, 0), limit + 1):
             if not zone.contains(float(series.close[index])):
-                return _closes_at(series, index)
-        return _closes_at(series, limit)
+                return _closes_at(series, index), WindowEnd.SALIDA_ZONA
+        return _closes_at(series, limit), WindowEnd.MUERTE_ID
+
+    def _search_end(
+        self, zoned: ImpulseZones, zone: Zone, touch: datetime
+    ) -> tuple[datetime | None, WindowEnd | None]:
+        """Cuándo deja de estar armada la búsqueda que abre este toque del OB de H4.
+
+        Lo primero de tres: que una vela de H4 cierre más allá del borde
+        **exterior** del OB —romperlo—, que el precio **toque** el UL del mismo
+        ID, o que muera el ID. Salir del OB hacia arriba no cuenta: el precio
+        puede irse a favor y la búsqueda sigue viva hasta el UL.
+
+        `None` cuando ninguna de las tres llega antes del fin del histórico.
+        """
+        series = self._series[H4]
+        limit = zoned.index_end if zoned.index_end is not None else len(series) - 1
+        start = max(_bar_of(series, touch), 0)
+        closing: datetime | None = _closes_at(series, limit)
+        why = WindowEnd.MUERTE_ID
+        for index in range(start, limit + 1):
+            if _beyond(float(series.close[index]), zone.outer, zoned.direction):
+                closing, why = _closes_at(series, index), WindowEnd.ROTURA_OB
+                break
+        return _earliest(
+            (closing, why), (self._reaches_last(zoned, touch, limit), WindowEnd.TOQUE_UL)
+        )
+
+    def _reaches_last(
+        self, zoned: ImpulseZones, touch: datetime, limit: int
+    ) -> datetime | None:
+        """Cuándo el precio llega al UL del ID de H4. `None` si no llega nunca.
+
+        Llegar es entrar en la zona, así que se mide contra su borde **interior**
+        —la línea del extremo, que es lo primero que el precio encuentra— y con
+        mechas, en la vela fina: esperar cuatro horas al cierre de H4 sería seguir
+        buscando en un sitio que ya se ha ido. Se mira desde la vela del toque
+        inclusive: si una sola vela fina recorre el impulso entero, la búsqueda
+        nace cerrada, que es lo prudente.
+        """
+        series = self._fine
+        start = max(_bar_of(series, touch), 0)
+        if start >= len(series):
+            return None
+        death = _closes_at(self._series[H4], limit)
+        stop = (
+            len(series)
+            if death is None
+            else int(series.timestamps.searchsorted(pd.Timestamp(death), "left"))
+        )
+        if stop <= start:
+            return None
+        inner = zoned.last.inner
+        if zoned.direction is ImpulseDirection.ALCISTA:
+            hits = np.flatnonzero(series.high[start:stop] >= inner)
+        else:
+            hits = np.flatnonzero(series.low[start:stop] <= inner)
+        return series.at(start + int(hits[0])) if hits.size else None
 
     def _hourly_span(self, touch: datetime, end: datetime | None) -> tuple[int, int] | None:
         """Las velas de H1 que caen en la ventana, en posiciones de la serie.
@@ -402,7 +555,11 @@ class _Cascade:
         if end is None:
             last = len(series) - 1
         else:
-            last = int(series.timestamps.searchsorted(pd.Timestamp(end), side="left")) - 1
+            # La última vela que **cierra** dentro de la ventana. La ventana ya no
+            # termina siempre en el cierre de una vela de H4 —el toque del UL la
+            # corta a media vela—, así que se cuenta por cierres y no por
+            # aperturas: una vela que aún no ha cerrado no ha confirmado nada.
+            last = int(series.timestamps.searchsorted(pd.Timestamp(end), side="right")) - 2
         if last < first:
             return None
         return first, min(last, len(series) - 1)
@@ -418,6 +575,7 @@ class _Cascade:
         zone: Zone,
         window_end: datetime | None,
         parent: int | None,
+        window_reason: WindowEnd | None = None,
     ) -> int:
         """Una marca hecha sobre un toque de zona ya medido por la fase 2.0."""
         self._seq += 1
@@ -439,6 +597,7 @@ class _Cascade:
                 low=zone.low,
                 high=zone.high,
                 window_end=window_end,
+                window_reason=window_reason,
             )
         )
         return self._seq
@@ -452,12 +611,11 @@ class _Cascade:
         zoned: ImpulseZones,
         parent: int,
         level: float,
-        low: float | None = None,
-        high: float | None = None,
-        attempts: int | None = None,
-        zone_start: datetime | None = None,
+        low: float,
+        high: float,
+        zone_start: datetime,
     ) -> int:
-        """Una marca sobre una vela de H1. El ID del que cuelga sigue siendo el de H4."""
+        """Una marca sobre una vela de H1. El ID del que cuelga es el de **H1**."""
         series = self._series[H1]
         self._seq += 1
         self._marks.append(
@@ -477,41 +635,10 @@ class _Cascade:
                 close=float(series.close[index]),
                 low=low,
                 high=high,
-                attempts=attempts,
                 zone_start=zone_start,
             )
         )
         return self._seq
-
-
-def _first_turtle_soup(
-    series: CandleSeries, first: int, last: int, direction: ImpulseDirection
-) -> TurtleSoup | None:
-    """El primer turtle soup del tramo. Su primera vela puede ser anterior a `first`."""
-    for index in range(max(first, 1), last + 1):
-        found = find_turtle_soup(series, index, direction)
-        if found is not None:
-            return found
-    return None
-
-
-def _winner(turtle: TurtleSoup | None, block: HourlyOrderBlock | None) -> int | None:
-    """La vela en la que confirma la cascada, o `None` si no confirma.
-
-    Las dos vías se miden en la misma serie, así que gana la de índice menor.
-    Con las dos en la misma vela manda el turtle soup: es **parámetro abierto**,
-    coincidieron en 209 de 1.508 casos la última vez que se midió y no cambió
-    ninguna operación.
-    """
-    candidates = [
-        index
-        for index in (
-            turtle.index if turtle is not None else None,
-            block.index_confirmation if block is not None else None,
-        )
-        if index is not None
-    ]
-    return min(candidates) if candidates else None
 
 
 def _bar_of(series: CandleSeries, moment: datetime) -> int:
@@ -522,6 +649,39 @@ def _bar_of(series: CandleSeries, moment: datetime) -> int:
     primera vela, y quien llama lo recorta.
     """
     return int(series.timestamps.searchsorted(pd.Timestamp(moment), side="right")) - 1
+
+
+def _finest(run: ImpulseRun, fallback: CandleSeries) -> CandleSeries:
+    """La serie de vela más corta de la corrida, o la del propio ID si no hay otra."""
+    charts = [name for name in run.chart_bars if name in TIMEFRAME_MINUTES]
+    if not charts:
+        return fallback
+    finest = min(charts, key=lambda name: TIMEFRAME_MINUTES[name])
+    series = CandleSeries.of(run.chart_bars[finest])
+    return series if len(series) > len(fallback) else fallback
+
+
+def _beyond(price: float, outer: float, direction: ImpulseDirection) -> bool:
+    """El precio ha dejado la zona atrás por su borde exterior."""
+    if direction is ImpulseDirection.ALCISTA:
+        return price < outer
+    return price > outer
+
+
+def _earliest(
+    first: tuple[datetime | None, WindowEnd | None],
+    second: tuple[datetime | None, WindowEnd | None],
+) -> tuple[datetime | None, WindowEnd | None]:
+    """El cierre que llegue antes, con su motivo.
+
+    Un instante `None` significa «no llega», no «llega ya»: con los dos a `None`
+    la ventana seguía armada al acabarse el histórico y no hay motivo que dar.
+    """
+    if first[0] is None:
+        return second
+    if second[0] is None:
+        return first
+    return first if first[0] <= second[0] else second
 
 
 def _closes_at(series: CandleSeries, index: int) -> datetime | None:
@@ -535,4 +695,4 @@ def _closes_at(series: CandleSeries, index: int) -> datetime | None:
     return series.at(index + 1)
 
 
-__all__ = ["CascadeMark", "CascadeRun", "CascadeStep", "detect_cascade"]
+__all__ = ["CascadeMark", "CascadeRun", "CascadeStep", "WindowEnd", "detect_cascade"]

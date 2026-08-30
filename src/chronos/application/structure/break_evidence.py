@@ -280,18 +280,18 @@ def _overlap_case() -> CheckGroup:
                 f"{'separados, no solapados' if ul_high < ob_low else 'solapados'}",
             ),
             Check(
-                "d4 cumple las dos condiciones",
+                "d5 cumple las dos condiciones",
                 "1 conflicto de solape",
                 f"{favor.diagnostics['conflictos_de_solape']} conflicto de solape",
             ),
             Check(
                 "a_favor_primero",
-                "ROTURA_A_FAVOR con nivel UL en b4",
+                "ROTURA_A_FAVOR con nivel UL en b5",
                 f"{_exit(favor.impulses[0])} en b{favor.impulses[0].index_end}",
             ),
             Check(
                 "en_contra_primero",
-                "ROTURA_EN_CONTRA con nivel OB en b4",
+                "ROTURA_EN_CONTRA con nivel OB en b5",
                 f"{_exit(against.impulses[0])} en b{against.impulses[0].index_end}",
             ),
         ),

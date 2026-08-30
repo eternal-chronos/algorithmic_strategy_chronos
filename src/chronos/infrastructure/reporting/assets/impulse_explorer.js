@@ -173,7 +173,16 @@
      * haya encuadre manual la escala la manda el usuario y el replay se limita a
      * desplazar la ventana para que el presente siga a la vista. Se suelta con
      * «Ajustar» o con doble clic sobre el gráfico. */
-    zoom: { x: null, y: null }
+    zoom: { x: null, y: null },
+    /* Simulador de entradas (I.1). `sim` es la caja plantada a mano —lado,
+     * entrada, stop, objetivo y el tramo que ocupa— y `arming` el lado que
+     * espera el clic que la planta. Es DIBUJO: no sale del explorador, no lo lee
+     * nadie y el motor no se entera de que existe. */
+    sim: null,
+    arming: null,
+    /* El R:R con el que se planta y al que vuelve el objetivo cuando se mueve el
+     * stop. `null` es «a mano»: lo dejó ahí un arrastre del objetivo. */
+    ratio: 2
   };
 
   var timer = null;    // temporizador de la reproducción automática
@@ -1139,6 +1148,41 @@
       });
     }
 
+    /* Las constituciones que no fueron: la vela contraria enorme que habría
+     * dado a luz un ID ya roto y en su lugar rompe y gira la pierna. No cuelgan
+     * de ningún ID —ése es el punto: no llegó a existir—, así que son las únicas
+     * marcas que el selector de ID no filtra. Van con las constituciones porque
+     * es exactamente donde el propietario busca el rombo que falta. */
+    var aborted = (source.aborted || []).filter(function (item) {
+      return item.x >= edges.lo && item.x <= edges.hi &&
+        !pending(item.x, primary(), edges);
+    });
+    if (aborted.length) {
+      traces.push({
+        type: "scatter", mode: "markers", name: "Constitución abortada " + label(primary()),
+        x: aborted.map(function (item) { return iso(item.x); }),
+        y: aborted.map(function (item) { return item.y; }),
+        text: aborted.map(function (item) {
+          return "CONSTITUCIÓN ABORTADA (" + primary() + ")<br>" + stamp(item.x) +
+            "<br>habría nacido un ID " + item.d + " ya roto: el cierre " + price(item.y) +
+            " ya estaba más allá de " + price(item.lvl) +
+            (item.src === "linea"
+              ? " (ancla)"
+              : "<br>por ZONA " + item.src + "<br>línea del ancla en " + price(item.ln)) +
+            "<br>esta vela no constituye: rompe y gira la pierna" +
+            "<br>pierna en curso: " + item.next;
+        }),
+        hoverinfo: "text", hoverlabel: { align: "left" },
+        marker: {
+          symbol: "hourglass", size: 11,
+          color: aborted.map(function (item) {
+            return item.d === "alcista" ? COLORS.bullish : COLORS.bearish;
+          }),
+          line: { color: COLORS.surface, width: 1 }
+        }
+      });
+    }
+
     var breaks = source.breaks.filter(function (item) {
       return item.x >= edges.lo && item.x <= edges.hi &&
         !pending(item.x, primary(), edges) && keeps(allowed, item.id);
@@ -1359,20 +1403,26 @@
    * detrás de ninguna de estas marcas: lo único que enseñan es dónde la máquina
    * ha bajado de temporalidad y qué ha visto al llegar.
    *
-   * La cascada son DOS escalones: el toque del OB de H4 y la confirmación en H1.
-   * El Diario no es un paso —no hay que tocar su OB para poder mirar H4—: lo que
-   * hace es prohibir, y su tramo se dibuja en gris para que se vea de dónde viene
-   * cada descarte.
+   * La cascada son DOS escalones: el toque del OB de H4 y, en H1, el ID que se
+   * pone en la dirección del de H4 y trae el OB que se marca; y sobre ese OB de
+   * H1, el toque que hace saltar la señal. El Diario no es un paso —no hay que
+   * tocar su OB para poder mirar H4—: lo que hace es prohibir, y su tramo se
+   * dibuja en gris para que se vea de dónde viene cada descarte.
+   *
+   * El toque del OB de H1 va fechado en la vela FINA en la que el precio entró
+   * en la zona —igual que el de H4 y el del Diario—, así que se ve sin esperar a
+   * que cierre la vela de H1: por eso su marca puede caer en mitad de una vela.
    *
    * Se dibujan por GRÁFICO y no por temporalidad de impulso, que es la
    * diferencia con todas las capas anteriores: el tramo diario se mira en el
-   * Diario, el toque de H4 en H4 y la confirmación en H1, que no lleva impulso
-   * propio. Por eso el payload trae `cascade` indexado por gráfico y aquí se lee
-   * el del gráfico que se está mirando, sin pasar por `impulsesOf`.
+   * Diario, el toque de H4 en H4 y el OB del ID de H1 en H1. Por eso el payload
+   * trae `cascade` indexado por gráfico y aquí se lee el del gráfico que se está
+   * mirando, sin pasar por `impulsesOf`.
    *
    * El ID del que cuelga cada marca es siempre el PRINCIPAL de su gráfico —el
-   * diario en el Diario, el de H4 en H4 y también en H1—, así que la capa
-   * obedece el selector de ID visibles igual que las señales de zona.
+   * diario en el Diario, el de H4 en H4 y el de H1 en H1, que en esta fase lleva
+   * detector propio—, así que la capa obedece el selector de ID visibles igual
+   * que las señales de zona.
    */
 
   function hasCascade() { return DATA.hasCascade === true; }
@@ -1384,27 +1434,31 @@
     return (DATA.cascade || {})[chart] || [];
   }
 
-  /* Un símbolo por paso, ninguno repetido de las capas que ya existían. Los tres
-   * pasos que NO abren nada —el tramo diario, que sólo prohíbe; el toque de H4
-   * desechado por ir en contra de él; y el OB de H1 que gasta sus dos velas— van
-   * en gris: se ven, pero no compiten con lo que sí siguió adelante. */
+  /* Un símbolo por paso, ninguno repetido de las capas que ya existían. Los dos
+   * pasos que NO abren nada —el tramo diario, que sólo prohíbe, y el toque de H4
+   * desechado por ir en contra de él— van en gris: se ven, pero no compiten con
+   * lo que sí siguió adelante. */
   var CASCADE_STYLE = {
     ZONA_DIARIA: {
       symbol: "star", size: 13, muted: true,
       title: "DENTRO DEL OB DIARIO -> nada en contra se mira"
     },
     BUSCAR_H1: { symbol: "star-square", size: 13, title: "TOCA EL OB DE H4 -> buscar en H1" },
-    CONFIRMA_TURTLE: { symbol: "diamond-tall", size: 13, title: "CONFIRMA en H1: turtle soup" },
-    CONFIRMA_OB_H1: { symbol: "bowtie", size: 14, title: "CONFIRMA en H1: OB de H1" },
-    H4_DESCARTADO: { symbol: "x-thin", size: 11, muted: true, title: "H4 EN CONTRA: desechado" },
-    OB_H1_DESECHADO: { symbol: "hourglass", size: 12, muted: true, title: "OB de H1 DESECHADO" }
+    CONFIRMA_OB_H1: {
+      symbol: "bowtie", size: 14,
+      title: "EL ID DE H1 YA VA COMO EL DE H4 -> su OB"
+    },
+    TOQUE_OB_H1: {
+      symbol: "octagon", size: 15,
+      title: "TOCA EL OB DE H1 -> SEÑAL"
+    },
+    H4_DESCARTADO: { symbol: "x-thin", size: 11, muted: true, title: "H4 EN CONTRA: desechado" }
   };
   var CASCADE_KINDS = [
-    "ZONA_DIARIA", "BUSCAR_H1", "CONFIRMA_TURTLE", "CONFIRMA_OB_H1",
-    "H4_DESCARTADO", "OB_H1_DESECHADO"
+    "ZONA_DIARIA", "BUSCAR_H1", "CONFIRMA_OB_H1", "TOQUE_OB_H1", "H4_DESCARTADO"
   ];
-  /* Los dos pasos de H1 que llevan zona propia: se dibujan además como caja. */
-  var CASCADE_BOXES = ["CONFIRMA_OB_H1", "OB_H1_DESECHADO"];
+  /* El único paso con zona propia: se dibuja además como caja. */
+  var CASCADE_BOXES = ["CONFIRMA_OB_H1"];
 
   function visibleCascade(edges) {
     if (blindfolded() || !state.cascade || !hasCascade()) { return []; }
@@ -1431,14 +1485,14 @@
     return [boxes, windows].filter(Boolean).concat(traces);
   }
 
-  /* El OB de H1 es una vela entera, igual que el del módulo 2, y como zona se
-   * dibuja: rectángulo de `lo` a `hi` desde la vela de REFERENCIA —que es la que
-   * lo define y queda detrás de la marca— hasta la vela que lo resolvió. El
-   * marcador dice cuándo se resolvió; la caja, sobre qué. Es DIBUJO: el
+  /* El OB de H1 es el OB de su ID —la vela del ancla entera, igual que en el
+   * Diario y en H4— y como zona se dibuja: rectángulo de `lo` a `hi` desde esa
+   * vela del ANCLA, que queda detrás de la marca, hasta la vela en la que se
+   * marcó. El marcador dice cuándo se supo; la caja, sobre qué. Es DIBUJO: el
    * rectángulo no decide nada, viene ya calculado del motor.
    *
-   * No hay caja para el turtle soup: ése no es una zona sino un nivel, y ya lo
-   * lleva el globo de su marca. */
+   * La misma zona vuelve a salir, sin recortar y con su color, en la capa de
+   * zonas de H1: ésta es la del paso de la cascada, con su globo. */
   function cascadeBoxTrace(marks, edges) {
     var bucket = { x: [], y: [], text: [] };
     marks.forEach(function (item) {
@@ -1483,10 +1537,20 @@
     };
   }
 
-  /* El tramo en el que la búsqueda estuvo ARMADA, del toque al momento en que el
-   * precio abandonó la zona. Sin él la marca dice que se empezó a buscar pero no
-   * hasta cuándo, que es justo la regla que hay que auditar. Una sola traza con
-   * huecos: una por marca serían cientos de trazas para dibujar rayas. */
+  /* Por qué se cerró una ventana. Es la regla que se audita, así que la marca lo
+   * dice en vez de dejar que se deduzca mirando las velas. */
+  var WINDOW_END = {
+    ROTURA_OB: "una vela de H4 cerró más allá del borde exterior del OB: lo atravesó entero",
+    TOQUE_UL: "el precio llegó al UL de ese mismo ID de H4, que es el sitio al que iba",
+    MUERTE_ID: "se acabó el ID",
+    SALIDA_ZONA: "una vela DIARIA cerró fuera de la zona"
+  };
+
+  /* El tramo en el que la búsqueda estuvo ARMADA, del toque a lo que la cerró:
+   * romper el OB, llegar al UL o morirse el ID. Sin él la marca dice que se
+   * empezó a buscar pero no hasta cuándo, que es justo la regla que hay que
+   * auditar. Una sola traza con huecos: una por marca serían cientos de trazas
+   * para dibujar rayas. */
   function cascadeWindowTrace(marks, edges) {
     var x = [], y = [];
     marks.forEach(function (item) {
@@ -1515,7 +1579,8 @@
       text += "<br>viene de " + parent[1] + " · ID nº " + parent[3] + " de " +
         label(parent[2]) + " · " + iso(parent[0]).slice(0, 16) + " UTC";
     }
-    if (item.k === "ZONA_DIARIA" || item.k === "BUSCAR_H1" || item.k === "H4_DESCARTADO") {
+    if (item.k === "ZONA_DIARIA" || item.k === "BUSCAR_H1" ||
+        item.k === "H4_DESCARTADO" || item.k === "TOQUE_OB_H1") {
       text += "<br>zona OB [" + price(item.lo) + ", " + price(item.hi) +
         "] · borde interior " + price(item.lvl) +
         "<br>la mecha llegó a " + price(item.r) + " · cierre " + price(item.c);
@@ -1529,26 +1594,28 @@
         "<br>vigente hasta " +
         (item.end === undefined
           ? "el final del histórico: el precio no llegó a abandonar la zona"
-          : iso(item.end).slice(0, 16) + " UTC, cuando una vela DIARIA cerró fuera");
+          : iso(item.end).slice(0, 16) + " UTC · " + (WINDOW_END[item.why] || ""));
     } else if (item.k === "BUSCAR_H1") {
       text += "<br>búsqueda armada hasta " +
         (item.end === undefined
-          ? "el final del histórico: el precio no llegó a abandonar la zona"
-          : iso(item.end).slice(0, 16) + " UTC, cuando el precio cerró fuera de la zona");
-    } else if (item.k === "CONFIRMA_TURTLE") {
-      text += "<br>la vela fue a buscar " + price(item.lvl) +
-        " —la mecha de la de " + stamp(item.x0) + "— y cerró en " + price(item.c) +
-        " sin superarlo";
+          ? "el final del histórico: no llegó a cerrarse"
+          : iso(item.end).slice(0, 16) + " UTC · " + (WINDOW_END[item.why] || "")) +
+        "<br>salir del OB a favor NO la cierra: se busca hasta romperlo o hasta " +
+        "llegar al UL";
     } else if (item.k === "CONFIRMA_OB_H1") {
-      text += "<br>OB de H1 [" + price(item.lo) + ", " + price(item.hi) +
-        "] · la vela de referencia es la de " + stamp(item.x0) +
-        "<br>superó " + price(item.lvl) + " con la mecha en " + price(item.r) +
-        "<br>lo consiguió la vela nº " + item.a + " a favor de las dos que había";
-    } else if (item.k === "OB_H1_DESECHADO") {
-      text += "<br>OB de H1 [" + price(item.lo) + ", " + price(item.hi) +
-        "] · la vela de referencia es la de " + stamp(item.x0) +
-        "<br>las DOS velas a favor se quedaron sin superar " + price(item.lvl) +
-        "<br>esta vía queda cerrada; el turtle soup sigue buscando";
+      text += "<br>el ID de H1 va ya en la misma dirección que el de H4: se marca SU OB" +
+        "<br>OB de H1 [" + price(item.lo) + ", " + price(item.hi) +
+        "] · borde interior " + price(item.lvl) +
+        " · la vela del ancla es la de " + stamp(item.x0) +
+        "<br>se sabe en esta vela: es la de la constitución del ID de H1 o la que " +
+        "confirmó su OB, la que llegó más tarde";
+    } else if (item.k === "TOQUE_OB_H1") {
+      text += "<br>el precio ENTRA en el OB de ese ID de H1 viniendo de fuera: " +
+        "aquí salta la señal" +
+        "<br>medido en la vela de " + label(item.src || "M15") +
+        ", NO se espera al cierre de la vela de H1" +
+        "<br>se esperaba mientras durase la ventana de H4: cerrada la búsqueda no " +
+        "hay señal, viva o no la zona de H1";
     }
     return text + "<br>SÓLO SEÑAL: no abre ni cierra ninguna operación";
   }
@@ -1717,6 +1784,455 @@
     document.addEventListener("mouseup", endAxisDrag);
   }
 
+  /* --- Simulador de entradas (I.1) ------------------------------------------
+   *
+   * Dos botones —Largo y Corto— y la caja de siempre: el rectángulo del OBJETIVO
+   * pegado por encima de la entrada y el del RIESGO por debajo, al revés en
+   * corto. El botón ARMA y el clic siguiente sobre el gráfico PLANTA la caja con
+   * la entrada en el precio y el minuto de ese clic. Después se arrastra: el
+   * borde de fuera de cada caja mueve el objetivo o el stop, la línea de la
+   * entrada mueve el conjunto entero, los bordes de los lados alargan el tramo y
+   * el interior lo desplaza todo.
+   *
+   * ES DIBUJO A MANO Y NADA MÁS. No hay orden, ni ejecución, ni resultado: la
+   * caja no lee una sola vela, nadie comprueba si el precio llegó al objetivo o
+   * al stop y el motor no se entera de que existe. Sirve para medir a ojo
+   * —cuántos pips de riesgo, qué R:R— encima de lo que el explorador ya pinta.
+   * El proyecto sigue sin entradas.
+   *
+   * El arrastre está escrito a mano, con el mismo gesto que la escala de los
+   * ejes (G.3), en vez de con las formas editables de Plotly: `edits.shapePosition`
+   * las vuelve arrastrables TODAS, y los rectángulos del limbo ocupan la pantalla
+   * entera, así que se quedarían con el pan del gráfico.
+   */
+  var SIM_SIDES = [
+    {
+      id: "long", label: "Largo",
+      title: "Arma la caja de un LARGO: objetivo por encima de la entrada, riesgo\n" +
+        "por debajo. El clic siguiente sobre el gráfico la planta ahí. Es dibujo:\n" +
+        "no abre nada."
+    },
+    {
+      id: "short", label: "Corto",
+      title: "Arma la caja de un CORTO: objetivo por debajo de la entrada, riesgo\n" +
+        "por encima. El clic siguiente sobre el gráfico la planta ahí. Es dibujo:\n" +
+        "no abre nada."
+    }
+  ];
+
+  /* Un pip es la última cifra que se enseña del precio: con cuatro decimales,
+   * 0,0001. La distancia se mide con esa unidad y no en porcentaje porque es la
+   * que se usa al hablar de un stop. */
+  var PIP = Math.pow(10, -DECIMALS);
+
+  /* R:R de salida y los que ofrece el control. Con uno puesto, el objetivo es
+   * SIEMPRE el riesgo por ese número: mover el stop arrastra el objetivo con él.
+   * Arrastrar el objetivo suelta el candado y deja el ratio «a mano», igual que
+   * tocar una casilla suelta el nivel de ruido: el control no puede decir 1:3 si
+   * lo que hay dibujado es otra cosa. */
+  var SIM_RATIOS = [1, 2, 3, 4];
+
+  var GRAB = 9;          // píxeles de tolerancia para agarrar un borde
+
+  /* Dónde empiezan las tres formas de la caja dentro de `layout.shapes`. Se fija
+   * al dibujar y es lo que permite mover sólo esas tres durante el arrastre. */
+  var simIndex = null;
+
+  var simDrag = null;
+
+  var SIM_CURSORS = {
+    stop: "ns-resize", target: "ns-resize", entry: "ns-resize",
+    from: "ew-resize", to: "ew-resize", body: "move"
+  };
+
+  function sideLabel(id) {
+    var side = SIM_SIDES.filter(function (item) { return item.id === id; })[0];
+    return side ? side.label : id;
+  }
+
+  function round_(value) { return Number(value.toFixed(DECIMALS)); }
+
+  function pips(distance) { return Math.round(Math.abs(distance) / PIP); }
+
+  function decimal(value) { return value.toFixed(1).replace(".", ","); }
+
+  function simRisk() { return Math.abs(state.sim.entry - state.sim.stop); }
+
+  function simReward() { return Math.abs(state.sim.target - state.sim.entry); }
+
+  function simRatio() {
+    var risk = simRisk();
+    return risk > 0 ? simReward() / risk : 0;
+  }
+
+  function simBox(name, x0, x1, from, to, colour, text, position) {
+    return {
+      type: "rect", name: name, xref: "x", yref: "y",
+      x0: x0, x1: x1, y0: from, y1: to,
+      fillcolor: rgba(colour, 0.22), line: { color: rgba(colour, 0.55), width: 1 },
+      layer: "above",
+      label: { text: text, textposition: position, font: { size: 11, color: colour } }
+    };
+  }
+
+  /* Las tres formas, siempre en este orden: objetivo, riesgo y la línea de la
+   * entrada. El orden es el que usa el arrastre para saber qué está moviendo. */
+  function simShapes() {
+    var sim = state.sim;
+    if (!sim) { return []; }
+    var long_ = sim.side === "long";
+    var x0 = iso(sim.from), x1 = iso(sim.to);
+    return [
+      simBox("sim-objetivo", x0, x1, sim.entry, sim.target, COLORS.bullish,
+        "objetivo " + pips(simReward()) + " pips",
+        long_ ? "top left" : "bottom left"),
+      simBox("sim-riesgo", x0, x1, sim.entry, sim.stop, COLORS.bearish,
+        "riesgo " + pips(simRisk()) + " pips",
+        long_ ? "bottom left" : "top left"),
+      {
+        type: "line", name: "sim-entrada", xref: "x", yref: "y",
+        x0: x0, x1: x1, y0: sim.entry, y1: sim.entry,
+        line: { color: COLORS.ink, width: 1.2 }, layer: "above",
+        label: {
+          text: sideLabel(sim.side).toUpperCase() + " · R:R 1:" + decimal(simRatio()),
+          textposition: "end", font: { size: 11, color: COLORS.ink }
+        }
+      }
+    ];
+  }
+
+  function armSim(side) {
+    state.arming = state.arming === side ? null : side;
+    draw();
+  }
+
+  function clearSim() {
+    state.sim = null;
+    state.arming = null;
+    draw();
+  }
+
+  /* La caja de salida: el riesgo es un 5 % de lo que se ve de alto y el objetivo
+   * el doble, sobre un cuarto de la ventana de ancho. Es un punto de partida
+   * para arrastrar, no una propuesta: el motor no ha dicho nada de este precio
+   * ni de esta distancia. */
+  function plantSim(side, point) {
+    var y = viewRange("y"), x = viewRange("x");
+    if (!y || !x) { return; }
+    var risk = (y[1] - y[0]) * 0.05;
+    var dir = side === "long" ? 1 : -1;
+    state.sim = {
+      side: side,
+      entry: round_(point.price),
+      stop: round_(point.price - dir * risk),
+      target: round_(point.price + (state.ratio || 2) * dir * risk),
+      from: point.minute,
+      to: point.minute + Math.max(1, Math.round((x[1] - x[0]) * 0.25))
+    };
+    state.arming = null;
+    draw();
+  }
+
+  /* El objetivo a la distancia que manda el ratio, contada desde la entrada y
+   * en riesgos. Sin ratio puesto no se toca: lo que hay dibujado lo puso una
+   * mano. */
+  function applyRatio() {
+    var sim = state.sim;
+    if (!sim || !state.ratio) { return; }
+    var dir = sim.side === "long" ? 1 : -1;
+    sim.target = round_(sim.entry + dir * simRisk() * state.ratio);
+  }
+
+  function setRatio(value) {
+    state.ratio = value;
+    applyRatio();
+    normalizeSim();
+    draw();
+  }
+
+  /* La caja no puede darse la vuelta: en largo el stop va por debajo de la
+   * entrada y el objetivo por encima, y al revés en corto. Un arrastre que cruce
+   * la entrada se queda a un pip, que es lo que impide un R:R negativo o
+   * infinito. */
+  function normalizeSim() {
+    var sim = state.sim;
+    var dir = sim.side === "long" ? 1 : -1;
+    if (dir * (sim.entry - sim.stop) < PIP) {
+      sim.stop = round_(sim.entry - dir * PIP);
+    }
+    if (dir * (sim.target - sim.entry) < PIP) {
+      sim.target = round_(sim.entry + dir * PIP);
+    }
+    if (sim.to <= sim.from) {
+      if (simDrag && simDrag.part === "from") { sim.from = sim.to - span(state.chart); }
+      else { sim.to = sim.from + span(state.chart); }
+    }
+  }
+
+  // --- El gráfico en píxeles -------------------------------------------------
+
+  function chartBox() {
+    var chart = document.getElementById("chart");
+    if (!chart || typeof chart.getBoundingClientRect !== "function") { return null; }
+    return chart.getBoundingClientRect();
+  }
+
+  /* El rectángulo de dibujo dentro del div, en píxeles.
+   *
+   * Tiene que ser el que Plotly ha calculado, no el que se le pidió: `MARGIN` es
+   * una PETICIÓN y Plotly la ensancha por su cuenta —la leyenda horizontal de
+   * arriba empuja el margen superior, y las etiquetas largas del eje de precios
+   * el de la izquierda—. Con el margen pedido, precio y píxel se desplazan unos
+   * cuantos píxeles y los tiradores de la caja dejan de estar donde se ve la
+   * línea: agarrar el stop se vuelve cuestión de suerte. `_size` es lo que Plotly
+   * resolvió; `MARGIN` sólo se usa mientras no haya figura de la que leerlo. */
+  function plotBox(box) {
+    var chart = document.getElementById("chart");
+    var size = chart && chart._fullLayout && chart._fullLayout._size;
+    if (size && size.w > 0 && size.h > 0) {
+      return { left: box.left + size.l, top: box.top + size.t, width: size.w, height: size.h };
+    }
+    return {
+      left: box.left + MARGIN.l, top: box.top + MARGIN.t,
+      width: box.width - MARGIN.l - MARGIN.r,
+      height: box.height - MARGIN.t - MARGIN.b
+    };
+  }
+
+  /* Lo que se está viendo, en datos. Manda el eje ya resuelto por Plotly; si
+   * todavía no hay figura de la que leerlo, se cae al tramo recortado, que es lo
+   * que ese eje va a autoescalar. Los dos ejes son lineales —el de fechas
+   * también, en minutos—, así que pasar de píxel a dato es una regla de tres. */
+  function viewRange(key) {
+    var pair = currentRange(key);
+    if (pair) { return pair; }
+    var cut = slice(bounds());
+    var b = bars();
+    if (cut.end <= cut.start) { return null; }
+    if (key === "x") { return [b.t[cut.start], b.t[cut.end - 1] + span(state.chart)]; }
+    var lo = Infinity, hi = -Infinity;
+    for (var i = cut.start; i < cut.end; i += 1) {
+      if (b.l[i] < lo) { lo = b.l[i]; }
+      if (b.h[i] > hi) { hi = b.h[i]; }
+    }
+    return hi > lo ? [lo, hi] : null;
+  }
+
+  /* `loose` deja pasar los puntos de fuera del área de dibujo: al arrastrar, el
+   * ratón se sale del gráfico y el gesto no puede morirse ahí. */
+  function dataAt(box, clientX, clientY, loose) {
+    var x = viewRange("x"), y = viewRange("y"), plot = plotBox(box);
+    if (!x || !y || plot.width <= 0 || plot.height <= 0) { return null; }
+    var fx = (clientX - plot.left) / plot.width;
+    var fy = (clientY - plot.top) / plot.height;
+    if (isNaN(fx) || isNaN(fy)) { return null; }
+    if (!loose && (fx < 0 || fx > 1 || fy < 0 || fy > 1)) { return null; }
+    return {
+      minute: Math.round(x[0] + fx * (x[1] - x[0])),
+      price: y[1] - fy * (y[1] - y[0])
+    };
+  }
+
+  function pixelAt(box, minute, value) {
+    var x = viewRange("x"), y = viewRange("y"), plot = plotBox(box);
+    if (!x || !y || plot.width <= 0 || plot.height <= 0) { return null; }
+    return {
+      x: plot.left + (minute - x[0]) / (x[1] - x[0]) * plot.width,
+      y: plot.top + (y[1] - value) / (y[1] - y[0]) * plot.height
+    };
+  }
+
+  // --- Plantar y arrastrar ---------------------------------------------------
+
+  function clickChart(event) {
+    if (!state.arming) { return; }
+    var box = chartBox();
+    if (!box || axisAt(box, event.clientX, event.clientY)) { return; }
+    var point = dataAt(box, event.clientX, event.clientY);
+    if (!point) { return; }
+    if (event.preventDefault) { event.preventDefault(); }
+    if (event.stopPropagation) { event.stopPropagation(); }
+    plantSim(state.arming, point);
+  }
+
+  /* Qué parte de la caja hay bajo el ratón. Las tres líneas ganan al interior:
+   * con la caja estrecha, todo el rectángulo cae dentro de la tolerancia y lo
+   * que se quiere agarrar entonces es el nivel más cercano. */
+  function simHandleAt(box, cx, cy) {
+    var sim = state.sim;
+    if (!sim) { return null; }
+    var left = pixelAt(box, sim.from, sim.entry);
+    var right = pixelAt(box, sim.to, sim.entry);
+    var stop = pixelAt(box, sim.from, sim.stop);
+    var target = pixelAt(box, sim.from, sim.target);
+    if (!left || !right || !stop || !target) { return null; }
+    if (cx < left.x - GRAB || cx > right.x + GRAB) { return null; }
+    var top = Math.min(stop.y, target.y), bottom = Math.max(stop.y, target.y);
+    if (cy < top - GRAB || cy > bottom + GRAB) { return null; }
+    var near = [["stop", stop.y], ["target", target.y], ["entry", left.y]]
+      .filter(function (level) { return Math.abs(cy - level[1]) <= GRAB; })
+      .sort(function (a, b) { return Math.abs(cy - a[1]) - Math.abs(cy - b[1]); })[0];
+    if (near) { return near[0]; }
+    if (Math.abs(cx - left.x) <= GRAB) { return "from"; }
+    if (Math.abs(cx - right.x) <= GRAB) { return "to"; }
+    return "body";
+  }
+
+  function startSimDrag(event) {
+    // El gesto de los ejes se registra antes y corta la propagación cuando es
+    // suyo, pero eso no impide que este oyente del mismo div se ejecute.
+    if (axisDrag || state.arming || !state.sim) { return; }
+    var box = chartBox();
+    if (!box) { return; }
+    var part = simHandleAt(box, event.clientX, event.clientY);
+    if (!part) { return; }
+    var origin = dataAt(box, event.clientX, event.clientY, true);
+    if (!origin) { return; }
+    simDrag = {
+      part: part, origin: origin,
+      base: {
+        entry: state.sim.entry, stop: state.sim.stop, target: state.sim.target,
+        from: state.sim.from, to: state.sim.to
+      }
+    };
+    if (event.preventDefault) { event.preventDefault(); }
+    if (event.stopPropagation) { event.stopPropagation(); }
+  }
+
+  function moveSimDrag(event) {
+    if (!simDrag) { hoverSim(event); return; }
+    var box = chartBox();
+    var point = box && dataAt(box, event.clientX, event.clientY, true);
+    if (!point) { return; }
+    applySimDrag(point);
+    if (event.preventDefault) { event.preventDefault(); }
+  }
+
+  function applySimDrag(point) {
+    var sim = state.sim, base = simDrag.base, part = simDrag.part;
+    var dy = point.price - simDrag.origin.price;
+    var dx = point.minute - simDrag.origin.minute;
+    if (part === "stop") {
+      sim.stop = round_(point.price);
+      // Con un R:R puesto, mover el stop es mover el objetivo: el ratio es lo
+      // que se ha fijado y la distancia al objetivo, su consecuencia.
+      applyRatio();
+    } else if (part === "target") {
+      sim.target = round_(point.price);
+      // Lo que se arrastra manda: a partir de aquí el ratio es el que se vea.
+      state.ratio = null;
+    } else if (part === "from") {
+      sim.from = point.minute;
+    } else if (part === "to") {
+      sim.to = point.minute;
+    } else {
+      // La línea de la entrada y el interior mueven la caja ENTERA: las
+      // distancias al stop y al objetivo son lo que se acaba de decidir y
+      // recolocar la entrada no puede cambiarlas por su cuenta.
+      sim.entry = round_(base.entry + dy);
+      sim.stop = round_(base.stop + dy);
+      sim.target = round_(base.target + dy);
+      if (part === "body") { sim.from = base.from + dx; sim.to = base.to + dx; }
+    }
+    normalizeSim();
+    redrawSim();
+  }
+
+  /* Durante el arrastre se mueven sólo las tres formas, no la figura entera: con
+   * ocho años de velas embebidas, rehacerla en cada píxel del gesto se nota. Al
+   * soltar se redibuja de verdad, que es cuando se ponen al día las notas. */
+  function redrawSim() {
+    var chart = document.getElementById("chart");
+    if (simIndex === null || !chart || typeof Plotly === "undefined" || !Plotly.relayout) {
+      draw();
+      return;
+    }
+    var update = {};
+    simShapes().forEach(function (shape, position) {
+      var key = "shapes[" + (simIndex + position) + "]";
+      update[key + ".x0"] = shape.x0;
+      update[key + ".x1"] = shape.x1;
+      update[key + ".y0"] = shape.y0;
+      update[key + ".y1"] = shape.y1;
+      update[key + ".label.text"] = shape.label.text;
+    });
+    Plotly.relayout(chart, update);
+  }
+
+  function endSimDrag() {
+    if (!simDrag) { return; }
+    simDrag = null;
+    draw();
+  }
+
+  /* Sin cursor no se ve que la caja se puede agarrar: el borde de un rectángulo
+   * translúcido no dice por sí solo que sea un tirador. */
+  function hoverSim(event) {
+    var chart = document.getElementById("chart");
+    if (!chart || !chart.style || !state.sim || state.arming) { return; }
+    var box = chartBox();
+    var part = box ? simHandleAt(box, event.clientX, event.clientY) : null;
+    chart.style.cursor = SIM_CURSORS[part] || "";
+  }
+
+  /* Qué caja hay puesta. Un rectángulo de colores sobre el precio se lee como
+   * una operación: el estado tiene que decir que no lo es. */
+  function simCaption() {
+    if (state.arming) {
+      return "SIMULADOR ARMADO (" + sideLabel(state.arming).toLowerCase() +
+        "): pulsa sobre el gráfico para plantar la entrada, o Escape para dejarlo";
+    }
+    if (!state.sim) { return null; }
+    var sim = state.sim;
+    return "simulación " + sideLabel(sim.side).toUpperCase() + " · entrada " +
+      price(sim.entry) + " · stop " + price(sim.stop) + " (" + pips(simRisk()) +
+      " pips) · objetivo " + price(sim.target) + " (" + pips(simReward()) +
+      " pips) · R:R 1:" + decimal(simRatio()) +
+      (state.ratio
+        ? " (fijo: mover el stop mueve el objetivo)"
+        : " (a mano: lo dejó ahí un arrastre del objetivo)") +
+      " · un pip es la última cifra del precio · ES DIBUJO A MANO: no hay orden, " +
+      "ni ejecución, ni resultado; nadie mira si el precio llegó y el motor no la ve";
+  }
+
+  function buildSimButtons() {
+    var container = document.getElementById("sim-buttons");
+    if (!container) { return; }
+    SIM_SIDES.forEach(function (side) {
+      var button = document.createElement("button");
+      button.type = "button";
+      button.textContent = side.label;
+      button.dataset.side = side.id;
+      button.title = side.title;
+      button.addEventListener("click", function () { armSim(side.id); });
+      container.appendChild(button);
+    });
+  }
+
+  function buildRatioButtons() {
+    var container = document.getElementById("sim-ratio");
+    if (!container) { return; }
+    SIM_RATIOS.forEach(function (value) {
+      var button = document.createElement("button");
+      button.type = "button";
+      button.textContent = "1:" + value;
+      button.dataset.ratio = String(value);
+      button.title = "Fija el objetivo a " + value + " veces el riesgo. Con esto puesto, " +
+        "mover el stop mueve el objetivo. Arrastrar el objetivo suelta el candado.";
+      button.addEventListener("click", function () { setRatio(value); });
+      container.appendChild(button);
+    });
+  }
+
+  function bindSim() {
+    var chart = document.getElementById("chart");
+    if (!chart || !chart.addEventListener || !document.addEventListener) { return; }
+    chart.addEventListener("click", clickChart, true);
+    chart.addEventListener("mousedown", startSimDrag, true);
+    document.addEventListener("mousemove", moveSimDrag);
+    document.addEventListener("mouseup", endSimDrag);
+  }
+
   /* Cambiar de tramo de historia —preset, fechas, ventana ciega, arrancar o
    * salir del replay— es pedir otro sitio, no otro zoom: ahí el encuadre manual
    * estorba. Alternar capas o dar un paso del replay no lo tocan. */
@@ -1771,6 +2287,15 @@
 
   // --- Figura ---------------------------------------------------------------
 
+  /* Las formas del limbo y, detrás, las tres de la caja simulada. Se apunta
+   * dónde empiezan: es lo que permite mover sólo esas tres mientras se arrastra
+   * en vez de rehacer la figura entera. */
+  function simShapes_(shapes) {
+    var box = simShapes();
+    simIndex = box.length ? shapes.length : null;
+    return shapes.concat(box);
+  }
+
   function layout(range) {
     var x = xRange(range);
     return {
@@ -1788,7 +2313,7 @@
       dragmode: "pan",
       showlegend: true,
       legend: { orientation: "h", y: 1.04, x: 0, font: { size: 11 } },
-      shapes: limboShapes(range),
+      shapes: simShapes_(limboShapes(range)),
       xaxis: {
         type: "date", gridcolor: COLORS.grid, rangeslider: { visible: false },
         // El rango va siempre con su `autorange`: si se diera uno sin apagar el
@@ -1880,11 +2405,16 @@
     var b = bars();
     var visible = cut.end - cut.start;
     var edges = window_(range);
+    // La caja simulada es lo único que dibuja el propietario, así que se declara
+    // siempre: también con la venda puesta, donde es justo el gesto de decir
+    // dónde habrías entrado antes de revelar.
+    var simulada = simCaption();
     if (blindfolded()) {
       return "AUDITORÍA CIEGA · semilla " + state.seed + " · " + label(state.chart) + " · " +
         range.from + " → " + range.to + " · " + visible.toLocaleString("es-ES") +
         " velas. Marca tus impulsos y pulsa Revelar. Sorteada dentro de " +
-        state.scope.from + " → " + state.scope.to + ".";
+        state.scope.from + " → " + state.scope.to + "." +
+        (simulada ? " · " + simulada : "");
     }
     var dibujados = overlays().filter(isVisible).map(function (timeframe) {
       var allowed = visibleIds(timeframe, edges);
@@ -2030,6 +2560,7 @@
     if (state.blind && state.revealed) {
       text += " · revelado de la ventana ciega con semilla " + state.seed;
     }
+    if (simulada) { text += " · " + simulada; }
     return text;
   }
 
@@ -2470,6 +3001,17 @@
     // Sólo hay algo que soltar si el encuadre está tomado a mano.
     document.getElementById("zoom-reset").disabled = !state.zoom.x && !state.zoom.y;
 
+    document.querySelectorAll("#sim-buttons button").forEach(function (button) {
+      button.setAttribute("aria-pressed", String(button.dataset.side === state.arming));
+    });
+    document.getElementById("sim-clear").disabled = !state.sim && !state.arming;
+    document.querySelectorAll("#sim-ratio button").forEach(function (button) {
+      button.setAttribute("aria-pressed", String(Number(button.dataset.ratio) === state.ratio));
+    });
+    // Armado, el gráfico deja de ser sólo para mirar: el cursor lo dice.
+    var canvas = document.getElementById("chart");
+    if (canvas && canvas.style) { canvas.style.cursor = state.arming ? "crosshair" : ""; }
+
     // Fase 2.0: las zonas sólo existen para el modo con el que se calcularon.
     if (hasZones()) {
       ["layer-zones-ul", "layer-zones-ob", "layer-zones-context"].forEach(function (id) {
@@ -2578,6 +3120,7 @@
       draw();
     });
     document.getElementById("blind-exit").addEventListener("click", exitBlind);
+    document.getElementById("sim-clear").addEventListener("click", clearSim);
     bindReplay();
     bindArrowKeys();
   }
@@ -2633,16 +3176,23 @@
     document.addEventListener("keydown", function (event) {
       var arrow = event.key === "ArrowLeft" || event.key === "ArrowRight";
       var space = event.key === " " || event.key === "Spacebar";
+      // Escape desarma el simulador de entradas: un botón que se queda esperando
+      // un clic tiene que poder soltarse sin plantar nada.
+      var escape = event.key === "Escape" || event.key === "Esc";
       // Con Ctrl/Alt/Meta la tecla es del navegador (Ctrl+D marca la página):
       // ahí no hay atajo de temporalidad.
       var modified = event.ctrlKey || event.altKey || event.metaKey;
       var chart = modified ? null : CHART_KEYS[String(event.key).toLowerCase()];
-      if (!arrow && !space && !chart) { return; }
+      if (!arrow && !space && !chart && !escape) { return; }
       var focused = document.activeElement;
       var tag = focused && focused.tagName ? focused.tagName.toUpperCase() : "";
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") { return; }
       // La barra espaciadora sobre un botón lo pulsa: ahí no se roba.
       if (space && (tag === "BUTTON" || !state.replay)) { return; }
+      if (escape) {
+        if (state.arming) { state.arming = null; draw(); }
+        return;
+      }
       if (event.preventDefault) { event.preventDefault(); }
       if (chart) { selectChart(chart); return; }
       if (space) { toggleReplay(); return; }
@@ -2664,7 +3214,10 @@
   buildVisibleButtons();
   buildPresetButtons();
   buildImpulseLayers();
+  buildSimButtons();
+  buildRatioButtons();
   bindControls();
   bindAxisScaling();
+  bindSim();
   draw();
 })();

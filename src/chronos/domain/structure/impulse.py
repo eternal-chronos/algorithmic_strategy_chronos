@@ -316,3 +316,34 @@ class BarState:
     @property
     def in_limbo(self) -> bool:
         return self.state is MachineState.LIMBO
+
+
+@dataclass(frozen=True, slots=True)
+class AbortedConstitution:
+    """Vela contraria que no llega a constituir: el ID nacería ya roto.
+
+    La regla «primero la rotura» sólo protege al ID **anterior**. Sin esto, una
+    vela contraria que cierra al otro lado del nivel de rotura en contra del ID
+    que iba a crear lo constituye igualmente, y el ID nace muerto: la rotura no
+    se juzga hasta la barra siguiente, así que el impulso sobrevive apuntando al
+    revés que el precio y bloquea al que debería nacer.
+
+    Aquí esa vela no constituye nada: se comporta como una vela de rotura y gira
+    la pierna. Se registra entera —el nivel que cruzó y de dónde salía— porque es
+    una constitución que el propietario habría visto y no está.
+    """
+
+    timestamp: datetime
+    index: int
+    timeframe: str
+    #: Dirección del ID que se habría constituido, y de la pierna que muere aquí.
+    aborted_direction: ImpulseDirection
+    #: Dirección de la pierna que esta misma vela abre.
+    new_leg_direction: ImpulseDirection
+    close: float
+    #: Nivel de rotura en contra que el cierre ya había dejado atrás: el ancla, o
+    #: el borde exterior del OB cuando la fase 2.1 lo pone a mandar.
+    level: float
+    #: La línea del ancla, mande o no, por la misma razón que en `BreakEvent`.
+    line: float
+    level_source: BreakLevelSource = BreakLevelSource.LINE

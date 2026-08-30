@@ -46,8 +46,9 @@ DOJI_BREAK = (
     (90.0, 95.0),    # b1 contraria -> ID#1 bajista [ancla 100, extremo 90]
     (95.0, 96.0),    # b2 alcista, retroceso dentro del rango
     (89.0, 89.0),    # b3 DOJI que cierra bajo el extremo -> rompe a favor
-    (89.0, 89.5),    # b4 alcista
-    (89.5, 90.2),    # b5 alcista
+    (88.0, 88.5),    # b4 alcista, contraria a la pierna bajista: constituye en L1 y L3.
+    #                  Cierra BAJO el ancla de ese ID (89), así que no nace roto
+    (87.5, 88.0),    # b5 alcista, la que constituye en L2 (allí la pierna arranca en b4)
 )
 
 

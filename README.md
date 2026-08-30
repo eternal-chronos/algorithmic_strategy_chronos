@@ -71,7 +71,8 @@ chronos structure entradas --config config/impulse.yaml
 El módulo de estructura detecta **el impulso dominante del Diario y de H4** y
 **no emite señales**: sin entradas, sin stops, sin targets y sin medición de
 rentabilidad. H1 y M15 no llevan detector —no se les marca ID— y sobre ellas se
-dibuja el de H4 como contexto. Ver
+dibuja el de H4 como contexto; la única excepción es la fase 3.0, que enciende el
+ID de H1 porque su cascada lo necesita para confirmar. Ver
 [`docs/MODULO_1_IMPULSO_DOMINANTE.md`](docs/MODULO_1_IMPULSO_DOMINANTE.md) y
 [`docs/MODULO_2_ZONAS.md`](docs/MODULO_2_ZONAS.md).
 

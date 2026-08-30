@@ -207,8 +207,8 @@ def build_payload(
         #: enseña, igual que las demás capas que no pueden pintar nada.
         "hasSignals": any(measurement.items for measurement in signals.values()),
         #: La cascada Diario → H4 → H1. Va **por gráfico** y no por temporalidad
-        #: de ID: la confirmación nace de un ID de H4 y se dibuja sobre las velas
-        #: de H1, que no lleva impulso propio, así que no cabe en `impulses`.
+        #: de ID: un mismo paso mezcla las dos —la confirmación cuelga de un toque
+        #: de H4 y habla del ID de H1—, así que no cabe en `impulses`.
         "cascade": _cascade(cascade),
         #: La cadena entera por número de paso, para que una marca pueda contar de
         #: dónde viene aunque su padre se dibuje en otro gráfico.
@@ -343,6 +343,10 @@ def _impulse_payload(
         "count": len(impulses),
         "list": _impulse_list(impulses, last),
         "constitutions": _constitutions(impulses, bars),
+        #: Velas contrarias que no llegaron a constituir: el ID habría nacido ya
+        #: roto. Van con las constituciones porque es donde el propietario busca
+        #: el rombo que no está.
+        "aborted": _aborted(analysis),
         "breaks": _breaks(analysis),
         #: Fase 2.1. Vacío con la regla apagada, y entonces la casilla no se
         #: enseña: una capa que no puede dibujar nada sólo hace dudar.
@@ -503,9 +507,9 @@ def _cascade(cascade: CascadeRun | None) -> dict[str, list[dict[str, Any]]]:
     """Capa "Cascada de entrada". Puramente visual: no abre ni cierra nada.
 
     Cada marca va en el gráfico en el que se mira ese paso —el toque diario en el
-    Diario, el de H4 en H4, la confirmación en H1— porque es donde el propietario
-    la busca. Van juntas en una lista por gráfico y el explorador las separa por
-    `k`, igual que las señales de zona.
+    Diario, el de H4 en H4, el OB del ID de H1 en H1— porque es donde el
+    propietario la busca. Van juntas en una lista por gráfico y el explorador las
+    separa por `k`, igual que las señales de zona.
 
     `y` es el punto de contacto con la zona en los toques y el cierre de la vela
     en lo que ocurre en H1: son marcas sobre velas, no sobre niveles.
@@ -539,11 +543,13 @@ def _cascade_mark(mark: CascadeMark) -> dict[str, Any]:
         record["hi"] = round(mark.high, DECIMALS)
     if mark.window_end is not None:
         record["end"] = _minute(pd.Timestamp(mark.window_end))
-    if mark.attempts is not None:
-        record["a"] = mark.attempts
+    if mark.window_reason is not None:
+        # Por qué se cerró la ventana. Es la regla que el propietario audita:
+        # sin esto, «hasta aquí» no dice si fue el OB, el UL o el ID.
+        record["why"] = mark.window_reason.value
     if mark.zone_start is not None:
-        # La zona del OB de H1 se mide sobre una vela anterior a la de la marca:
-        # sin este extremo el rectángulo no se puede dibujar.
+        # La zona del OB de H1 se dibuja sobre la vela del ancla de su ID, que
+        # queda detrás de la marca: sin este extremo no hay rectángulo.
         record["x0"] = _minute(pd.Timestamp(mark.zone_start))
     return record
 
@@ -700,6 +706,27 @@ def _breaks(analysis: TimeframeAnalysis) -> list[dict[str, Any]]:
             ),
         }
         for event in analysis.events
+    ]
+
+
+def _aborted(analysis: TimeframeAnalysis) -> list[dict[str, Any]]:
+    """Constituciones que no fueron (§8): la vela contraria que rompe y gira.
+
+    Viaja con el nivel que su cierre ya había dejado atrás y con las dos
+    direcciones —la del ID que no nació y la de la pierna que abre—, que es todo
+    lo que hace falta para explicar en el globo por qué ahí no hay rombo.
+    """
+    return [
+        {
+            "x": _minute(pd.Timestamp(item.timestamp)),
+            "y": round(item.close, DECIMALS),
+            "d": item.aborted_direction.value,
+            "next": item.new_leg_direction.value,
+            "lvl": round(item.level, DECIMALS),
+            "ln": round(item.line, DECIMALS),
+            "src": item.level_source.value,
+        }
+        for item in analysis.aborted
     ]
 
 

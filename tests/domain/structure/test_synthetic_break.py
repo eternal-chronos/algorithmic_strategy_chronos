@@ -248,7 +248,7 @@ def test_las_dos_series_del_ob_solo_se_diferencian_en_el_ob() -> None:
 
 
 def test_caso_8_el_conflicto_lo_resuelve_overlap_priority() -> None:
-    """d4 cierra en 2060: sobre el borde del UL (2050) y bajo el del OB (2080)."""
+    """d5 cierra en 2060: sobre el borde del UL (2050) y bajo el del OB (2080)."""
     _, favor = run_break(
         SYNTHETIC_OVERLAP_UP, overlap_priority=OverlapPriority.A_FAVOR_FIRST
     )
@@ -259,11 +259,11 @@ def test_caso_8_el_conflicto_lo_resuelve_overlap_priority() -> None:
     assert favor.diagnostics["conflictos_de_solape"] == 1
     assert against.diagnostics["conflictos_de_solape"] == 1
 
-    assert favor.impulses[0].index_end == 4
+    assert favor.impulses[0].index_end == 5
     assert favor.impulses[0].exit_break_kind is BreakKind.A_FAVOR
     assert favor.impulses[0].exit_level_source is BreakLevelSource.LAST
 
-    assert against.impulses[0].index_end == 4
+    assert against.impulses[0].index_end == 5
     assert against.impulses[0].exit_break_kind is BreakKind.EN_CONTRA
     assert against.impulses[0].exit_level_source is BreakLevelSource.ORDER_BLOCK
 
@@ -451,3 +451,45 @@ def test_el_doji_no_rompe_ni_estira_el_extremo() -> None:
     for item in detector.avoided_breaks:
         if item.extended_extreme:
             assert abs(item.close - item.line) > 0
+
+
+# --- Nadie nace roto, también con la regla nueva ------------------------------
+
+#: La contraria cierra ENTRE la línea del ancla y el borde exterior del OB. Con
+#: la línea el ID nacería roto y no llega a nacer; con la zona el OB lo salva y
+#: nace igual que cualquier otro. Escrito a mano:
+#:   c0 (2000, 2010, 1998, 2004) verde · ancla A1 del ID = 2004 y OB = [1998, 2010]
+#:   c1 (2004, 2006, 2002, 2003) roja  · abre la pierna bajista
+#:   c2 (2003, 2004, 1990, 1992) roja  · extremo 1992; su 1990 < 1998 CONFIRMA el OB
+#:   c3 (1992, 2008, 1991, 2007) verde · contraria: 2007 > 2004 (línea) y < 2010 (OB)
+BORN_BROKEN_ONLY_BY_LINE: tuple[tuple[float, float, float, float], ...] = (
+    (2000.00, 2010.00, 1998.00, 2004.00),
+    (2004.00, 2006.00, 2002.00, 2003.00),
+    (2003.00, 2004.00, 1990.00, 1992.00),
+    (1992.00, 2008.00, 1991.00, 2007.00),
+)
+
+
+def test_el_ob_confirmado_deja_nacer_al_id_que_la_linea_habria_impedido() -> None:
+    _, detector = run_break(BORN_BROKEN_ONLY_BY_LINE)
+
+    assert detector.diagnostics["constituciones_abortadas_por_nacer_roto"] == 0
+    impulse = detector.impulses[0]
+    assert impulse.direction is ImpulseDirection.BAJISTA
+    assert impulse.index_constitution == 3
+    assert impulse.anchor == pytest.approx(2004.00)
+    assert impulse.extreme == pytest.approx(1992.00)
+
+
+def test_sin_la_regla_nueva_esa_misma_vela_no_constituye() -> None:
+    """Las mismas velas por línea: 2007 ya está más allá del ancla, no nace nada."""
+    _, detector = run_break(BORN_BROKEN_ONLY_BY_LINE, break_by_zone=False)
+
+    assert detector.impulses == ()
+    assert detector.diagnostics["constituciones_abortadas_por_nacer_roto"] == 1
+    fallida = detector.aborted_constitutions[0]
+    assert fallida.index == 3
+    assert fallida.aborted_direction is ImpulseDirection.BAJISTA
+    assert fallida.new_leg_direction is ImpulseDirection.ALCISTA
+    assert fallida.level == pytest.approx(2004.00)
+    assert fallida.level_source is BreakLevelSource.LINE

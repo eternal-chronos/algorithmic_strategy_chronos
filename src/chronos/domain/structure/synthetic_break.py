@@ -137,6 +137,13 @@ SYNTHETIC_WITHOUT_ORDER_BLOCK_UP: tuple[Candle, ...] = _without_order_block(
 #: negativo**: su extremo (2040) queda por debajo de su ancla (2090). Ahí, y sólo
 #: ahí, los dos bordes exteriores se invierten —el del UL en 2050, el del OB en
 #: 2080— y una vela puede cerrar más allá de los dos a la vez.
+#:
+#: La vela que constituye vuelve con otro hueco a dentro del OB (cierra en 2085,
+#: sobre el borde 2080). No es adorno: si cerrase por debajo, el ID nacería ya
+#: roto y la regla no lo dejaría nacer, así que el conflicto no existiría. Y por
+#: eso entre el extremo y la constitución hay una vela de margen (d3): con la
+#: constituyente pegada al extremo, su propia mecha estiraría el UL por encima
+#: del borde del OB y volvería a cerrar la ventana del conflicto.
 SYNTHETIC_OVERLAP_UP: tuple[Candle, ...] = (
     (2100.00, 2105.00, 2080.00, 2090.00),  # d0 roja · semilla bajista; ancla del ID#1 = 2090 y su
     #                                            vela entera es el OB: [2080, 2105]
@@ -144,8 +151,12 @@ SYNTHETIC_OVERLAP_UP: tuple[Candle, ...] = (
     #                                            Su mecha 2106 > 2105 CONFIRMA el OB#1 sin que su
     #                                            cuerpo llegue a ninguna parte
     (2010.00, 2050.00, 2008.00, 2040.00),  # d2 verde · extremo del ID#1 (cuerpo 2040, mecha 2050)
-    (2040.00, 2045.00, 2035.00, 2038.00),  # d3 roja · CONSTITUYE ID#1; rango 2040 - 2090 = -50
-    (2038.00, 2070.00, 2035.00, 2060.00),  # d4 verde · CASO 8: 2060 > 2050 (borde del UL) y
+    (2020.00, 2030.00, 2015.00, 2035.00),  # d3 verde · no mejora el extremo (2035 < 2040) y su
+    #                                            mecha 2030 no estira el UL: es la vela de margen
+    (2090.00, 2095.00, 2082.00, 2085.00),  # d4 roja · HUECO AL ALZA; CONSTITUYE ID#1.
+    #                                            rango 2040 - 2090 = -50. Cierra en 2085, dentro
+    #                                            del OB: el ID no nace roto y llega a existir
+    (2038.00, 2070.00, 2035.00, 2060.00),  # d5 verde · CASO 8: 2060 > 2050 (borde del UL) y
     #                                            2060 < 2080 (borde del OB) A LA VEZ.
     #                                            a_favor_primero   -> ROTURA_A_FAVOR
     #                                            en_contra_primero -> ROTURA_EN_CONTRA

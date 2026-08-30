@@ -129,7 +129,10 @@ No cambia la detección ni los informes: sólo cuántas cosas se dibujan a la ve
       <div style="display:flex; gap:16px; flex-wrap:wrap;">
         <span id="impulse-layers" style="display:flex; gap:16px; flex-wrap:wrap;"></span>
         <label class="toggle"><input type="checkbox" id="layer-limbo"> Limbo</label>
-        <label class="toggle"><input type="checkbox" id="layer-marks" checked> Constituciones y roturas</label>
+        <label class="toggle" title="Rombos de constitución, marcadores de rotura y el reloj
+de arena de las constituciones abortadas: la vela contraria que habría dado a luz un ID ya
+roto y que en su lugar rompe y gira la pierna."><input type="checkbox" id="layer-marks"
+          checked> Constituciones y roturas</label>
         <label class="toggle"><input type="checkbox" id="layer-contacts"> Contactos</label>
         <label class="toggle"><input type="checkbox" id="layer-mid"> Nivel 50 %</label>
         <span id="zone-layers" style="display:flex; gap:16px; flex-wrap:wrap;">
@@ -167,17 +170,23 @@ Obedecen el selector de ID visibles: con «ID actual» se ven las del ID vigente
 un paso, sólo veta. Cada marca va en el gráfico en el que se mira:
   ✦ (H4) el precio TOCA el OB de un ID de H4 → se baja a H1. No hace falta nada del
      Diario para que se abra esta búsqueda;
-  ◆ alto (H1) confirma por TURTLE SOUP: la vela va a buscar la mecha de la anterior y
-     cierra sin superarla;
-  ⋈ (H1) confirma por OB DE H1: la vela a favor supera con mecha el extremo de la
-     contraria anterior; hay dos oportunidades y las dos miden el mismo nivel. Su vela
-     de referencia se dibuja además como CAJA punteada gris, de su mínimo a su máximo;
+  ⋈ (H1) el ID DE H1 va ya en la misma dirección que el de H4 y tiene OB confirmado:
+     se marca ESE OB. No es un patrón de velas: en H1 hay ID propio, con el mismo
+     detector que el Diario y H4, y lo que se espera es a que deje de ir en contra.
+     La vela del ancla de ese ID se dibuja además como CAJA punteada gris, de su
+     mínimo a su máximo;
+  ⬢ (H1) el precio TOCA ese OB de H1 viniendo de fuera: AQUÍ SALTA LA SEÑAL. Es el
+     mismo TOQUE_OB de la fase 2.0 leído sobre el OB de H1, así que tampoco espera
+     al cierre de la vela: va fechado en la vela fina (M15) en la que el precio
+     entró en la zona y puede caer en mitad de una vela de H1. Se espera mientras
+     VIVA EL ID DE H1, aunque la ventana de H4 ya se haya cerrado; un toque por
+     confirmación y ni uno más;
   ★ (Diario, gris) el precio está DENTRO del OB de un ID diario. No abre ninguna
      búsqueda: mientras dure, prohíbe todo lo que vaya en contra de esa dirección;
   ✕ fino (H4, gris) toque de un OB de H4 EN CONTRA de un OB diario vigente: se desecha
-     hasta que el precio salga de esa zona diaria;
-  ⧗ (H1, gris) el OB de H1 gastó sus dos velas sin superar el nivel: esa vía queda
-     cerrada y sólo sigue buscando el turtle soup. También lleva su caja.
+     hasta que el precio salga de esa zona diaria.
+El UL de H1 no interviene: el ID de H1 trae sus dos zonas y las dos se dibujan en la capa
+de zonas, pero la cascada sólo lee el OB.
 Una confirmación por ventana y ni una más: la primera cierra la búsqueda, así que lo que
 llegue después no se pinta aunque el motor lo vea.
 La raya punteada que sale de ✦ y de ★ es la VENTANA: hasta cuándo estuvo armada la
@@ -245,6 +254,31 @@ temporalidad inferior. El motor no la ve hasta que cierra.">
         </label>
       </div>
     </div>
+    <div class="group" id="sim-group">
+      <span title="Dos cajas como las de cualquier plataforma para SIMULAR una entrada a
+mano. El botón ARMA (Largo o Corto) y el clic siguiente sobre el gráfico PLANTA la caja
+con la entrada en ese precio y esa vela: el objetivo va pegado por encima de la entrada y
+el riesgo por debajo, al revés en corto.
+Después se arrastra: el borde de fuera de cada caja mueve el objetivo o el stop, la línea
+de la entrada mueve el conjunto entero, los bordes de los lados alargan el tramo y el
+interior lo desplaza todo. La etiqueta dice los pips de cada lado y el R:R; un pip es la
+última cifra del precio. Escape desarma sin plantar nada.
+ES DIBUJO A MANO Y NADA MÁS: no hay orden, ni ejecución, ni resultado. Nadie mira si el
+precio llegó al objetivo o al stop, no sale de la pantalla y el motor no la ve. El
+proyecto sigue sin entradas.">
+        Simular entrada
+      </span>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <div class="buttons" id="sim-buttons"></div>
+        <div class="buttons" id="sim-ratio" title="R:R fijo: el objetivo se pone a tantas veces
+el riesgo. Con uno puesto, mover el stop mueve el objetivo con él y el ratio no cambia.
+Arrastrar el objetivo suelta el candado y deja el ratio a mano: ningún botón queda pulsado
+y el estado lo dice."></div>
+        <div class="buttons">
+          <button type="button" id="sim-clear" title="Quita la caja simulada">Quitar</button>
+        </div>
+      </div>
+    </div>
     <div class="group">
       <span>Auditoría ciega</span>
       <div style="display:flex; gap:8px; align-items:center;">
@@ -269,6 +303,10 @@ temporalidad inferior. El motor no la ve hasta que cierra.">
       arranca en la vela que lo define y termina en la constitución</span>
     <span><i class="box" style="background:#898781"></i>Barras en LIMBO (sin sesgo)</span>
     <span>◆ vela contraria que constituye</span>
+    <span>⧗ (reloj de arena) vela contraria que NO constituye: el ID habría nacido
+      ya roto —su cierre estaba más allá del nivel de rotura en contra del ID que
+      iba a crear—, así que rompe y gira la pierna. No cuelga de ningún ID, así
+      que es la única marca que el selector de ID visibles no filtra</span>
     <span>▲ ROTURA_A_FAVOR</span>
     <span>✕ ROTURA_EN_CONTRA</span>
     <span>○ TOQUE_MECHA</span>
@@ -287,13 +325,16 @@ temporalidad inferior. El motor no la ve hasta que cierra.">
       las zonas del anterior desaparecen del gráfico (siguen en los CSV)</span>
     <span>✦ el precio toca el OB de un ID de H4: se baja a H1. La cascada empieza AQUÍ,
       sin pedirle nada al Diario</span>
-    <span>◆ alto = confirma en H1 por TURTLE SOUP · ⋈ = confirma en H1 por OB DE H1</span>
-    <span>caja punteada gris en H1 = la vela de referencia del OB de H1, de su mínimo a su
-      máximo, desde que la define hasta la vela que lo resuelve</span>
+    <span>⋈ = el ID de H1 va ya como el de H4 y tiene OB: se marca ese OB de H1</span>
+    <span>caja punteada gris en H1 = el OB del ID de H1, la vela de su ancla de mínimo a
+      máximo, desde esa vela hasta aquella en la que se marcó</span>
+    <span>⬢ = el precio TOCA ese OB de H1: aquí salta la SEÑAL. Fechada en la vela fina
+      (M15) del toque, sin esperar al cierre de la vela de H1, igual que el toque del OB
+      en H4 y en el Diario. Se espera mientras viva el ID de H1</span>
     <span>★ gris = el precio está DENTRO del OB de un ID DIARIO. No abre nada: sólo
       prohíbe lo contrario a su dirección mientras dure</span>
     <span>✕ fino gris = toque de un OB de H4 EN CONTRA de un OB diario vigente: desechado
-      sin mirarlo · ⧗ gris = el OB de H1 gastó sus dos velas y esa vía se cierra</span>
+      sin mirarlo</span>
     <span>raya punteada gris a la derecha de ✦ o de ★ = la VENTANA en la que la búsqueda
       estuvo armada, o el veto diario vigente: termina cuando el precio cierra fuera de la
       zona (en el veto, con una vela DIARIA)</span>
@@ -315,6 +356,19 @@ temporalidad inferior. El motor no la ve hasta que cierra.">
       o doble clic devuelven el encuadre automático</span>
     <span>teclas <b>d</b> (Diario), <b>4</b> (H4), <b>1</b> (H1) y <b>m</b> (M15) cambian
       la temporalidad; se ignoran con el foco en un campo de texto</span>
+    <span><i class="box" style="background:#1baf7a; opacity:.22"></i>
+      <i class="box" style="background:#d03b3b; opacity:.22"></i>Entrada SIMULADA a mano
+      («Simular entrada»): la caja verde es el objetivo y la roja el riesgo, colgando de la
+      línea de la entrada —al revés en corto—. El botón arma, el clic planta y después se
+      arrastra: bordes de fuera = stop y objetivo, línea de la entrada = mover la caja
+      entera, bordes de los lados = alargar el tramo. Escape desarma</span>
+    <span>los botones <b>1:1 · 1:2 · 1:3 · 1:4</b> fijan el R:R: el objetivo se planta a
+      esa distancia y mover el stop lo arrastra con él. Arrastrar el objetivo suelta el
+      candado —ningún botón queda pulsado— y el ratio pasa a ser el que se vea</span>
+    <span>la caja simulada dice los pips de cada lado y el R:R; un pip es la última cifra
+      del precio. NO ES UNA OPERACIÓN: no hay orden, ni ejecución, ni resultado, y nadie
+      comprueba si el precio llegó al objetivo o al stop. Es lo único del gráfico que
+      dibuja el propietario y no el motor</span>
   </div>
 
   <footer>

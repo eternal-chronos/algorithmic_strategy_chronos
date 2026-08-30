@@ -52,7 +52,7 @@ implementada, testeada y con un backtest reproducible.
 | 2.0 | Zonas UL y OB | Detección y dibujo de las dos zonas de cada ID; la rotura sigue siendo por línea | Implementada sobre 2018–2025; **pendiente de auditoría visual del propietario** | `chronos structure zonas` |
 | 2.1 | Rotura por zona | La zona sustituye a la línea como nivel de rotura del ID: el UL a favor, el OB en contra | Implementada sobre 2018–2025; **pendiente de auditoría visual del propietario** | `chronos structure rotura-por-zona` |
 | 2.2 | — | *(aparcada: FVG)* | — | — |
-| 3.0 | Señales de entrada | La cascada H4 → H1 rehecha desde cero, y **sólo señales**: toque del OB de H4 → confirmación en H1 por turtle soup o por OB de H1, con el OB diario de **veto** direccional. Sin entradas, sin stops, sin targets, sin métricas | Implementada sobre 2018–2025; **pendiente de auditoría visual del propietario** | `chronos structure entradas` |
+| 3.0 | Señales de entrada | La cascada H4 → H1 rehecha desde cero, y **sólo señales**: toque del OB de H4 → se espera a que el **ID de H1** —que en esta fase lleva detector propio— se ponga en la dirección del de H4 y se marca su OB → **el precio toca ese OB de H1 y ahí salta la señal**, en el instante del toque y no al cierre de la vela. Con el OB diario de **veto** direccional. Sin entradas, sin stops, sin targets, sin métricas | Implementada sobre 2018–2025; **pendiente de auditoría visual del propietario** | `chronos structure entradas` |
 | 3.1 | Entradas | Convertir las señales de la 3.0 en operaciones. **No empieza hasta que la 3.0 esté auditada** | — | — |
 
 ### Fase 3.0 — señales de entrada
@@ -67,11 +67,29 @@ bajista es su espejo):
 
 1. el precio **toca el OB de un ID de H4** —el `TOQUE_OB` de la fase 2.0, sin
    redefinirlo— y se abre la búsqueda en H1;
-2. en H1 confirma lo primero que aparezca: **turtle soup** o **OB de H1** —la
-   vela a favor que supera con mecha el extremo de la contraria anterior, con dos
-   oportunidades contra el mismo nivel—. Gastadas las dos sin superarlo, esa vía
-   se cierra y sólo sigue buscando el turtle soup. **Una confirmación por ventana
-   y ni una más**: la primera cierra la búsqueda.
+2. en H1 se **espera a que el ID de H1 vaya en la misma dirección que el de H4**:
+   si al bajar manda un ID bajista, hay que esperar a que se rompa y se constituya
+   el alcista. En cuanto ese ID de H1 tiene **OB confirmado**, se marca ese OB.
+   Da igual que el ID de H1 ya viniera alineado al llegar el toque: lo que se pide
+   es que lo esté. **Una confirmación por ventana y ni una más.**
+3. y **el precio toca ese OB de H1: ahí salta la señal**. Es el mismo `TOQUE_OB`
+   de la fase 2.0, leído sobre el OB de H1 y sin redefinir nada. **No se espera
+   al cierre de la vela de H1**, igual que no se espera al de la de H4 ni al de
+   la diaria: la señal se fecha en la vela fina —M15— en la que el precio entró
+   en la zona. Se espera **mientras dure la ventana de H4** y no más: cerrada la
+   búsqueda, el OB de H1 marcado deja de valer aunque su ID siga vivo. **Un toque
+   por confirmación y ni uno más.**
+
+**H1 lleva ID propio en esta fase.** Es el cambio de fondo: en H1 se marca el ID
+exactamente igual que en el Diario y en H4 —mismo detector, mismas reglas, mismas
+dos zonas—, así que el segundo escalón es estructura y no un patrón de velas. El
+turtle soup y el OB «de dos oportunidades» que confirmaban antes están **borrados
+del proyecto**. El **UL de H1 se dibuja pero no interviene**: la cascada sólo lee
+el OB.
+
+Encender el detector de H1 mete su temporalidad en el hash de configuración, así
+que la fase 3.0 corre con un hash distinto del de la línea base `e27d20d0fa4e` y
+a propósito: el reparto por defecto de las fases 1 y 2 no se toca.
 
 **El Diario veta, no autoriza.** Mientras el precio esté **dentro** del OB de un
 ID diario no se mira ninguna confirmación que vaya en contra de él: en el OB de
@@ -80,16 +98,31 @@ salga de esa zona. Fuera de esos tramos vale cualquier toque de H4, alcista o
 bajista. El tramo del veto y los toques descartados se dibujan para poder
 auditarlo.
 
-**La ventana dura mientras el precio no abandone la zona**: se cierra en la
-primera vela de esa temporalidad que cierre fuera de ella, por el lado que sea, o
-con la muerte del ID. El veto diario, por tanto, se levanta con el cierre de una
-vela **diaria** fuera del OB y no antes. Cada visita nueva la vuelve a armar. Es
-la decisión del propietario y el primer parámetro que se va a mover cuando mire
-el dibujo.
+**La búsqueda dura hasta romper el OB o hasta llegar al UL.** Decisión del
+propietario. La ventana se abre en el toque y se cierra con lo primero de tres:
 
-Parámetros abiertos declarados: qué vía gana con las dos confirmando en la misma
-vela de H1 (hoy, el turtle soup), y que una confirmación cierre la ventana —lo
-que llega después no se dibuja aunque el motor lo vea—.
+1. una vela de H4 **cierra más allá del borde exterior del OB**, o sea lo
+   atraviesa entero;
+2. el precio **toca el UL del mismo ID de H4** —el extremo, el sitio al que se
+   iba—, y basta con tocarlo: se mide con mechas en la vela fina y no espera al
+   cierre de la vela de H4. Es lo que impide seguir buscando indefinidamente
+   cuando H1 no llega a girar o gira demasiado tarde porque el precio sube sin
+   parar;
+3. muere el ID de H4.
+
+**Salir del OB hacia arriba no cierra nada**: el precio puede irse a favor y la
+búsqueda sigue viva hasta el UL. Cada visita nueva la vuelve a armar y anula la
+anterior; si al volver no ha nacido ningún ID de H1 nuevo, se vuelve a coger el
+mismo con su mismo OB.
+
+El **tramo diario del veto se mide distinto y es a propósito**: ahí la pregunta es
+estar dentro del OB diario o no estarlo, así que se levanta con el cierre de una
+vela **diaria** fuera de la zona, por el lado que sea.
+
+Parámetros abiertos declarados: que valga un ID de H1 que **ya venía alineado**
+cuando el precio tocó la zona de H4 —lo decidió el propietario, y es lo que hace
+que muchas marcas caigan en la misma vela del toque— y que una confirmación cierre
+la ventana, de modo que lo que llega después no se dibuja aunque el motor lo vea.
 
 ### Fase 1 — impulso dominante
 
@@ -300,7 +333,8 @@ y en este orden, es comprobar que la base se entiende:
    ([MODULO_2_ZONAS.md](MODULO_2_ZONAS.md#señales-de-zona-sólo-dibujo));
 2. **los ID** —qué ID está vigente en cada instante y con qué identificador;
 3. **la multitemporalidad** —qué dice el Diario mientras H4 dice otra cosa, y cómo
-   se lee eso sobre H1 y M15, que ya no llevan ID propio.
+   se lee eso sobre H1 y M15, que entonces no llevaban ID propio (a H1 se lo
+   devuelve la fase 3.0).
 
 Hasta que eso esté auditado sobre el explorador no se vuelve a escribir la
 cascada. El proyecto queda, por tanto, **sin señales, sin entradas, sin stops,

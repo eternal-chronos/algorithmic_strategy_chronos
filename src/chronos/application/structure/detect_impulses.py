@@ -22,7 +22,12 @@ from chronos.application.structure.timezone_audit import TimezoneAudit
 from chronos.domain.errors import DomainError
 from chronos.domain.structure.body import BodyBar
 from chronos.domain.structure.detector import DominantImpulseDetector
-from chronos.domain.structure.impulse import BarState, BreakEvent, DominantImpulse
+from chronos.domain.structure.impulse import (
+    AbortedConstitution,
+    BarState,
+    BreakEvent,
+    DominantImpulse,
+)
 from chronos.domain.structure.zone_break import AvoidedBreak, ZoneBreakLevels
 from chronos.domain.structure.zones import CandleSeries
 
@@ -92,6 +97,9 @@ class TimeframeAnalysis:
     #: Fase 2.1: velas que la regla antigua habría llamado rotura y la nueva ha
     #: salvado. Vacío con `break_by_zone: false`.
     avoided: tuple[AvoidedBreak, ...] = ()
+    #: Velas contrarias que no llegaron a constituir porque el ID habría nacido
+    #: ya roto. Ahí no hay rombo de constitución y sí un giro de pierna.
+    aborted: tuple[AbortedConstitution, ...] = ()
 
     @property
     def published(self) -> tuple[DominantImpulse, ...]:
@@ -243,6 +251,7 @@ class DetectDominantImpulses:
             table=table,
             diagnostics=detector.diagnostics,
             avoided=detector.avoided_breaks,
+            aborted=detector.aborted_constitutions,
         )
 
 

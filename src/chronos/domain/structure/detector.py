@@ -17,6 +17,14 @@ Decisiones de orden y de borde, todas cubiertas por tests:
   barra: una barra que rompe sólo rompe. La constitución puede ocurrir como muy
   pronto en la barra siguiente. Así, una barra que rompe y además es contraria a
   la pierna que queda en curso no hace las dos cosas a la vez.
+- **Nadie nace roto.** El punto anterior protege al ID *anterior*, no al que va a
+  nacer. Una vela contraria enorme —la que se traga la pierna entera— cerraba al
+  otro lado del nivel de rotura en contra del ID que constituía, y ese ID nacía
+  muerto: como la rotura no se juzga hasta la barra siguiente, sobrevivía
+  apuntando al revés que el precio y bloqueaba al que debía nacer. Esa vela ya no
+  constituye: se comporta como una vela de rotura y **gira la pierna**, así que
+  el ID que sale es el del sentido nuevo. Queda registrada en
+  `aborted_constitutions`.
 - **Rotura estricta.** "Cerrar más allá" es desigualdad estricta; tocar el nivel
   exacto no rompe.
 - **Arranque de la pierna.** Es el primer elemento de la racha contigua de velas
@@ -74,7 +82,12 @@ from chronos.domain.structure.enums import (
     SeedMode,
 )
 from chronos.domain.structure.errors import LookaheadError, StructureError
-from chronos.domain.structure.impulse import BarState, BreakEvent, DominantImpulse
+from chronos.domain.structure.impulse import (
+    AbortedConstitution,
+    BarState,
+    BreakEvent,
+    DominantImpulse,
+)
 from chronos.domain.structure.zone_break import (
     AvoidedBreak,
     BreakLevels,
@@ -107,6 +120,24 @@ class _Leg:
     #: Desde dónde se busca hacia atrás el ancla A1. Es el arranque de la pierna
     #: salvo en `L2`, donde la vela de la rotura tampoco puede aportar el ancla.
     anchor_search_before: int
+
+
+@dataclass(frozen=True, slots=True)
+class _AnchorChoice:
+    """El ancla de una pierna con las dos lecturas y la vela de la que sale.
+
+    Se calcula antes de saber si la pierna llega a constituir: el nivel de rotura
+    en contra sale de aquí, y es lo que decide si la vela contraria constituye o
+    rompe.
+    """
+
+    price: float
+    index: int
+    a1: float | None
+    a2: float
+    #: El modo pedía A1 y no había vela contraria anterior: manda A2 de respaldo
+    #: y el impulso no se publica.
+    missing: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,6 +201,8 @@ class DominantImpulseDetector:
         #: Fase 2.1. Velas que bajo la regla de la fase 1 habrían roto el ID y con
         #: la nueva no. Vacío con el interruptor apagado.
         self._avoided: list[AvoidedBreak] = []
+        #: Velas contrarias que no constituyeron porque el ID habría nacido roto.
+        self._aborted: list[AbortedConstitution] = []
         self._diagnostics: dict[str, int] = {
             "dojis": 0,
             "roturas_a_favor": 0,
@@ -188,6 +221,9 @@ class DominantImpulseDetector:
             #: `L3`: velas contrarias que llegaron antes de que la pierna tuviera
             #: extremo válido y por tanto no constituyeron ningún ID.
             "constituciones_aplazadas_sin_extremo": 0,
+            #: Velas contrarias que no constituyeron porque su cierre ya estaba
+            #: más allá del nivel de rotura en contra del ID que iban a crear.
+            "constituciones_abortadas_por_nacer_roto": 0,
             # --- Fase 2.1 · rotura por zona. Todos a cero con el interruptor
             # apagado, que es como se comprueba que no se ha colado nada.
             #: Roturas según de dónde salió el nivel que las produjo. Con la
@@ -274,6 +310,11 @@ class DominantImpulseDetector:
     @property
     def states(self) -> tuple[BarState, ...]:
         return tuple(self._states)
+
+    @property
+    def aborted_constitutions(self) -> tuple[AbortedConstitution, ...]:
+        """Constituciones que no fueron: el ID habría nacido ya roto."""
+        return tuple(self._aborted)
 
     @property
     def avoided_breaks(self) -> tuple[AvoidedBreak, ...]:
@@ -480,14 +521,27 @@ class DominantImpulseDetector:
                 # que es justo lo que este modo impide.
                 self._diagnostics["constituciones_aplazadas_sin_extremo"] += 1
                 return
+            choice = self._anchor_of(leg)
+            against = self._against_level_of(leg, choice, through=index - 1)
+            if self._is_beyond(bar.close, against.price, leg.direction.opposite()):
+                # El ID nacería ya roto: esta vela no constituye, rompe. Se juzga
+                # con lo cerrado *antes* de ella, igual que cualquier rotura.
+                self._abort_constitution(index, bar, leg, against)
+                return
             # §2.3: el extremo se fija con lo alcanzado *hasta la vela anterior*,
             # así que la contraria no lo actualiza aunque su cuerpo lo supere.
-            self._constitute(index, bar, leg, extreme=leg.extreme)
+            self._constitute(index, bar, leg, extreme=leg.extreme, anchor=choice)
             return
 
         self._extend_leg(leg, index, bar)
 
-    def _constitute(self, index: int, bar: BodyBar, leg: _Leg, *, extreme: float) -> None:
+    def _anchor_of(self, leg: _Leg) -> _AnchorChoice:
+        """El ancla del ID que cerraría esta pierna, con su vela y sus dos lecturas.
+
+        Se calcula antes de saber si el ID llega a nacer: el nivel de rotura en
+        contra sale del ancla, y sin él no se puede decir si la vela contraria
+        constituye o rompe.
+        """
         anchor_a2 = self._bars[leg.start_index].anchor_towards(leg.direction)
         counter_index = self._last_counter_index_before(
             leg.anchor_search_before, leg.direction
@@ -497,30 +551,99 @@ class DominantImpulseDetector:
             if counter_index is not None
             else None
         )
-        anchor = anchor_a1 if self._anchor_mode is AnchorMode.A1_LAST_COUNTER_BODY else anchor_a2
-
-        publishable = index >= self._warmup_bars
-        if index < self._warmup_bars:
-            self._diagnostics["impulsos_en_calentamiento"] += 1
-        if anchor_a1 is None:
-            self._diagnostics["impulsos_sin_ancla_a1"] += 1
-        if anchor is None:
-            # Sólo ocurre con ANCHOR_MODE=A1 al principio del histórico: no hay
-            # vela contraria anterior de la que sacar el ancla. No se inventa un
-            # sustituto; el impulso existe pero no se publica.
-            publishable = False
-            anchor = anchor_a2
-
-        break_bar = self._bars[leg.break_index] if leg.break_index is not None else None
+        wants_a1 = self._anchor_mode is AnchorMode.A1_LAST_COUNTER_BODY
+        chosen = anchor_a1 if wants_a1 else anchor_a2
         # Barra de la que sale el ancla *activa*: la del arranque de la pierna en
         # A2, la última contraria previa en A1. Es lo que el explorador necesita
         # para pegar cada línea a la vela que la define, y evita reconstruirlo a
         # posteriori buscando qué cuerpo coincide con el precio.
-        anchor_index = (
-            counter_index
-            if self._anchor_mode is AnchorMode.A1_LAST_COUNTER_BODY and counter_index is not None
-            else leg.start_index
+        source_index = counter_index if wants_a1 and counter_index is not None else leg.start_index
+        return _AnchorChoice(
+            # Sólo ocurre con ANCHOR_MODE=A1 al principio del histórico: no hay
+            # vela contraria anterior de la que sacar el ancla. No se inventa un
+            # sustituto; el impulso existe pero no se publica.
+            price=anchor_a2 if chosen is None else chosen,
+            index=source_index,
+            a1=anchor_a1,
+            a2=anchor_a2,
+            missing=chosen is None,
         )
+
+    def _against_level_of(
+        self, leg: _Leg, anchor: _AnchorChoice, *, through: int
+    ) -> SideLevel:
+        """Nivel de rotura en contra del ID que cerraría esta pierna.
+
+        Es el mismo que juzgará al ID desde su barra siguiente: el ancla, o el
+        borde exterior del OB cuando la fase 2.1 lo pone a mandar. `through` es la
+        última vela cerrada antes de la que se está juzgando, así que un OB que se
+        confirme en esta misma vela todavía no cuenta.
+        """
+        if self._zones is None:
+            return SideLevel(
+                price=anchor.price,
+                line=anchor.price,
+                inner=anchor.price,
+                source=BreakLevelSource.LINE,
+            )
+        return self._zones.order_block_level(
+            direction=leg.direction,
+            anchor=anchor.price,
+            index_anchor=anchor.index,
+            through=through,
+        )
+
+    def _abort_constitution(
+        self, index: int, bar: BodyBar, leg: _Leg, side: SideLevel
+    ) -> None:
+        """La vela contraria rompe en vez de constituir, y gira la pierna.
+
+        No hay `BreakEvent` porque no ha muerto ningún ID: no llegó a existir. Lo
+        que sí queda es el registro de la constitución que no fue, que es lo que
+        el propietario ve en el gráfico —una vela contraria enorme sin rombo— y
+        necesita poder explicar.
+        """
+        self._diagnostics["constituciones_abortadas_por_nacer_roto"] += 1
+        new_direction = leg.direction.opposite()
+        self._aborted.append(
+            AbortedConstitution(
+                timestamp=bar.timestamp,
+                index=index,
+                timeframe=self._timeframe,
+                aborted_direction=leg.direction,
+                new_leg_direction=new_direction,
+                close=bar.close,
+                level=side.price,
+                line=side.line,
+                level_source=side.source,
+            )
+        )
+        if self._leg_start_mode is LegStartMode.L2_NEXT_BAR:
+            # L2: esta barra sólo rompe, igual que en la rotura de un ID vivo.
+            self._leg = None
+            self._pending = _PendingLeg(direction=new_direction, break_index=index)
+            self._state = MachineState.LIMBO
+            return
+        self._open_leg(
+            new_direction,
+            start_index=self._leg_start_index(index, new_direction),
+            break_index=index,
+            limbo_start_index=index + 1,
+        )
+
+    def _constitute(
+        self, index: int, bar: BodyBar, leg: _Leg, *, extreme: float, anchor: _AnchorChoice
+    ) -> None:
+        publishable = index >= self._warmup_bars
+        if index < self._warmup_bars:
+            self._diagnostics["impulsos_en_calentamiento"] += 1
+        if anchor.a1 is None:
+            self._diagnostics["impulsos_sin_ancla_a1"] += 1
+        if anchor.missing:
+            publishable = False
+
+        break_bar = self._bars[leg.break_index] if leg.break_index is not None else None
+        anchor_index = anchor.index
         extreme_index = leg.extreme_index
         assert extreme_index is not None  # el extremo y su barra se fijan juntos
         impulse = DominantImpulse(
@@ -532,10 +655,10 @@ class DominantImpulseDetector:
             index_constitution=index,
             ts_leg_start=self._bars[leg.start_index].timestamp,
             index_leg_start=leg.start_index,
-            anchor=anchor,
+            anchor=anchor.price,
             extreme=extreme,
-            anchor_a1=anchor_a1,
-            anchor_a2=anchor_a2,
+            anchor_a1=anchor.a1,
+            anchor_a2=anchor.a2,
             index_anchor=anchor_index,
             ts_anchor=self._bars[anchor_index].timestamp,
             index_extreme=extreme_index,

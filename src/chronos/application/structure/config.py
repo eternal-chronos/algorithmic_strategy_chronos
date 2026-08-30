@@ -25,8 +25,9 @@ from chronos.domain.structure.enums import (
 
 #: Temporalidades del módulo. Un ID sólo se rompe con cierres de su propia
 #: temporalidad, así que la que lleve detector lo lleva propio (§1.2, §2.4).
-#: **El ID vive sólo en el Diario y en H4**: H1 y M15 son temporalidades de
-#: lectura y de ejecución, y sobre ellas se dibuja el ID de H4 como contexto.
+#: **En el reparto por defecto el ID vive en el Diario y en H4**; la fase 3.0 le
+#: añade H1 con `with_hourly_structure`, porque su cascada necesita el ID de H1
+#: para decidir. M15 sigue siendo sólo lectura.
 M15 = "M15"
 H1 = "H1"
 H4 = "H4"
@@ -41,9 +42,10 @@ TIMEFRAME_MINUTES: dict[str, int] = {M15: 15, H1: 60, H4: 240, DAILY: 1440}
 #: contexto de temporalidad superior.
 #:
 #: El reparto lo fija el propietario: es cómo lee él el mercado, no una decisión
-#: del motor. **Sólo el Diario y H4 tienen ID propio.** H1 y M15 no aportan
-#: estructura: son las temporalidades en las que se mira cómo llega el precio a
-#: la zona, así que sobre ellas se dibuja el ID de H4 y nada más.
+#: del motor. **Aquí sólo el Diario y H4 tienen ID propio**, que es lo que fija la
+#: línea base de la fase 1: H1 y M15 llevan dibujado el ID de H4 como contexto.
+#: La fase 3.0 corre con otro reparto —el de `with_hourly_structure`— porque su
+#: cascada sí necesita el ID de H1; las demás fases no lo tocan.
 DEFAULT_CHARTS: dict[str, tuple[str, ...]] = {
     DAILY: (DAILY,),
     H4: (H4, DAILY),
@@ -110,6 +112,33 @@ class ChartsConfig:
     def primary(self, chart: str) -> str:
         """Temporalidad que manda en ese gráfico: su limbo y sus marcadores."""
         return self.layout[chart][0]
+
+
+def with_hourly_structure(charts: ChartsConfig) -> ChartsConfig:
+    """El reparto con **ID propio en H1**, que es el de la fase 3.0.
+
+    La cascada baja a H1 a esperar a que su ID se ponga en la dirección del de
+    H4, así que ahí H1 deja de ser una temporalidad de sólo lectura y pasa a
+    llevar detector, exactamente el mismo que el Diario y H4.
+
+    No se cambia el reparto por defecto: encender el detector de H1 mete su
+    temporalidad en el hash de configuración y las corridas de las fases 1 y 2
+    dejarían de ser comparables con la línea base `e27d20d0fa4e`. Quien necesita
+    el ID de H1 es la fase 3.0 y es ella la que lo pide.
+
+    El ID de H1 se dibuja como **principal** de su gráfico —suyos son el limbo y
+    los marcadores— y el de H4 se queda detrás como contexto, que es el orden en
+    el que se lee: la zona la manda H4 y el giro se ve en H1.
+    """
+    overlays = charts.layout.get(H1)
+    if overlays is None:
+        raise DomainError(
+            "La cascada de la fase 3.0 necesita el gráfico de H1 en el reparto: "
+            "es donde espera al ID que confirma"
+        )
+    if H1 in overlays:
+        return charts
+    return ChartsConfig({**charts.layout, H1: (H1, *overlays)})
 
 
 @dataclass(frozen=True, slots=True)

@@ -64,6 +64,7 @@ function declare(id) {
  'cascade-layers', 'layer-cascade',
  'break-layers', 'avoided-layer', 'layer-avoided', 'steps-layer', 'layer-steps',
  'blind-seed', 'blind-start', 'blind-reveal', 'blind-exit',
+ 'sim-group', 'sim-buttons', 'sim-ratio', 'sim-clear',
  'replay-group', 'replay-date', 'replay-start', 'replay-back', 'replay-step',
  'replay-play', 'replay-exit', 'replay-forming', 'replay-speed', 'replay-window',
  'notes', 'explorer-data'].forEach(declare);
@@ -95,6 +96,8 @@ global.document = {
     if (selector === '#visible-buttons button') { return elements['visible-buttons'].children; }
     if (selector === '#mode-buttons button') { return elements['mode-buttons'].children; }
     if (selector === '#noise-buttons button') { return elements['noise-buttons'].children; }
+    if (selector === '#sim-buttons button') { return elements['sim-buttons'].children; }
+    if (selector === '#sim-ratio button') { return elements['sim-ratio'].children; }
     if (selector === '#view-buttons button') { return viewButtons; }
     missing.push(selector);
     return [];
@@ -119,13 +122,21 @@ function engineLayer(name) {
   return !/^(Velas |Cierres |Vela en formación)/.test(name || '');
 }
 
+function simShape(shape) {
+  return String(shape.name || '').indexOf('sim-') === 0;
+}
+
 function furthest(traces, layout) {
   const points = [];
   traces.forEach(function (trace) {
     if (!engineLayer(trace.name)) { return; }
     (trace.x || []).forEach(function (value) { if (value) { points.push(value); } });
   });
-  (layout.shapes || []).forEach(function (shape) { points.push(shape.x1); });
+  // La caja simulada la dibuja el propietario a mano: no es motor y no puede
+  // contar como que el replay se ha adelantado al reloj.
+  (layout.shapes || []).forEach(function (shape) {
+    if (!simShape(shape)) { points.push(shape.x1); }
+  });
   return points.length ? points.sort()[points.length - 1] : null;
 }
 
@@ -169,7 +180,17 @@ global.Plotly = {
       firstBar: traces[0] && traces[0].x && traces[0].x[0],
       lastBar: traces[0] && traces[0].x && traces[0].x[traces[0].x.length - 1],
       hover: traces[0] && traces[0].text && traces[0].text[0],
-      shapes: (layout.shapes || []).length,
+      shapes: (layout.shapes || []).filter(function (shape) {
+        return !simShape(shape);
+      }).length,
+      // I.1 — la caja de la entrada simulada, con lo que dice cada rectángulo.
+      sim: (layout.shapes || []).filter(simShape).map(function (shape) {
+        return {
+          name: shape.name, type: shape.type,
+          x0: shape.x0, x1: shape.x1, y0: shape.y0, y1: shape.y1,
+          label: (shape.label && shape.label.text) || null,
+        };
+      }),
       yTickFormat: layout.yaxis && layout.yaxis.tickformat,
       xRange: (layout.xaxis && layout.xaxis.range) || null,
       yRange: (layout.yaxis && layout.yaxis.range) || null,
@@ -195,6 +216,14 @@ function snapshot(label) {
     replayPlay: elements['replay-play'].textContent,
     lastRelayout: relayoutCalls[relayoutCalls.length - 1] || null,
     replayLocked: elements['from'].disabled === true && elements['next'].disabled === true,
+    simArmed: (elements['sim-buttons'].children.filter(function (button) {
+      return button.getAttribute('aria-pressed') === 'true';
+    })[0] || {}).dataset?.side || null,
+    simClearDisabled: elements['sim-clear'].disabled === true,
+    simRatio: (elements['sim-ratio'].children.filter(function (button) {
+      return button.getAttribute('aria-pressed') === 'true';
+    })[0] || {}).dataset?.ratio || null,
+    simCursor: elements['chart'].style.cursor || '',
     visibleMode: (elements['visible-buttons'].children.filter(function (button) {
       return button.getAttribute('aria-pressed') === 'true';
     })[0] || {}).dataset?.visible || null,
@@ -366,6 +395,17 @@ visiblesZonas.filter(function (button) { return button.dataset.visible === 'all'
   .forEach(function (button) { button.fire('click'); });
 const capaPrincipal = elements['impulse-layers'].children[0].children[0];
 capaPrincipal.fire('change', { target: { checked: true } });
+
+// Constituciones, roturas y el reloj de arena de las constituciones abortadas
+// comparten capa: se apaga y se enciende para que el paso recorra las tres. Va
+// aquí porque necesita las tres cosas que este bloque acaba de dejar puestas: el
+// impulso principal encendido (los marcadores son suyos), todos los ID y el
+// histórico entero a la vista. Las constituciones abortadas son raras y con una
+// ventana corta no cae ninguna.
+steps.push(snapshot('marcas-por-defecto'));
+elements['layer-marks'].fire('change', { target: { checked: false } });
+steps.push(snapshot('sin-marcas'));
+elements['layer-marks'].fire('change', { target: { checked: true } });
 steps.push(snapshot('evitadas-por-defecto'));
 elements['layer-avoided'].fire('change', { target: { checked: false } });
 steps.push(snapshot('evitadas-apagadas'));
@@ -645,6 +685,130 @@ elements['layer-mid'].fire('change', { target: { checked: false } });
 // Y el preset lo suelta: pedir otro tramo de historia es pedir otro sitio.
 presets[presets.length - 1].fire('click');
 steps.push(snapshot('zoom-suelto-por-el-preset'));
+
+// I.1 — el simulador de entradas: dos botones que arman, un clic que planta la
+// caja y arrastres que la mueven. Con el encuadre tomado a mano se sabe qué
+// precio hay debajo de cada píxel, así que el recorrido puede comprobar dónde
+// cae la caja y cuánto se mueve. Es dibujo del propietario: ninguna de estas
+// cosas toca al motor.
+tabs[0].fire('click');
+presets[0].fire('click');
+const spanDiario = payload.spans[tabs[0].dataset.tf];
+const simX = [
+  minuteOf(plotCalls[plotCalls.length - 1].lastBar) - 200 * spanDiario,
+  minuteOf(plotCalls[plotCalls.length - 1].lastBar),
+];
+const simY = precios;
+zoomTo(simX, simY);
+
+// El mismo cálculo que hace el explorador: MARGIN sobre el div de 1200 x 720.
+function pixelOf(minute, price) {
+  const width = 1200 - 66 - 18;
+  const height = 720 - 16 - 44;
+  return {
+    x: 66 + (minute - simX[0]) / (simX[1] - simX[0]) * width,
+    y: 16 + (simY[1] - price) / (simY[1] - simY[0]) * height,
+  };
+}
+
+const simButtons = elements['sim-buttons'].children;
+
+function armar(side) {
+  simButtons.filter(function (button) { return button.dataset.side === side; })
+    .forEach(function (button) { button.fire('click'); });
+}
+
+function clicGrafico(point) {
+  elements['chart'].fire('click', {
+    clientX: point.x, clientY: point.y,
+    preventDefault() {}, stopPropagation() {},
+  });
+}
+
+function arrastrarCaja(desde, hasta) {
+  elements['chart'].fire('mousedown', {
+    clientX: desde.x, clientY: desde.y,
+    preventDefault() {}, stopPropagation() {},
+  });
+  fireDocument('mousemove', {
+    clientX: hasta.x, clientY: hasta.y, preventDefault() {},
+  });
+  fireDocument('mouseup', {});
+}
+
+function cajaSimulada() {
+  const shapes = plotCalls[plotCalls.length - 1].sim || [];
+  const busca = function (name) {
+    return shapes.filter(function (shape) { return shape.name === name; })[0];
+  };
+  const linea = busca('sim-entrada');
+  if (!linea) { return null; }
+  return {
+    entry: linea.y0,
+    target: busca('sim-objetivo').y1,
+    stop: busca('sim-riesgo').y1,
+    from: minuteOf(linea.x0),
+    to: minuteOf(linea.x1),
+  };
+}
+
+function asaDeLaCaja(price) {
+  const caja = cajaSimulada();
+  return pixelOf(Math.round((caja.from + caja.to) / 2), caja[price]);
+}
+
+const entradaSimulada = (simY[0] + simY[1]) / 2;
+const minutoSimulado = simX[0] + Math.round((simX[1] - simX[0]) * 0.4);
+
+armar('long');
+steps.push(snapshot('sim-armado'));
+// Escape suelta el botón sin plantar nada.
+pressKey('Escape');
+steps.push(snapshot('sim-desarmado'));
+
+armar('long');
+clicGrafico(pixelOf(minutoSimulado, entradaSimulada));
+steps.push(snapshot('sim-largo'));
+
+// El borde de fuera de la caja roja mueve el stop y nada más.
+const asaStop = asaDeLaCaja('stop');
+arrastrarCaja(asaStop, { x: asaStop.x, y: asaStop.y + 40 });
+steps.push(snapshot('sim-stop-arrastrado'));
+
+// La línea de la entrada mueve el conjunto entero: las distancias no cambian.
+const asaEntrada = asaDeLaCaja('entry');
+arrastrarCaja(asaEntrada, { x: asaEntrada.x, y: asaEntrada.y - 25 });
+steps.push(snapshot('sim-entrada-arrastrada'));
+
+// El R:R fijo: 1:3 recoloca el objetivo sin tocar el stop, y con el candado
+// puesto mover el stop arrastra el objetivo con él.
+const ratios = elements['sim-ratio'].children;
+
+function fijarRatio(value) {
+  ratios.filter(function (button) { return button.dataset.ratio === value; })
+    .forEach(function (button) { button.fire('click'); });
+}
+
+fijarRatio('3');
+steps.push(snapshot('sim-ratio-1-3'));
+
+const asaStopConCandado = asaDeLaCaja('stop');
+arrastrarCaja(asaStopConCandado, { x: asaStopConCandado.x, y: asaStopConCandado.y - 20 });
+steps.push(snapshot('sim-stop-con-candado'));
+
+// Arrastrar el objetivo suelta el candado: manda lo que se ve.
+const asaObjetivo = asaDeLaCaja('target');
+arrastrarCaja(asaObjetivo, { x: asaObjetivo.x, y: asaObjetivo.y + 30 });
+steps.push(snapshot('sim-objetivo-a-mano'));
+
+// En corto el objetivo va por debajo de la entrada y el riesgo por encima.
+fijarRatio('4');
+armar('short');
+clicGrafico(pixelOf(minutoSimulado, entradaSimulada));
+steps.push(snapshot('sim-corto'));
+
+elements['sim-clear'].fire('click');
+steps.push(snapshot('sim-quitado'));
 
 console.log(JSON.stringify({
   unknownElements: missing,

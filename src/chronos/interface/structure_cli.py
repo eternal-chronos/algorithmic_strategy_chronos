@@ -19,6 +19,11 @@ from rich.console import Console
 from rich.table import Table
 
 from chronos.application.entries.cascade import CascadeRun, detect_cascade
+from chronos.application.entries.signal_stats import (
+    DEFAULT_CAP,
+    SignalStudy,
+    study_signals,
+)
 from chronos.application.structure import (
     baseline_comparison,
     break_comparison,
@@ -37,6 +42,7 @@ from chronos.application.structure.config import (
     ChartsConfig,
     ImpulseConfig,
     ZonesConfig,
+    with_hourly_structure,
 )
 from chronos.application.structure.detect_impulses import DetectDominantImpulses, ImpulseRun
 from chronos.application.structure.evidence import BASELINE_HASH, PHASE1_BASELINE, collect
@@ -69,6 +75,7 @@ from chronos.infrastructure.reporting.session_audit_report import (
     SessionAuditReport,
     render_session_audit,
 )
+from chronos.infrastructure.reporting.signal_stats_report import render_signal_stats
 from chronos.infrastructure.reporting.zone_captures import write_zone_captures
 from chronos.infrastructure.reporting.zone_report import render_zone_report
 from chronos.infrastructure.structure.aggregation import (
@@ -614,41 +621,24 @@ def entries_command(
     Lo único que produce es el explorador con la capa de la cascada encendida,
     para que el propietario mire si la máquina está viendo lo que ve él.
 
-    La búsqueda arranca en el toque del OB de un ID de H4 y baja a H1; el Diario
-    no es un escalón, sólo prohíbe lo que vaya en contra de su OB mientras el
-    precio esté dentro de él.
+    La búsqueda arranca en el toque del OB de un ID de H4 y baja a H1, donde se
+    espera a que el ID de H1 se ponga en la dirección del de H4 para marcar su OB;
+    la señal salta cuando el precio toca ese OB de H1, en el instante del toque y
+    sin esperar al cierre de la vela, igual que en H4 y en el Diario. El Diario no
+    es un escalón, sólo prohíbe lo que vaya en contra de su OB mientras el precio
+    esté dentro de él.
 
-    Corre el módulo con las zonas encendidas y con la rotura por zona —que es la
-    regla vigente de la fase 2.1—, porque la cascada se apoya en los toques del OB
-    y ésos son los que la fase 2.0 ya calcula.
+    Corre el módulo con las zonas encendidas, con la rotura por zona —que es la
+    regla vigente de la fase 2.1— y con **ID propio en H1**, que es lo que esta
+    fase añade al reparto: el hash de configuración es por tanto otro, y a
+    propósito, para que ninguna corrida de esta fase se confunda con la línea base
+    de la fase 1.
     """
     with _handled():
-        run_config = load_impulse_config(config)
-        if not run_config.enabled:
-            console.print(
-                "[yellow]El módulo de impulso dominante está desactivado "
-                "(`enabled: false`). No hay nada que buscar.[/yellow]"
-            )
+        corrida = _cascade_pipeline(config, skip_tz_audit)
+        if corrida is None:
             return
-
-        history = load_history(run_config.data, run_config.structure_side)
-        audit = _audit_or_stop(run_config, history, skip_tz_audit)
-        series, skipped = _aggregate_available(history, run_config)
-        aggregated = {tf: item.frame for tf, item in series.items()}
-        notes = [item.description for item in series.values()] + skipped
-        provenance = f"{history.provenance} · lado efectivo: {history.side}"
-
-        cascade_config = replace(
-            run_config,
-            rules=replace(run_config.rules, break_by_zone=True),
-            zones=ZonesConfig(enabled=True),
-        )
-        console.print("[dim]Corrida con la rotura por ZONA y las zonas encendidas...[/dim]")
-        run = DetectDominantImpulses(cascade_config).execute(
-            aggregated, audit=audit, provenance=provenance, aggregation_notes=notes
-        )
-        zones = detect_zones(run)
-        cascade = detect_cascade(run, zones)
+        run_config, run, zones, cascade = corrida
         _print_cascade(cascade)
 
         output.mkdir(parents=True, exist_ok=True)
@@ -666,6 +656,49 @@ def entries_command(
         console.print(f"\nExplorador: [bold]{explorer}[/bold]")
 
 
+def _cascade_pipeline(
+    config: Path, skip_tz_audit: bool
+) -> tuple[ImpulseConfig, ImpulseRun, ZonesRun, CascadeRun] | None:
+    """La corrida de la fase 3.0: rotura por zona, zonas encendidas e ID en H1.
+
+    La comparten el explorador de la cascada y su estadística: son la misma
+    corrida vista de dos maneras, y calcularla con configuraciones distintas
+    haría que el dibujo y los números hablaran de señales distintas.
+
+    Devuelve `None` con el módulo apagado, que no es un error.
+    """
+    run_config = load_impulse_config(config)
+    if not run_config.enabled:
+        console.print(
+            "[yellow]El módulo de impulso dominante está desactivado "
+            "(`enabled: false`). No hay nada que buscar.[/yellow]"
+        )
+        return None
+
+    history = load_history(run_config.data, run_config.structure_side)
+    audit = _audit_or_stop(run_config, history, skip_tz_audit)
+    series, skipped = _aggregate_available(history, run_config)
+    aggregated = {tf: item.frame for tf, item in series.items()}
+    notes = [item.description for item in series.values()] + skipped
+    provenance = f"{history.provenance} · lado efectivo: {history.side}"
+
+    cascade_config = replace(
+        run_config,
+        rules=replace(run_config.rules, break_by_zone=True),
+        zones=ZonesConfig(enabled=True),
+        charts=with_hourly_structure(run_config.charts),
+    )
+    console.print(
+        "[dim]Corrida con la rotura por ZONA, las zonas encendidas y "
+        "el ID de H1...[/dim]"
+    )
+    run = DetectDominantImpulses(cascade_config).execute(
+        aggregated, audit=audit, provenance=provenance, aggregation_notes=notes
+    )
+    zones = detect_zones(run)
+    return run_config, run, zones, detect_cascade(run, zones)
+
+
 def _print_cascade(cascade: CascadeRun) -> None:
     """Cuántos pasos de cada tipo. Ni porcentajes ni verdictos: sólo el recuento.
 
@@ -674,8 +707,8 @@ def _print_cascade(cascade: CascadeRun) -> None:
     """
     if not cascade.enabled:
         console.print(
-            "[yellow]La cascada no se ha podido calcular: hacen falta las zonas, "
-            "el ID de H4 y las velas de H1.[/yellow]"
+            "[yellow]La cascada no se ha podido calcular: hacen falta las zonas "
+            "y los dos ID, el de H4 y el de H1.[/yellow]"
         )
         return
     table = Table(show_header=True, header_style="bold")
@@ -689,6 +722,99 @@ def _print_cascade(cascade: CascadeRun) -> None:
         "[dim]SON SEÑALES: no hay entradas, ni stops, ni targets, ni resultados. "
         "Se auditan en el explorador, capa «Cascada de entrada».[/dim]"
     )
+
+
+@structure_app.command("entradas-estadisticas")
+def entries_stats(
+    config: Annotated[Path, typer.Option("--config", "-c")] = DEFAULT_CONFIG,
+    output: Annotated[Path, typer.Option("--salida", "-o")] = Path("now/fase30"),
+    cap: Annotated[
+        int,
+        typer.Option("--tope", help="Velas de H1 que se observan tras cada señal"),
+    ] = DEFAULT_CAP,
+    skip_tz_audit: Annotated[bool, typer.Option("--skip-tz-audit")] = False,
+) -> None:
+    """Qué valen las señales de la cascada, en números. **Sigue sin haber entradas.**
+
+    Mide, para cada marca de la fase 3.0, cuánto recorrió el precio a favor y en
+    contra a partir de ella, en múltiplos de la distancia al borde exterior de su
+    zona —el sitio donde la señal queda desmentida— y hasta que una vela de H1
+    cierra más allá de ese borde o se agota el tope.
+
+    No abre nada: no hay orden, ni stop, ni target, ni tamaño, ni comisiones, ni
+    curva de capital. Ninguna cifra que salga de aquí es una rentabilidad.
+
+    Contesta dos preguntas del propietario, cada una con su bloque: si bajar a H1
+    mejora los toques del OB de H4, y qué otras formas de confirmar en H1 dan
+    mejores números que esperar el toque de su OB.
+    """
+    with _handled():
+        corrida = _cascade_pipeline(config, skip_tz_audit)
+        if corrida is None:
+            return
+        _, run, zones, cascade = corrida
+        study = study_signals(run, zones, cascade, cap_bars=cap)
+        _print_study(study)
+
+        output.mkdir(parents=True, exist_ok=True)
+        report = output / "estadisticas_senales.txt"
+        report.write_text(render_signal_stats(study), encoding="utf-8")
+        console.print(f"\nInforme: [bold]{report}[/bold]")
+
+
+def _print_study(study: SignalStudy) -> None:
+    """Las mismas tablas del informe, en la consola. No calcula nada."""
+    if not study.enabled:
+        console.print(
+            "[yellow]No hay estadística que sacar: la cascada no se ha podido "
+            "calcular.[/yellow]"
+        )
+        return
+    console.print(
+        "\n[bold]Estadística de las señales[/bold] "
+        f"[dim](tope de {study.cap_bars} velas de H1; R = distancia al borde "
+        "exterior de la zona)[/dim]"
+    )
+    if study.funnel is not None:
+        funnel = study.funnel
+        console.print(
+            f"\nEmbudo: {funnel.touches:,} toques de OB de H4 "
+            f"({funnel.vetoed:,} vetados por el Diario) → "
+            f"{funnel.confirmed:,} con OB de H1 confirmado → "
+            f"[bold]{funnel.signalled:,} señales[/bold]."
+        )
+    for block in study.sections:
+        table = Table(show_header=True, header_style="bold", title=block.title)
+        table.add_column("Grupo")
+        table.add_column("n", justify="right")
+        for target in study.targets:
+            table.add_column(f"≥{target:g}R", justify="right")
+        table.add_column("muerta", justify="right")
+        table.add_column("MFE (R)", justify="right")
+        table.add_column("MAE (R)", justify="right")
+        table.add_column("MFE (ATR)", justify="right")
+        table.add_column("R (USD)", justify="right")
+        for group in block.groups:
+            table.add_row(
+                group.name,
+                f"{group.n:,}",
+                *[f"{value:.1%}" for value in group.hit],
+                f"{group.dead:.1%}",
+                _number(group.favor_median),
+                _number(group.against_median),
+                _number(group.favor_atr_median),
+                _number(group.risk_median),
+            )
+        console.print()
+        console.print(table)
+    console.print(
+        "\n[dim]SIGUEN SIENDO SEÑALES: ninguna de estas cifras es una "
+        "rentabilidad.[/dim]"
+    )
+
+
+def _number(value: float) -> str:
+    return "n/d" if value != value else f"{value:,.2f}"
 
 
 def _print_break_regression(baseline: ImpulseRun) -> tuple[bool, str]:
