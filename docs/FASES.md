@@ -124,6 +124,16 @@ cuando el precio tocó la zona de H4 —lo decidió el propietario, y es lo que 
 que muchas marcas caigan en la misma vela del toque— y que una confirmación cierre
 la ventana, de modo que lo que llega después no se dibuja aunque el motor lo vea.
 
+**Las zonas tienen su propio reparto en el explorador.** No es el de los
+impulsos: en **M15** se dibujan el OB y el UL **de H1** y sólo ésos —ahí se fecha
+el toque que dispara la señal, y la caja de H4 a esa escala es cuatro velas de
+alto que sólo tapan—, y en **H1** se dibujan las suyas **y las de H4**, para ver
+si el precio está dentro de la zona grande. Cada temporalidad lleva **su color**
+—violeta el Diario, naranja H4, azul H1—, con el UL en el tono fuerte y el OB
+aclarado, y el fondo al 25-30 % para que se entienda sin tapar el precio. Es
+DIBUJO de zonas ya calculadas: no mide ningún toque, no añade ninguna señal y no
+cambia la cascada.
+
 ### Fase 1 — impulso dominante
 
 No es una estrategia registrada con `@register`: no emite señales. Es un módulo

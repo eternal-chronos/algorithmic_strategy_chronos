@@ -385,6 +385,16 @@ visiblesZonas.forEach(function (button) {
 visiblesZonas.filter(function (button) { return button.dataset.visible === 'pair'; })
   .forEach(function (button) { button.fire('click'); });
 
+// Cada gráfico lleva SUS zonas, y el reparto no es el de los impulsos: en M15
+// las de H1 y no las de H4, en H1 las de H1 y las de H4. Se retrata cada gráfico
+// con el periodo completo para poder comprobarlo.
+tabs.forEach(function (tab) {
+  tab.fire('click');
+  steps.push(snapshot('zonas-de-' + tab.dataset.tf));
+});
+// El gráfico vuelve a ser el que los pasos siguientes dan por supuesto.
+conZonas.fire('click');
+
 // Fase 2.1: la capa de roturas evitadas, encendida y apagada sobre las mismas
 // velas. Con `break_by_zone: false` no hay ninguna y los dos pasos salen iguales.
 // Se dibujan todos los ID: con el filtro «actual + anterior» las evitadas de los

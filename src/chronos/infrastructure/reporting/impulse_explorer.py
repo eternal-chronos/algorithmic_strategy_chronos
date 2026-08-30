@@ -11,6 +11,11 @@ diario, sobre H1 el de H1 y el de H4, y sobre M15 sólo el de H1. El impulso
 principal de cada gráfico lleva línea continua, sombreado de limbo y marcadores;
 el de contexto va en trazo discontinuo y sin marcadores, para que no compitan.
 
+Las **zonas** llevan su propio reparto, que no es el de los impulsos: sobre M15
+se dibujan las de H1 y sólo ésas —ahí se fecha el toque que dispara la señal, y
+la caja de H4 a esa escala sólo tapa—, y sobre H1 las de H1 y las de H4. Cada
+temporalidad tiene su color, con el relleno al 25-30 %.
+
 Del payload sale todo lo que se puede derivar en el navegador: las etiquetas de
 los puntos se componen en JavaScript y las marcas de tiempo viajan como minutos
 desde la época. Con ocho años de M15 —doscientas mil velas— la diferencia entre
@@ -31,6 +36,7 @@ import pandas as pd
 import plotly.offline as pyo
 
 from chronos.application.entries.cascade import CascadeMark, CascadeRun
+from chronos.application.structure.config import DAILY, H1, H4, M15, ChartsConfig
 from chronos.application.structure.detect_impulses import ImpulseRun, TimeframeAnalysis
 from chronos.application.structure.lateralization import (
     LateralizationStudy,
@@ -56,6 +62,21 @@ _MARKER = re.compile(r"__[A-Z][A-Z_]*__")
 BULLISH = theme.SERIES[2]
 BEARISH = theme.NEGATIVE
 LIMBO_FILL = theme.INK_MUTED
+
+#: Las ZONAS, en cambio, van por TEMPORALIDAD y no por dirección: en el mismo
+#: gráfico puede haber cajas de dos —el OB de H4 sobre el gráfico de H1— y el
+#: color es lo que dice de quién es cada una. La dirección sigue leyéndose en la
+#: línea del ID y en el globo de la zona.
+ZONE_COLORS: dict[str, str] = {
+    DAILY: theme.VIOLET,
+    H4: theme.SERIES[1],
+    H1: theme.SERIES[0],
+}
+
+#: Cuánto se aclara el tono de la temporalidad para el relleno del OB. El OB es
+#: la caja grande —la vela del ancla entera— y el UL el tramo de mecha: con el
+#: mismo tono y la misma fuerza, el OB se come el gráfico.
+_OB_LIGHTEN = 0.45
 
 DECIMALS = 4
 
@@ -154,6 +175,7 @@ def build_payload(
     # para construir M15, su pestaña no puede quedarse ahí esperando a que
     # alguien la pulse.
     available = tuple(chart for chart in charts.charts if chart in bars)
+    zone_layout, zone_context = _zone_layout(charts, available, zoned)
     return {
         "meta": {
             "symbol": run.config.symbol,
@@ -181,6 +203,9 @@ def build_payload(
             "grid": theme.GRIDLINE,
             "surface": theme.SURFACE,
             "font": theme.FONT_FAMILY,
+            #: Un tono por temporalidad para las zonas, con el relleno del OB
+            #: aclarado: `line` es el borde de las dos, `UL` y `OB` los rellenos.
+            "zones": _zone_palette(),
         },
         "charts": list(available),
         "layout": {chart: list(charts.overlays(chart)) for chart in available},
@@ -199,6 +224,15 @@ def build_payload(
         #: `False` cuando la corrida no llevaba zonas: el explorador esconde sus
         #: casillas en vez de ofrecer capas que no pueden dibujar nada.
         "hasZones": bool(zoned),
+        #: Qué zonas dibuja cada gráfico. **No es el reparto de impulsos**: en el
+        #: gráfico fino se dibujan las de H1 —el OB que la cascada lee, y donde
+        #: el toque se fecha— y NO las de H4, que a esa escala es una caja de
+        #: cuatro velas que sólo tapa; y en H1 se dibujan las suyas y las de H4,
+        #: para ver si el precio está dentro de la zona grande.
+        "zoneLayout": zone_layout,
+        #: De las anteriores, las que apaga la casilla «Zonas del contexto»: las
+        #: del DIARIO sobre otro gráfico, que son las que ocupan la pantalla.
+        "zoneContext": zone_context,
         #: Lo mismo para la capa de roturas evitadas de la fase 2.1: con la regla
         #: apagada no hay ni una y la casilla no se enseña.
         "hasAvoided": any(analysis.avoided for analysis in run.analyses.values()),
@@ -232,6 +266,54 @@ def build_payload(
             if variant.mode != run.config.rules.leg_start_mode.value
         },
     }
+
+
+def _zone_palette() -> dict[str, dict[str, str]]:
+    """El borde y los dos rellenos de cada temporalidad."""
+    return {
+        timeframe: {"line": colour, "UL": colour, "OB": _lighten(colour, _OB_LIGHTEN)}
+        for timeframe, colour in ZONE_COLORS.items()
+    }
+
+
+def _lighten(colour: str, amount: float) -> str:
+    """El mismo tono mezclado con blanco, para no inventar hexadecimales."""
+    value = colour.lstrip("#")
+    mixed = (
+        round(int(value[index : index + 2], 16) * (1 - amount) + 255 * amount)
+        for index in (0, 2, 4)
+    )
+    return "#" + "".join(f"{channel:02x}" for channel in mixed)
+
+
+def _zone_layout(
+    charts: ChartsConfig,
+    available: Sequence[str],
+    zoned: dict[str, TimeframeZones],
+) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+    """Qué zonas dibuja cada gráfico, y cuáles de ellas son opcionales.
+
+    Por defecto son las de los impulsos que ese gráfico ya dibuja. El **gráfico
+    fino** es la excepción y es a propósito: en M15 lo que se mira es si el
+    precio está dentro del OB de H1 —ahí se fecha el toque que dispara la señal—
+    y la caja de H4, cuatro veces más alta, sólo tapa. Cuando H1 lleva zonas
+    (fase 3.0), M15 dibuja las suyas y sólo las suyas.
+
+    Las opcionales son las del **Diario sobre otro gráfico**: su OB ocupa la
+    pantalla entera y por eso la casilla «Zonas del contexto» las apaga. Las
+    demás no cuelgan de ninguna casilla porque son justo lo que se quiere ver.
+    """
+    layout: dict[str, list[str]] = {}
+    optional: dict[str, list[str]] = {}
+    for chart in available:
+        drawn = [timeframe for timeframe in charts.overlays(chart) if timeframe in zoned]
+        if chart == M15 and H1 in zoned:
+            drawn = [H1]
+        layout[chart] = drawn
+        optional[chart] = [
+            timeframe for timeframe in drawn if timeframe == DAILY and chart != DAILY
+        ]
+    return layout, optional
 
 
 def _mode_impulses(variant: ModeVariant) -> dict[str, Any]:

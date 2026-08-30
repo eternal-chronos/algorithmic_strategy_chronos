@@ -2552,3 +2552,135 @@ def test_la_caja_nueva_se_planta_con_el_ratio_puesto(
     riesgo = niveles["stop"] - niveles["entrada"]
     assert niveles["entrada"] - niveles["objetivo"] == pytest.approx(4 * riesgo, abs=1e-4)
     assert _caja(corto)["sim-entrada"]["label"] == "CORTO · R:R 1:4,0"
+
+
+# --- El reparto de las zonas y su color por temporalidad ---------------------
+#
+# Las zonas NO siguen el reparto de los impulsos: en M15 se dibujan las de H1
+# —donde se fecha el toque que dispara la señal de la cascada— y no las de H4,
+# que a esa escala sólo tapa; en H1, las de H1 y las de H4. Y el color lo pone la
+# temporalidad, no la dirección, que es lo que permite saber de quién es cada
+# caja cuando en el mismo gráfico hay dos.
+
+
+def _zonas_de(step: dict, timeframe: str) -> list[dict]:
+    return [
+        trace
+        for trace in step["plot"]["traces"]
+        if trace["name"].startswith(f"Zona UL {timeframe} ")
+        or trace["name"].startswith(f"Zona OB {timeframe} ")
+    ]
+
+
+def test_el_reparto_de_zonas_de_la_linea_base_es_el_de_los_impulsos(
+    run: ImpulseRun, zones: ZonesRun
+) -> None:
+    """Sin ID en H1 no hay nada que repartir: cada gráfico lleva lo que dibuja."""
+    payload = build_payload(run, zones=zones)
+
+    assert payload["zoneLayout"] == {DAILY: [DAILY], H4: [H4, DAILY], H1: [H4], M15: [H4]}
+    assert payload["zoneContext"] == {DAILY: [], H4: [DAILY], H1: [], M15: []}
+
+
+def test_el_grafico_fino_lleva_las_zonas_de_h1_y_solo_esas(
+    entries_run: ImpulseRun, entries_zones: ZonesRun
+) -> None:
+    payload = build_payload(entries_run, zones=entries_zones)
+
+    assert payload["zoneLayout"][M15] == [H1]
+    assert payload["zoneLayout"][H1] == [H1, H4]
+    # Y sólo el Diario cuelga de la casilla: lo demás es justo lo que se mira.
+    assert payload["zoneContext"] == {DAILY: [], H4: [DAILY], H1: [], M15: []}
+
+
+def test_sin_zonas_no_hay_reparto_que_dibujar(entries_run: ImpulseRun) -> None:
+    payload = build_payload(entries_run)
+    assert all(not drawn for drawn in payload["zoneLayout"].values())
+
+
+def test_en_m15_se_dibuja_el_ob_de_h1_y_no_el_de_h4(
+    entries_run: ImpulseRun, entries_zones: ZonesRun, tmp_path: Path
+) -> None:
+    paso = _step(_draw(entries_run, tmp_path, zones=entries_zones), f"zonas-de-{M15}")
+
+    assert _zonas_de(paso, H1), _trace_names(paso)
+    assert not _zonas_de(paso, H4), _trace_names(paso)
+    assert not _zonas_de(paso, DAILY)
+
+
+def test_en_h1_se_dibujan_las_suyas_y_las_de_h4(
+    entries_run: ImpulseRun, entries_zones: ZonesRun, tmp_path: Path
+) -> None:
+    paso = _step(_draw(entries_run, tmp_path, zones=entries_zones), f"zonas-de-{H1}")
+
+    assert _zonas_de(paso, H1), _trace_names(paso)
+    assert _zonas_de(paso, H4), _trace_names(paso)
+    # La de H4 es la de la temporalidad de encima y se dice en el nombre.
+    assert all(f"({H4} " not in trace["name"] for trace in _zonas_de(paso, H1))
+    assert all("(contexto)" in trace["name"] for trace in _zonas_de(paso, H4))
+
+
+def test_cada_temporalidad_pinta_sus_zonas_de_su_color(
+    entries_run: ImpulseRun, entries_zones: ZonesRun, tmp_path: Path
+) -> None:
+    """El color es de la temporalidad: dos cajas del mismo gráfico no pueden
+    salir del mismo color por ir las dos al alza."""
+    paso = _step(_draw(entries_run, tmp_path, zones=entries_zones), f"zonas-de-{H1}")
+    palette = build_payload(entries_run, zones=entries_zones)["colors"]["zones"]
+
+    def rellenos(timeframe: str, kind: str) -> set[str]:
+        return {
+            trace["fillcolor"]
+            for trace in _zonas_de(paso, timeframe)
+            if trace["name"].startswith(f"Zona {kind}") and trace["fillcolor"]
+        }
+
+    for timeframe in (H1, H4):
+        for kind in ("UL", "OB"):
+            colores = rellenos(timeframe, kind)
+            assert colores, f"{timeframe} {kind}"
+            for relleno in colores:
+                assert _rgb(relleno) == _rgb(palette[timeframe][kind])
+    # Y el OB no se pinta con el mismo tono que el UL: es la caja grande.
+    assert palette[H1]["OB"] != palette[H1]["UL"]
+    assert rellenos(H1, "UL") != rellenos(H4, "UL")
+
+
+def test_el_fondo_de_las_zonas_no_tapa_el_precio(
+    entries_run: ImpulseRun, entries_zones: ZonesRun, tmp_path: Path
+) -> None:
+    """Entre el 20 % y el 30 %: se entiende que hay una caja y se ven las velas."""
+    paso = _step(_draw(entries_run, tmp_path, zones=entries_zones), f"zonas-de-{H1}")
+    rellenos = [
+        trace["fillcolor"]
+        for trace in paso["plot"]["traces"]
+        if trace["name"].startswith("Zona ") and trace["fillcolor"]
+    ]
+
+    assert rellenos
+    for relleno in rellenos:
+        assert 0.20 <= float(relleno.rsplit(",", 1)[1].rstrip(")")) <= 0.30
+
+
+def test_las_notas_dicen_de_quien_son_las_zonas_de_este_grafico(
+    entries_run: ImpulseRun, entries_zones: ZonesRun, tmp_path: Path
+) -> None:
+    resultado = _draw(entries_run, tmp_path, zones=entries_zones)
+    en_m15 = _step(resultado, f"zonas-de-{M15}")["notes"]
+    en_h1 = _step(resultado, f"zonas-de-{H1}")["notes"]
+
+    def dibujadas(notas: str) -> str:
+        return notas.split("zonas dibujadas: ")[1].split(" · ")[0]
+
+    assert dibujadas(en_m15).endswith(f"de {H1}"), dibujadas(en_m15)
+    assert f"de {H4}" not in dibujadas(en_m15)
+    assert f"de {H1}" in dibujadas(en_h1) and f"de {H4}" in dibujadas(en_h1)
+    assert "cada temporalidad con su color" in en_h1
+
+
+def _rgb(colour: str) -> tuple[int, int, int]:
+    """El mismo tono, venga como `#rrggbb` o como `rgba(r,g,b,a)`."""
+    if colour.startswith("#"):
+        return tuple(int(colour[index : index + 2], 16) for index in (1, 3, 5))  # type: ignore[return-value]
+    numbers = colour[colour.index("(") + 1 : colour.index(")")].split(",")
+    return tuple(int(value) for value in numbers[:3])  # type: ignore[return-value]

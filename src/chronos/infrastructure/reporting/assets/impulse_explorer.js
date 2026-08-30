@@ -72,20 +72,20 @@
     clean: {
       visible: "current",
       limbo: false, marks: true, contacts: false, mid: false, wrong: false,
-      zonesUl: true, zonesOb: true, zonesContext: false, signals: true,
-      cascade: true, avoided: false, steps: false
+      zonesUl: true, zonesOb: true, zonesContext: false,
+      signals: true, cascade: true, avoided: false, steps: false
     },
     normal: {
       visible: "pair",
       limbo: true, marks: true, contacts: false, mid: false, wrong: true,
-      zonesUl: true, zonesOb: true, zonesContext: true, signals: true,
-      cascade: true, avoided: true, steps: true
+      zonesUl: true, zonesOb: true, zonesContext: true,
+      signals: true, cascade: true, avoided: true, steps: true
     },
     all: {
       visible: "all",
       limbo: true, marks: true, contacts: true, mid: true, wrong: true,
-      zonesUl: true, zonesOb: true, zonesContext: true, signals: true,
-      cascade: true, avoided: true, steps: true
+      zonesUl: true, zonesOb: true, zonesContext: true,
+      signals: true, cascade: true, avoided: true, steps: true
     }
   };
 
@@ -879,12 +879,33 @@
     return kind === "UL" ? state.zonesUl : state.zonesOb;
   }
 
-  /* Las zonas de la temporalidad de CONTEXTO son dos rectángulos que ocupan la
-   * pantalla entera —el UL y el OB del diario sobre un gráfico de H4— y tapan el
-   * precio que se está auditando. Se pueden apagar solas, y «Limpio» las apaga. */
-  function drawsZonesOf(position) {
-    return position === 0 || state.zonesContext;
+  /* Qué zonas dibuja ESTE gráfico. No es el reparto de impulsos y por eso viene
+   * aparte en el payload: sobre M15 se dibujan las de H1 —el OB en el que se
+   * fecha el toque— y no las de H4, que a esa escala es una caja de cuatro velas
+   * que sólo tapa; sobre H1 se dibujan las suyas y las de H4, que es lo que hay
+   * que ver para saber si el precio está dentro de la zona grande.
+   *
+   * `zoneContext` son las que la casilla «Zonas del contexto» apaga: las del
+   * Diario sobre otro gráfico, que ocupan la pantalla entera. Las demás no
+   * cuelgan de ninguna casilla porque son justo lo que se quiere mirar. */
+  function zoneTimeframes() {
+    var drawn = (DATA.zoneLayout || {})[state.chart] || [];
+    var optional = (DATA.zoneContext || {})[state.chart] || [];
+    return drawn.filter(function (timeframe) {
+      if (!isVisible(timeframe)) { return false; }
+      return state.zonesContext || optional.indexOf(timeframe) < 0;
+    });
   }
+
+  /* El color de una zona lo pone su TEMPORALIDAD, no su dirección: en el mismo
+   * gráfico hay cajas de dos y lo primero que hay que poder decir es de quién es
+   * cada una. La dirección sigue en la línea del ID y en el globo. Dentro del
+   * tono, el UL va fuerte y el OB aclarado: el OB es la caja grande. */
+  function zonePalette(timeframe) {
+    return (COLORS.zones || {})[timeframe] || null;
+  }
+
+  var ZONE_ALPHA = { UL: 0.30, OB: 0.25 };
 
   /* Un polígono por zona dentro de una sola traza por (temporalidad, tipo,
    * dirección): con `fill: toself` y separadores nulos, Plotly los dibuja todos
@@ -895,43 +916,46 @@
     var edges = window_(range);
     var traces = [];
 
-    overlays().forEach(function (timeframe, position) {
-      if (!isVisible(timeframe) || !drawsZonesOf(position)) { return; }
-      var own = position === 0;
-      var allowed = zoneIds(timeframe, edges);
-      var buckets = {};
-
-      zonesOf(timeframe).forEach(function (zone) {
-        if (!wantsZone(zone.k)) { return; }
-        if (zone.x1 < edges.lo || zone.xd > edges.hi) { return; }
-        // La zona no existe hasta que cierra la vela que la hace nacer.
-        if (pending(zone.x0, timeframe, edges)) { return; }
-        if (!keeps(allowed, zone.id)) { return; }
-        var key = zone.k + ":" + zone.d;
-        if (!buckets[key]) { buckets[key] = { live: shape(), before: shape(), zone: zone }; }
-        pushZone(buckets[key].live, zone.x0, clip(zone.x1, edges), zone, timeframe, false);
-        if (zone.xd < zone.x0) {
-          pushZone(buckets[key].before, zone.xd, zone.x0, zone, timeframe, true);
-        }
-      });
-
-      Object.keys(buckets).forEach(function (key) {
-        var kind = key.split(":")[0];
-        var direction = key.split(":")[1];
-        var colour = direction === "alcista" ? COLORS.bullish : COLORS.bearish;
-        var name = (kind === "UL" ? "Zona UL " : "Zona OB ") + label(timeframe) +
-          " " + direction + (own ? "" : " (contexto)");
-        if (buckets[key].live.x.length) {
-          traces.push(zoneTrace(name, buckets[key].live, colour, kind, own, false));
-        }
-        if (buckets[key].before.x.length) {
-          traces.push(zoneTrace(
-            "Antes de existir · " + name, buckets[key].before, colour, kind, own, true
-          ));
-        }
-      });
+    zoneTimeframes().forEach(function (timeframe) {
+      pushZoneTraces(traces, timeframe, edges);
     });
     return traces;
+  }
+
+  /* Las zonas de una temporalidad sobre el gráfico actual. El filtro es el mismo
+   * para todas: sólo las del ID actual. */
+  function pushZoneTraces(traces, timeframe, edges) {
+    var allowed = zoneIds(timeframe, edges);
+    var buckets = {};
+
+    zonesOf(timeframe).forEach(function (zone) {
+      if (!wantsZone(zone.k)) { return; }
+      if (zone.x1 < edges.lo || zone.xd > edges.hi) { return; }
+      // La zona no existe hasta que cierra la vela que la hace nacer.
+      if (pending(zone.x0, timeframe, edges)) { return; }
+      if (!keeps(allowed, zone.id)) { return; }
+      var key = zone.k + ":" + zone.d;
+      if (!buckets[key]) { buckets[key] = { live: shape(), before: shape(), zone: zone }; }
+      pushZone(buckets[key].live, zone.x0, clip(zone.x1, edges), zone, timeframe, false);
+      if (zone.xd < zone.x0) {
+        pushZone(buckets[key].before, zone.xd, zone.x0, zone, timeframe, true);
+      }
+    });
+
+    Object.keys(buckets).forEach(function (key) {
+      var kind = key.split(":")[0];
+      var direction = key.split(":")[1];
+      var name = (kind === "UL" ? "Zona UL " : "Zona OB ") + label(timeframe) +
+        " " + direction + (timeframe === primary() ? "" : " (contexto)");
+      if (buckets[key].live.x.length) {
+        traces.push(zoneTrace(name, buckets[key].live, timeframe, kind, false));
+      }
+      if (buckets[key].before.x.length) {
+        traces.push(zoneTrace(
+          "Antes de existir · " + name, buckets[key].before, timeframe, kind, true
+        ));
+      }
+    });
   }
 
   function shape() { return { x: [], y: [], text: [] }; }
@@ -972,19 +996,20 @@
     return head + body;
   }
 
-  function zoneTrace(name, bucket, colour, kind, own, before) {
+  function zoneTrace(name, bucket, timeframe, kind, before) {
+    // Sin tono declarado para esa temporalidad, el color de la dirección: una
+    // zona sin pintar sería peor que una zona del color de antes.
+    var palette = zonePalette(timeframe);
+    var edge = palette ? palette.line : COLORS.ink;
+    var fill = palette ? palette[kind] : COLORS.muted;
     return {
       type: "scatter", mode: "lines", name: name,
       x: bucket.x, y: bucket.y, text: bucket.text,
       hoverinfo: "text", hoverlabel: { align: "left" }, connectgaps: false,
       fill: before ? "none" : "toself",
-      fillcolor: before ? undefined : rgba(colour, kind === "UL" ? 0.30 : 0.16),
-      opacity: before ? 0.35 : (own ? 1 : 0.7),
-      line: {
-        color: colour,
-        width: before ? 1 : (own ? 1.2 : 1),
-        dash: before ? "dot" : "solid"
-      }
+      fillcolor: before ? undefined : rgba(fill, ZONE_ALPHA[kind]),
+      opacity: before ? 0.35 : 1,
+      line: { color: edge, width: before ? 1 : 1.2, dash: before ? "dot" : "solid" }
     };
   }
 
@@ -1006,8 +1031,7 @@
     var edges = window_(range);
     var bucket = shape();
 
-    overlays().forEach(function (timeframe, position) {
-      if (!isVisible(timeframe) || !drawsZonesOf(position)) { return; }
+    zoneTimeframes().forEach(function (timeframe) {
       var allowed = zoneIds(timeframe, edges);
       candidatesOf(timeframe).forEach(function (item) {
         if (item.x1 < edges.lo || item.xd > edges.hi) { return; }
@@ -1042,8 +1066,7 @@
     var edges = window_(range);
     var items = [];
 
-    overlays().forEach(function (timeframe, position) {
-      if (!isVisible(timeframe) || !drawsZonesOf(position)) { return; }
+    zoneTimeframes().forEach(function (timeframe) {
       var allowed = zoneIds(timeframe, edges);
       zonesOf(timeframe).forEach(function (zone) {
         if (zone.k !== "OB" || zone.xc === null || zone.xc === undefined) { return; }
@@ -2460,20 +2483,25 @@
         DATA.meta.legStartMode + " y no se dibujan en otro modo: serían zonas de " +
         "impulsos que en este modo no existen";
     } else if (zonesAvailable() && (state.zonesUl || state.zonesOb)) {
-      var conZona = 0;
-      overlays().forEach(function (timeframe, position) {
-        if (!isVisible(timeframe) || !drawsZonesOf(position)) { return; }
+      // Qué zonas se están viendo y DE QUIÉN: en este gráfico puede haber cajas
+      // de dos temporalidades y las de una tercera no dibujarse. Sin decirlo,
+      // una zona ausente se lee como que ese ID no tenía ninguna.
+      var dibujadas = zoneTimeframes().map(function (timeframe) {
         var allowed = zoneIds(timeframe, edges);
-        conZona += zonesOf(timeframe).filter(function (zone) {
+        var cuantas = zonesOf(timeframe).filter(function (zone) {
           return wantsZone(zone.k) && zone.x1 >= edges.lo && zone.xd <= edges.hi &&
             keeps(allowed, zone.id);
         }).length;
+        return cuantas.toLocaleString("es-ES") + " de " + label(timeframe);
       });
-      text += " · zonas dibujadas: " + conZona.toLocaleString("es-ES") +
-        " (sólo las del ID actual: al constituirse uno nuevo, las del anterior se van)" +
-        (state.zonesContext || overlays().length < 2
-          ? ""
-          : " · zonas del contexto (" + label(overlays()[1]) + ") APAGADAS") +
+      var fuera = state.zonesContext
+        ? []
+        : ((DATA.zoneContext || {})[state.chart] || []).map(label);
+      text += " · zonas dibujadas: " +
+        (dibujadas.length ? dibujadas.join(", ") : "ninguna") +
+        " · cada temporalidad con su color, y siempre las del ID actual: al " +
+        "constituirse uno nuevo, las del anterior se van" +
+        (fuera.length ? " · zonas del contexto (" + fuera.join(", ") + ") APAGADAS" : "") +
         (DATA.meta.breakByZone
           ? " (fase 2.1: éstas SÍ deciden la rotura)"
           : " (fase 2.0: sólo se dibujan, no rompen nada)");

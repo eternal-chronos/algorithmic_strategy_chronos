@@ -24,6 +24,11 @@ BASELINE = "#c3c2b7"
 # Categóricos, en orden fijo. Nunca se ciclan.
 SERIES = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100")
 
+# Un tono más fuera de la serie categórica, para las capas que necesitan
+# distinguir una tercera cosa sin repetir el azul, el naranja o el verde: las
+# zonas del módulo de estructura llevan un color por temporalidad.
+VIOLET = "#6f4bd8"
+
 # Polaridad (ganancia / pérdida): pareja divergente azul ↔ rojo con gris neutro.
 POSITIVE = "#2a78d6"
 NEGATIVE = "#d03b3b"

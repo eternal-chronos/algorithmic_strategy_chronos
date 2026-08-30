@@ -138,15 +138,23 @@ roto y que en su lugar rompe y gira la pierna."><input type="checkbox" id="layer
         <span id="zone-layers" style="display:flex; gap:16px; flex-wrap:wrap;">
           <label class="toggle" title="Fase 2.0: el tramo de mecha del extremo del ID.
 Nunca cubre el cuerpo. Se estira una vela si la siguiente llega más lejos.
-Sólo se dibuja la del ID actual, mande lo que mande el selector de ID.">
+Sólo se dibuja la del ID actual, mande lo que mande el selector de ID.
+El COLOR lo pone la temporalidad —violeta el Diario, naranja H4, azul H1—, no la
+dirección: en un mismo gráfico hay cajas de dos y lo primero es saber de quién es cada
+una. El UL va con el tono fuerte; el OB, aclarado.">
             <input type="checkbox" id="layer-zones-ul" checked> Zonas UL</label>
           <label class="toggle" title="Fase 2.0: la vela del ancla entera, mechas incluidas.
 Punteada mientras no la confirma una vela del color del impulso.
-Sólo se dibuja la del ID actual, mande lo que mande el selector de ID.">
+Sólo se dibuja la del ID actual, mande lo que mande el selector de ID.
+Color de su temporalidad, en tono aclarado: es la caja grande y pesa menos que el UL.
+QUÉ ZONAS LLEVA CADA GRÁFICO no es el reparto de los impulsos: sobre M15 se dibujan las
+de H1 —el OB en el que se fecha el toque— y NO las de H4, que a esa escala sólo tapa;
+sobre H1, las de H1 y las de H4.">
             <input type="checkbox" id="layer-zones-ob" checked> OB</label>
-          <label class="toggle" title="Las zonas de la temporalidad de CONTEXTO (el diario
-sobre un gráfico de H4). Son dos rectángulos del tamaño de la pantalla y tapan el precio:
-apagarlas deja verlo. Las del impulso principal siguen dibujándose.">
+          <label class="toggle" title="Las zonas del DIARIO sobre otro gráfico. Son dos
+rectángulos del tamaño de la pantalla y tapan el precio: apagarlas deja verlo. Las demás
+—las del gráfico y las de la temporalidad de encima, H4 sobre H1— se dibujan siempre:
+son justo lo que hay que mirar.">
             <input type="checkbox" id="layer-zones-context"> Zonas del contexto</label>
         </span>
         <span id="signal-layers" style="display:flex; gap:16px; flex-wrap:wrap;">
@@ -312,10 +320,22 @@ y el estado lo dice."></div>
     <span>○ TOQUE_MECHA</span>
     <span>□ ROTURA_FALLIDA</span>
     <span>línea punteada fina = nivel del 50 % del ID</span>
-    <span><i class="box" style="background:#1baf7a; opacity:.30"></i>Zona UL (fase 2.0):
-      del cuerpo de la vela del extremo a la punta de su mecha</span>
-    <span><i class="box" style="background:#1baf7a; opacity:.16"></i>Zona OB (fase 2.0):
-      la vela del ancla entera</span>
+    <span><i class="box" style="background:#6f4bd8; opacity:.30"></i>
+      <i class="box" style="background:#eb6834; opacity:.30"></i>
+      <i class="box" style="background:#2a78d6; opacity:.30"></i>Zona UL (fase 2.0): del
+      cuerpo de la vela del extremo a la punta de su mecha. El COLOR es el de la
+      TEMPORALIDAD —violeta el Diario, naranja H4, azul H1—, no el de la dirección: la
+      dirección se lee en la línea del ID y en el globo</span>
+    <span><i class="box" style="background:#b09cea; opacity:.30"></i>
+      <i class="box" style="background:#f4ac8f; opacity:.30"></i>
+      <i class="box" style="background:#8ab5e8; opacity:.30"></i>Zona OB (fase 2.0): la
+      vela del ancla entera, en el tono aclarado de su temporalidad. Es la caja grande y
+      por eso pesa menos que el UL; el borde es el mismo tono fuerte</span>
+    <span>cada gráfico lleva SUS zonas y no las de todos: en <b>M15</b> se dibujan las de
+      <b>H1</b> —el OB en el que se fecha el toque que dispara la señal— y NO las de H4,
+      que a esa escala es una caja de cuatro velas que sólo tapa; en <b>H1</b>, las de H1
+      y las de H4; en H4, las suyas y —si la casilla «Zonas del contexto» está puesta—
+      las del Diario</span>
     <span>rectángulo de borde punteado = vela del ancla de un ID SIN OB confirmado:
       la zona no existe, la vela sí</span>
     <span>★ vela que confirma el OB</span>
