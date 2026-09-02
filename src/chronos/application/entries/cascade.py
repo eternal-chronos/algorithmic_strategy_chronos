@@ -134,7 +134,7 @@ from chronos.application.structure.zone_signals import (
 from chronos.application.structure.zones import ImpulseZones, ZonesRun
 from chronos.domain.structure.enums import ImpulseDirection
 from chronos.domain.structure.zone_signals import ZoneSignalKind
-from chronos.domain.structure.zones import CandleSeries, Zone
+from chronos.domain.structure.zones import CandleSeries, Zone, ZoneKind
 
 
 class CascadeStep(StrEnum):
@@ -211,6 +211,11 @@ class CascadeMark:
     #: PUL de H1 se dibuja sobre la vela del extremo del ID anterior al suyo, que
     #: queda detrás.
     zone_start: datetime | None = None
+    #: Qué zona es la del paso: `PUL` o `APUL`. El lado en contra de un ID lo
+    #: lleva una de las dos y nunca las dos, así que una marca que dijera «PUL»
+    #: siempre estaría mintiendo en la mitad de los casos. `None` en los pasos
+    #: que no cuelgan de ninguna zona.
+    zone_kind: ZoneKind | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -343,7 +348,8 @@ class _Cascade:
         vetoes = self._daily_vetoes()
         for touch in self._touches[H4]:
             zoned = self._zoned.get(H4, {}).get(touch.id_num)
-            if zoned is None or zoned.penultimate is None:
+            against = None if zoned is None else zoned.against
+            if zoned is None or against is None:
                 continue
             if not self._window.contains(touch.timestamp):
                 # Fuera de la franja no se mira nada, así que no hay ni descarte
@@ -357,12 +363,12 @@ class _Cascade:
                     step=CascadeStep.H4_DESCARTADO,
                     chart=H4,
                     touch=touch,
-                    zone=zoned.penultimate,
+                    zone=against,
                     window_end=None,
                     parent=veto.seq,
                 )
                 continue
-            self._hourly_window(touch, zoned, zoned.penultimate)
+            self._hourly_window(touch, zoned, against)
         self._marks.sort(key=lambda mark: (mark.timestamp, mark.seq))
         return tuple(self._marks)
 
@@ -375,14 +381,15 @@ class _Cascade:
         vetoes: list[_DailyVeto] = []
         for touch in self._touches[DAILY]:
             zoned = self._zoned.get(DAILY, {}).get(touch.id_num)
-            if zoned is None or zoned.penultimate is None:
+            against = None if zoned is None else zoned.against
+            if zoned is None or against is None:
                 continue
-            end, why = self._veto_end(zoned, zoned.penultimate, touch.timestamp)
+            end, why = self._veto_end(zoned, against, touch.timestamp)
             seq = self._mark(
                 step=CascadeStep.ZONA_DIARIA,
                 chart=DAILY,
                 touch=touch,
-                zone=zoned.penultimate,
+                zone=against,
                 window_end=end,
                 window_reason=why,
                 parent=None,
@@ -436,6 +443,7 @@ class _Cascade:
             low=block.low,
             high=block.high,
             zone_start=block.ts_defining,
+            zone_kind=block.kind,
         )
         self._hourly_touch(
             parent=confirmed,
@@ -504,7 +512,7 @@ class _Cascade:
         """
         series = self._series[H1]
         for zoned in self._hourly_ids:
-            block = zoned.penultimate
+            block = zoned.against
             if zoned.direction is not direction or block is None:
                 continue
             # El PUL nace con el ID: su vela ya estaba cerrada antes.
@@ -659,6 +667,7 @@ class _Cascade:
                 close=touch.signal.close,
                 low=zone.low,
                 high=zone.high,
+                zone_kind=zone.kind,
                 window_end=window_end,
                 window_reason=window_reason,
             )
@@ -677,6 +686,7 @@ class _Cascade:
         low: float,
         high: float,
         zone_start: datetime,
+        zone_kind: ZoneKind,
     ) -> int:
         """Una marca sobre una vela de H1. El ID del que cuelga es el de **H1**."""
         series = self._series[H1]
@@ -699,6 +709,7 @@ class _Cascade:
                 low=low,
                 high=high,
                 zone_start=zone_start,
+                zone_kind=zone_kind,
             )
         )
         return self._seq

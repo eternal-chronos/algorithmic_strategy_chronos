@@ -147,10 +147,15 @@ class BreakLevelSource(StrEnum):
     """De dónde salió el nivel que rompió el ID (fase 2.1).
 
     Con `BREAK_BY_ZONE = false` es siempre `linea` y la columna no dice nada
-    nuevo. Con la regla nueva separa las dos formas de morir: atravesando una
-    zona entera, o por línea porque en ese lado no había zona que la sustituyera
-    —lo que sólo le pasa al ancla del primer ID del histórico, que no tiene ID
-    anterior del que sacar su PUL—.
+    nuevo. Con la regla nueva separa las formas de morir: atravesando una zona
+    entera —UL a favor, PUL o APUL en contra—, o por línea porque en ese lado no
+    había ninguna zona que la sustituyera, que es lo que le pasa al ancla de los
+    primeros ID del histórico.
+
+    El lado en contra tiene **dos** zonas posibles y nunca las dos a la vez: el
+    nivel es el último extremo del sentido opuesto, que es el del ID anterior
+    —PUL— cuando aquél iba al revés que éste, y uno más atrás —APUL— cuando iba
+    en el mismo sentido. Cuál mandó no se deriva del ID después; se guarda aquí.
     """
 
     #: El nivel es la línea del ID: el extremo a favor, el ancla en contra.
@@ -159,6 +164,11 @@ class BreakLevelSource(StrEnum):
     LAST = "UL"
     #: Borde exterior de la zona PUL: el cuerpo de la vela del extremo anterior.
     PENULTIMATE = "PUL"
+    #: Borde exterior de la zona APUL: el tramo de mecha, hacia el lado de la
+    #: rotura en contra, de la vela del extremo del último ID que iba en sentido
+    #: **contrario**. Manda cuando el ID anterior iba en el mismo sentido que
+    #: éste y su extremo cae por tanto en el lado a favor.
+    ANTE_PENULTIMATE = "APUL"
 
 
 class OverlapPriority(StrEnum):

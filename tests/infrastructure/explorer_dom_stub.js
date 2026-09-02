@@ -65,7 +65,7 @@ function declare(id) {
  'break-layers', 'avoided-layer', 'layer-avoided', 'steps-layer', 'layer-steps',
  'blind-seed', 'blind-start', 'blind-reveal', 'blind-exit',
  'sim-group', 'sim-buttons', 'sim-ratio', 'sim-clear',
- 'ob-group', 'ob-mark', 'ob-undo', 'ob-clear',
+ 'rect-group', 'rect-buttons', 'rect-undo', 'rect-clear',
  'account-group', 'account-initial', 'account-mode', 'account-risk',
  'account-buttons', 'account-undo', 'account-reset', 'account-copy', 'account-summary',
  'replay-group', 'replay-date', 'replay-start', 'replay-back', 'replay-step',
@@ -115,6 +115,7 @@ global.document = {
     if (selector === '#noise-buttons button') { return elements['noise-buttons'].children; }
     if (selector === '#sim-buttons button') { return elements['sim-buttons'].children; }
     if (selector === '#sim-ratio button') { return elements['sim-ratio'].children; }
+    if (selector === '#rect-buttons button') { return elements['rect-buttons'].children; }
   if (selector === '#account-buttons button') { return elements['account-buttons'].children; }
     if (selector === '#view-buttons button') { return viewButtons; }
     missing.push(selector);
@@ -144,14 +145,14 @@ function simShape(shape) {
   return String(shape.name || '').indexOf('sim-') === 0;
 }
 
-// I.3 — los recuadros de OB los planta el propietario a mano, igual que la caja
-// simulada: tampoco son capa del motor.
-function obShape(shape) {
-  return String(shape.name || '').indexOf('ob-') === 0;
+// I.3 — los recuadros de PUL, UL y APUL los planta el propietario a mano, igual
+// que la caja simulada: tampoco son capa del motor.
+function rectShape(shape) {
+  return String(shape.name || '').indexOf('rect-') === 0;
 }
 
 function handDrawn(shape) {
-  return simShape(shape) || obShape(shape);
+  return simShape(shape) || rectShape(shape);
 }
 
 function furthest(traces, layout) {
@@ -222,9 +223,9 @@ global.Plotly = {
           label: (shape.label && shape.label.text) || null,
         };
       }),
-      // I.3 — los recuadros de OB marcados a mano, con el color y el trazo que
-      // los distinguen de todo lo que dibuja el motor.
-      ob: (layout.shapes || []).filter(obShape).map(function (shape) {
+      // I.3 — los recuadros marcados a mano, con el color y el trazo que los
+      // distinguen de todo lo que dibuja el motor.
+      rect: (layout.shapes || []).filter(rectShape).map(function (shape) {
         return {
           name: shape.name, type: shape.type,
           x0: shape.x0, x1: shape.x1, y0: shape.y0, y1: shape.y1,
@@ -267,10 +268,12 @@ function snapshot(label) {
       return button.getAttribute('aria-pressed') === 'true';
     })[0] || {}).dataset?.ratio || null,
     simCursor: elements['chart'].style.cursor || '',
-    // I.3 — el recuadro del OB: si el botón espera el clic y si hay algo que quitar.
-    obArmed: elements['ob-mark'].getAttribute('aria-pressed') === 'true',
-    obUndoDisabled: elements['ob-undo'].disabled === true,
-    obClearDisabled: elements['ob-clear'].disabled === true,
+    // I.3 — los recuadros a mano: qué botón espera el clic y si hay algo que quitar.
+    rectArmed: (elements['rect-buttons'].children.filter(function (button) {
+      return button.getAttribute('aria-pressed') === 'true';
+    })[0] || {}).dataset?.kind || null,
+    rectUndoDisabled: elements['rect-undo'].disabled === true,
+    rectClearDisabled: elements['rect-clear'].disabled === true,
     // I.2 — la cuenta simulada: lo que dice la barra y lo que deja hacer.
     account: {
       summary: elements['account-summary'].textContent,
@@ -928,15 +931,22 @@ elements['account-reset'].fire('click');
 steps.push(snapshot('cuenta-reiniciada'));
 elements['sim-clear'].fire('click');
 
-// I.3 — el recuadro del OB: un botón que arma, un clic que lo planta y arrastres
-// que lo mueven. Se marcan varios y se quitan de uno en uno o de golpe. Es
-// dibujo del propietario: no lo ha detectado el motor y no cuenta como capa.
-function armarOb() {
-  elements['ob-mark'].fire('click');
+// I.3 — los recuadros a mano: tres botones —PUL, UL y APUL— que arman, un clic
+// que planta el suyo y arrastres que lo mueven. Se marcan varios de cada nombre y
+// se quitan de uno en uno o de golpe. Es dibujo del propietario: no lo ha
+// detectado el motor y no cuenta como capa.
+function botonRect(kind) {
+  return elements['rect-buttons'].children.filter(function (button) {
+    return button.dataset.kind === kind;
+  })[0];
 }
 
-function recuadrosOb() {
-  return (plotCalls[plotCalls.length - 1].ob || []).map(function (shape) {
+function armarRect(kind) {
+  botonRect(kind).fire('click');
+}
+
+function recuadros() {
+  return (plotCalls[plotCalls.length - 1].rect || []).map(function (shape) {
     return {
       name: shape.name,
       high: shape.y1,
@@ -948,43 +958,49 @@ function recuadrosOb() {
 }
 
 function asaDelRecuadro(index, borde) {
-  const ob = recuadrosOb()[index];
-  const minuto = Math.round((ob.from + ob.to) / 2);
-  if (borde === 'high') { return pixelOf(minuto, ob.high); }
-  if (borde === 'low') { return pixelOf(minuto, ob.low); }
-  return pixelOf(minuto, (ob.high + ob.low) / 2);
+  const rect = recuadros()[index];
+  const minuto = Math.round((rect.from + rect.to) / 2);
+  if (borde === 'high') { return pixelOf(minuto, rect.high); }
+  if (borde === 'low') { return pixelOf(minuto, rect.low); }
+  return pixelOf(minuto, (rect.high + rect.low) / 2);
 }
 
-steps.push(snapshot('ob-sin-nada'));
-armarOb();
-steps.push(snapshot('ob-armado'));
+steps.push(snapshot('rect-sin-nada'));
+armarRect('PUL');
+steps.push(snapshot('rect-armado'));
 // Escape suelta el botón sin plantar nada, igual que en el simulador.
 pressKey('Escape');
-steps.push(snapshot('ob-desarmado'));
+steps.push(snapshot('rect-desarmado'));
 
-armarOb();
+armarRect('PUL');
 clicGrafico(pixelOf(minutoSimulado, entradaSimulada));
-steps.push(snapshot('ob-plantado'));
+steps.push(snapshot('rect-plantado'));
 
 // El borde de arriba mueve el techo y nada más.
 const asaTecho = asaDelRecuadro(0, 'high');
 arrastrarCaja(asaTecho, { x: asaTecho.x, y: asaTecho.y - 20 });
-steps.push(snapshot('ob-techo-arrastrado'));
+steps.push(snapshot('rect-techo-arrastrado'));
 
 // Por dentro se mueve entero: el alto y el ancho no cambian.
 const asaDentro = asaDelRecuadro(0, 'body');
 arrastrarCaja(asaDentro, { x: asaDentro.x + 40, y: asaDentro.y + 30 });
-steps.push(snapshot('ob-movido'));
+steps.push(snapshot('rect-movido'));
 
-// Se marcan varios: el OB de H4 y el de H1 en el mismo gráfico.
-armarOb();
-clicGrafico(pixelOf(minutoSimulado, (simY[0] + entradaSimulada) / 2));
-steps.push(snapshot('ob-segundo'));
+// Se marcan varios y de nombres distintos: cada uno con su color.
+const medioSimulado = (simY[0] + entradaSimulada) / 2;
+armarRect('UL');
+clicGrafico(pixelOf(minutoSimulado, medioSimulado));
+steps.push(snapshot('rect-segundo'));
 
-elements['ob-undo'].fire('click');
-steps.push(snapshot('ob-deshecho'));
-elements['ob-clear'].fire('click');
-steps.push(snapshot('ob-limpio'));
+// Y se numeran POR NOMBRE: el segundo PUL es «PUL 2» aunque entre medias haya un UL.
+armarRect('PUL');
+clicGrafico(pixelOf(minutoSimulado, (simY[0] + medioSimulado) / 2));
+steps.push(snapshot('rect-tercero'));
+
+elements['rect-undo'].fire('click');
+steps.push(snapshot('rect-deshecho'));
+elements['rect-clear'].fire('click');
+steps.push(snapshot('rect-limpio'));
 
 console.log(JSON.stringify({
   unknownElements: missing,

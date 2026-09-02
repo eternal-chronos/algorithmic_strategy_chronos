@@ -161,7 +161,7 @@ def _signals_of(
             ):
                 moment = (
                     _at_the_moment(signal, zone, own, touching)
-                    if zone.kind is ZoneKind.PENULTIMATE
+                    if zone.kind is not ZoneKind.LAST
                     else None
                 )
                 series, measured = (

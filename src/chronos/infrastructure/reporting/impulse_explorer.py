@@ -11,7 +11,7 @@ diario, sobre H1 el de H1 y el de H4, y sobre M15 sólo el de H1. El impulso
 principal de cada gráfico lleva línea continua, sombreado de limbo y marcadores;
 el de contexto va en trazo discontinuo y sin marcadores, para que no compitan.
 
-Las cajas de UL y PUL **ya no se dibujan**: tapaban el precio y decían de la zona
+Las cajas de las zonas **ya no se dibujan**: tapaban el precio y decían de la zona
 lo que no decían del ID. En su lugar cada ID lleva su **marco** —las dos
 verticales son la vela que lo constituye y la que lo mata, las dos horizontales
 su ancla y su extremo—, con el color de su temporalidad. Las zonas siguen en el
@@ -74,10 +74,15 @@ TIMEFRAME_COLORS: dict[str, str] = {
     H1: theme.SERIES[0],
 }
 
-#: El recuadro que dibuja el propietario para marcar un OB (I.3). No es una zona
-#: del motor —las de la fase 2.0 se calculan y viajan en `impulses`—: es una
-#: marca a mano, y por eso lleva un color que no usa ninguna capa calculada.
-OB_MARK = theme.MAGENTA
+#: Los recuadros que dibuja el propietario a mano (I.3) y el color de cada uno.
+#: No son zonas del motor —las de la fase 2.0 se calculan y viajan en
+#: `impulses`—: son marcas a mano, y por eso llevan colores que no usa ninguna
+#: capa calculada. El nombre es lo que se dibuja al lado del rectángulo.
+HAND_RECTS: dict[str, str] = {
+    "PUL": theme.MAGENTA,
+    "UL": theme.CYAN,
+    "APUL": theme.OLIVE,
+}
 
 DECIMALS = 4
 
@@ -206,10 +211,10 @@ def build_payload(
             #: Un tono por temporalidad para el marco del ID: el de H4 sobre H1
             #: y el de H1 sobre M15 tienen que distinguirse de un vistazo.
             "timeframes": dict(TIMEFRAME_COLORS),
-            #: El recuadro que el propietario planta a mano para marcar un OB.
-            #: Ninguna capa del motor usa este tono: en magenta sólo se dibuja lo
-            #: que ha puesto una mano.
-            "ob": OB_MARK,
+            #: Los recuadros que el propietario planta a mano para marcar un
+            #: PUL, un UL o un APUL. Ninguna capa del motor usa estos tonos: con
+            #: ellos sólo se dibuja lo que ha puesto una mano.
+            "rects": dict(HAND_RECTS),
         },
         "charts": list(available),
         "layout": {chart: list(charts.overlays(chart)) for chart in available},
@@ -396,7 +401,7 @@ def _impulse_payload(
 def _zones(
     zones: TimeframeZones | None, analysis: TimeframeAnalysis, last: pd.Timestamp
 ) -> list[dict[str, Any]]:
-    """Capas "Zonas UL" y "PUL" (§8). Puramente visual: no interviene en nada.
+    """Capas "Zonas UL" y "PUL/APUL" (§8). Puramente visual: no interviene en nada.
 
     Cada zona viaja con dos tramos horizontales distintos, igual que las líneas
     del ID en B.1: el rectángulo lleno va del **nacimiento** al fin del ID —que
@@ -409,8 +414,11 @@ def _zones(
     §3.2). Por eso su rectángulo va entero de la constitución al fin del ID,
     mientras la línea del extremo puede seguir subiendo en escalera por encima.
 
-    El PUL cuelga de una vela **anterior** al ID —la del extremo del ID previo,
-    la que llevaba su UL—, así que su `xd` queda siempre por detrás de `x0`.
+    La zona del lado en contra cuelga de una vela **anterior** al ID —la del
+    extremo de un ID previo, la que llevaba su UL—, así que su `xd` queda siempre
+    por detrás de `x0`. Es el PUL, o el APUL cuando el ID anterior murió por
+    rotura en contra y este ID se quedó sin PUL: nunca las dos, así que cada ID
+    manda como mucho dos zonas y `k` dice cuál es cada una.
     """
     if zones is None:
         return []
@@ -419,8 +427,9 @@ def _zones(
     for zoned in zones.items:
         # Un UL por ID y sólo uno: no se remarca aunque el extremo se estire.
         records.append(_zone_record(zoned, zoned.last, ends[zoned.id_num]))
-        if zoned.penultimate is not None:
-            records.append(_zone_record(zoned, zoned.penultimate, ends[zoned.id_num]))
+        against = zoned.against
+        if against is not None:
+            records.append(_zone_record(zoned, against, ends[zoned.id_num]))
     return records
 
 
@@ -541,6 +550,10 @@ def _cascade_mark(mark: CascadeMark) -> dict[str, Any]:
         # Por qué se cerró la ventana. Es la regla que el propietario audita:
         # sin esto, «hasta aquí» no dice si fue el PUL, el UL o el ID.
         record["why"] = mark.window_reason.value
+    if mark.zone_kind is not None:
+        # PUL o APUL: el lado en contra de un ID lo lleva una de las dos y el
+        # globo no puede decir «PUL» sobre un APUL.
+        record["zk"] = mark.zone_kind.value
     if mark.zone_start is not None:
         # La zona del PUL de H1 se dibuja sobre la vela del extremo anterior, que
         # queda detrás de la marca: sin este extremo no hay rectángulo.
@@ -649,6 +662,13 @@ def _impulse_list(impulses: list[Any], last: pd.Timestamp) -> list[dict[str, Any
             #: dominio al constituir; aquí sólo se transporta para poder marcarlo.
             "ec": impulse.extreme_bar_direction.value,
             "w": impulse.extreme_on_counter_bar,
+            #: Qué zona lleva el ID en su lado EN CONTRA: `PUL`, `APUL` o `linea`
+            #: cuando no hay ninguna. Lo decidió el detector al constituirlo —el
+            #: APUL sale cuando el ID anterior murió rompiéndose en contra— y no
+            #: se puede re-derivar en el navegador: haría falta la cadena entera
+            #: de impulsos hacia atrás. El globo del ID lo dice sin que haya que
+            #: esperar a la rotura para enterarse.
+            "az": impulse.against_source.value,
             #: Si el ID sigue VIVO al final del histórico. `x1` es entonces la
             #: última vela y no la de su muerte: el marco llega al presente y
             #: tiene que poder decir por qué en vez de fechar una muerte que no

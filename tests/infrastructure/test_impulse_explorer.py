@@ -46,7 +46,7 @@ from chronos.infrastructure.reporting.impulse_explorer import (
     ASSETS,
     BEARISH,
     BULLISH,
-    OB_MARK,
+    HAND_RECTS,
     TIMEFRAME_COLORS,
     ModeVariant,
     bar_counts,
@@ -1331,7 +1331,7 @@ def test_cada_zona_viaja_con_sus_dos_bordes(run: ImpulseRun, zones: ZonesRun) ->
     registros = payload["impulses"][H4]["zones"]
     assert len(registros) == len(zones.per_timeframe[H4].table)
     for registro in registros:
-        assert registro["k"] in {"UL", "PUL"}
+        assert registro["k"] in {"UL", "PUL", "APUL"}
         assert registro["lo"] <= registro["hi"]
         assert {registro["i"], registro["o"]} == {registro["lo"], registro["hi"]} or (
             registro["i"] == registro["o"]
@@ -1347,29 +1347,67 @@ def test_la_zona_no_nace_antes_que_su_vela_definitoria(
         assert registro["x0"] <= registro["x1"]
 
 
-def test_el_pul_cuelga_de_una_vela_anterior_a_su_id(
+def test_la_zona_en_contra_cuelga_de_una_vela_anterior_a_su_id(
     run: ImpulseRun, zones: ZonesRun
 ) -> None:
-    """La vela del PUL es la del extremo del ID anterior: queda siempre detrás."""
+    """El PUL y el APUL salen de extremos anteriores: quedan siempre detrás."""
     registros = build_payload(run, zones=zones)["impulses"][H4]["zones"]
     uls = [item for item in registros if item["k"] == "UL"]
-    puls = [item for item in registros if item["k"] == "PUL"]
+    contra = [item for item in registros if item["k"] in {"PUL", "APUL"}]
 
-    assert uls and puls
-    # `xd` es la vela definitoria y `x0` el nacimiento: en el PUL nunca coinciden,
-    # porque entre una y otro está la muerte del ID anterior.
-    assert all(item["xd"] < item["x0"] for item in puls)
+    assert uls and contra
+    # `xd` es la vela definitoria y `x0` el nacimiento: en la zona en contra nunca
+    # coinciden, porque entre una y otro está la muerte de al menos un ID.
+    assert all(item["xd"] < item["x0"] for item in contra)
 
 
-def test_los_id_sin_pul_no_viajan_como_zona(run: ImpulseRun, zones: ZonesRun) -> None:
-    """Sin ID anterior no hay zona que dibujar: tampoco una a medias."""
+def test_cada_id_manda_una_sola_zona_en_contra(
+    run: ImpulseRun, zones: ZonesRun
+) -> None:
+    """PUL y APUL nunca conviven: el ID lleva una, no las dos."""
+    registros = build_payload(run, zones=zones)["impulses"][H4]["zones"]
+    con_pul = {item["id"] for item in registros if item["k"] == "PUL"}
+    con_apul = {item["id"] for item in registros if item["k"] == "APUL"}
+
+    assert con_apul, "sin APUL en el histórico no hay nada que auditar"
+    assert not (con_pul & con_apul)
+
+
+def test_los_id_sin_zona_en_contra_no_viajan_como_zona(
+    run: ImpulseRun, zones: ZonesRun
+) -> None:
+    """Sin ningún ID contrario detrás no hay zona que dibujar, ni a medias."""
     payload = build_payload(run, zones=zones)
-    sin_pul = {zoned.id_num for zoned in zones.per_timeframe[H4].without_penultimate}
-    con_pul = {
-        item["id"] for item in payload["impulses"][H4]["zones"] if item["k"] == "PUL"
+    sin_zona = {
+        zoned.id_num for zoned in zones.per_timeframe[H4].without_against_zone
+    }
+    con_zona = {
+        item["id"]
+        for item in payload["impulses"][H4]["zones"]
+        if item["k"] in {"PUL", "APUL"}
     }
 
-    assert not (con_pul & sin_pul)
+    assert not (con_zona & sin_zona)
+
+
+def test_cada_id_dice_que_zona_lleva_en_su_lado_en_contra(
+    run: ImpulseRun, zones: ZonesRun
+) -> None:
+    """`az` viaja con el ID: el navegador no puede derivarlo sin la cadena entera."""
+    payload = build_payload(run, zones=zones)
+    impulsos = payload["impulses"][H4]["list"]
+    zonas = payload["impulses"][H4]["zones"]
+    por_id = {
+        item["id"]: item["k"] for item in zonas if item["k"] in {"PUL", "APUL"}
+    }
+
+    assert impulsos
+    assert all(item["az"] in {"PUL", "APUL", "linea"} for item in impulsos)
+    for impulso in impulsos:
+        if impulso["az"] == "linea":
+            assert impulso["id"] not in por_id
+        else:
+            assert por_id.get(impulso["id"]) == impulso["az"]
 
 
 def test_las_zonas_ya_no_se_dibujan(
@@ -1482,8 +1520,11 @@ def test_las_notas_dicen_que_las_zonas_ya_no_se_pintan(
     """Quien viene de la fase 2.0 buscaría las cajas: su ausencia hay que decirla."""
     notas = _step(_draw(run, tmp_path, zones=zones), "marco-por-defecto")["notes"]
 
-    assert "las zonas UL y PUL no se dibujan" in notas
+    assert "las zonas UL, PUL y APUL no se dibujan" in notas
     assert "siguen en los datos" in notas
+    # Y dicen que el lado en contra tiene dos zonas posibles: sin eso, un ID con
+    # APUL se lee como si le faltara el PUL.
+    assert "último extremo del SENTIDO OPUESTO" in notas
 
 
 def test_las_capas_de_zona_no_se_dibujan_en_otro_modo_de_r36(
@@ -1577,7 +1618,7 @@ def test_cada_rotura_evitada_viaja_con_su_zona_y_su_linea(zoned_run: ImpulseRun)
         else:
             assert registro["y"] < registro["ln"]
             assert registro["y"] >= registro["zo"]
-        assert registro["z"] in ("UL", "PUL")
+        assert registro["z"] in ("UL", "PUL", "APUL")
         assert registro["k"] in ("favor", "contra")
 
 
@@ -1585,10 +1626,16 @@ def test_la_rotura_real_dice_si_fue_por_zona_o_por_linea(zoned_run: ImpulseRun) 
     registros = build_payload(zoned_run)["impulses"][H4]["breaks"]
     fuentes = {item["src"] for item in registros}
 
-    assert fuentes <= {"linea", "UL", "PUL"}
+    assert fuentes <= {"linea", "UL", "PUL", "APUL"}
     # El UL existe siempre, así que ninguna rotura a favor puede ser por línea.
     assert all(
         item["src"] == "UL" for item in registros if item["k"] == "favor"
+    )
+    # Y en contra manda una de las dos zonas, nunca las dos: cuál lo dice `src`.
+    assert all(
+        item["src"] in ("linea", "PUL", "APUL")
+        for item in registros
+        if item["k"] == "contra"
     )
 
 
@@ -2226,7 +2273,7 @@ def test_el_globo_de_la_ventana_cuenta_el_motivo(
 
     assert globos
     assert any("llegó al UL" in texto for texto in globos)
-    assert any("salir del PUL a favor NO la cierra" in texto for texto in globos)
+    assert any("salir de la zona a favor NO la cierra" in texto for texto in globos)
 
 
 def test_la_cadena_deja_remontar_hasta_el_toque_de_h4(
@@ -2866,39 +2913,40 @@ def _rgb(colour: str) -> tuple[int, int, int]:
     return tuple(int(value) for value in numbers[:3])  # type: ignore[return-value]
 
 
-# --- I.3 · el recuadro del OB -------------------------------------------------
+# --- I.3 · los recuadros a mano ------------------------------------------------
 #
-# Un rectángulo que planta el PROPIETARIO para señalar dónde ve un OB. No lo ha
-# detectado nadie: en el proyecto no hay regla de OB. Lo que se comprueba aquí es
-# que cae donde se pulsa, que se mueve como se dice, que se distingue de todo lo
-# que dibuja el motor y que el estado deja claro de quién es.
+# Tres rectángulos —PUL, UL y APUL— que planta el PROPIETARIO para señalar dónde
+# los ve. No los ha detectado nadie: en el proyecto no hay regla de ninguno de
+# los tres. Lo que se comprueba aquí es que caen donde se pulsa, que se mueven
+# como se dice, que cada nombre se distingue del otro y de todo lo que dibuja el
+# motor, y que el estado deja claro de quién son.
 
 
 def _recuadros(step: dict) -> list[dict]:
-    return step["plot"]["ob"]
+    return step["plot"]["rect"]
 
 
 def _alto(recuadro: dict) -> float:
     return recuadro["y1"] - recuadro["y0"]
 
 
-def test_el_boton_del_ob_arma_y_lo_dice_antes_de_plantar_nada(
+def test_el_boton_del_recuadro_arma_y_lo_dice_antes_de_plantar_nada(
     run: ImpulseRun, tmp_path: Path
 ) -> None:
-    armado = _step(_draw(run, tmp_path), "ob-armado")
+    armado = _step(_draw(run, tmp_path), "rect-armado")
 
-    assert armado["obArmed"]
+    assert armado["rectArmed"] == "PUL"
     assert not _recuadros(armado), "armar no puede dibujar todavía ningún recuadro"
-    assert "RECUADRO DE OB ARMADO" in armado["notes"]
+    assert "RECUADRO DE PUL ARMADO" in armado["notes"]
     assert armado["simCursor"] == "crosshair"
 
 
 def test_escape_desarma_el_recuadro_sin_plantarlo(run: ImpulseRun, tmp_path: Path) -> None:
-    desarmado = _step(_draw(run, tmp_path), "ob-desarmado")
+    desarmado = _step(_draw(run, tmp_path), "rect-desarmado")
 
-    assert not desarmado["obArmed"]
+    assert desarmado["rectArmed"] is None
     assert not _recuadros(desarmado)
-    assert "RECUADRO DE OB ARMADO" not in desarmado["notes"]
+    assert "ARMADO" not in desarmado["notes"]
 
 
 def test_el_recuadro_se_planta_centrado_en_el_precio_del_clic(
@@ -2906,7 +2954,7 @@ def test_el_recuadro_se_planta_centrado_en_el_precio_del_clic(
 ) -> None:
     """El recorrido pulsa en el centro del encuadre que él mismo ha fijado
     (1,05 → 1,35), así que el recuadro tiene que salir centrado en 1,2000."""
-    recuadros = _recuadros(_step(_draw(run, tmp_path), "ob-plantado"))
+    recuadros = _recuadros(_step(_draw(run, tmp_path), "rect-plantado"))
 
     assert len(recuadros) == 1
     recuadro = recuadros[0]
@@ -2915,28 +2963,30 @@ def test_el_recuadro_se_planta_centrado_en_el_precio_del_clic(
     assert recuadro["y1"] > recuadro["y0"], "el recuadro tiene alto"
     assert recuadro["x1"] > recuadro["x0"], "y ancho"
     assert recuadro["type"] == "rect"
-    assert recuadro["label"] == "OB 1 (a mano)"
+    assert recuadro["label"] == "PUL 1 (a mano)"
 
 
 def test_el_recuadro_se_distingue_de_lo_que_dibuja_el_motor(
     run: ImpulseRun, tmp_path: Path
 ) -> None:
-    """Magenta y punteado: el color no lo usa ninguna capa calculada, así que lo
-    que se ve en magenta lo ha puesto una mano."""
-    recuadro = _recuadros(_step(_draw(run, tmp_path), "ob-plantado"))[0]
+    """Punteado y con un color que no usa ninguna capa calculada: lo que se ve
+    así lo ha puesto una mano."""
+    recuadro = _recuadros(_step(_draw(run, tmp_path), "rect-plantado"))[0]
 
-    assert _rgb(recuadro["color"]) == _rgb(OB_MARK)
+    assert _rgb(recuadro["color"]) == _rgb(HAND_RECTS["PUL"])
     assert recuadro["dash"] == "dot"
     del_motor = {_rgb(BULLISH), _rgb(BEARISH)} | {
         _rgb(colour) for colour in TIMEFRAME_COLORS.values()
     }
-    assert _rgb(OB_MARK) not in del_motor
+    a_mano = {_rgb(colour) for colour in HAND_RECTS.values()}
+    assert len(a_mano) == 3, "cada nombre lleva su color"
+    assert not a_mano & del_motor
 
 
 def test_arrastrar_el_techo_no_mueve_el_suelo(run: ImpulseRun, tmp_path: Path) -> None:
     resultado = _draw(run, tmp_path)
-    antes = _recuadros(_step(resultado, "ob-plantado"))[0]
-    despues = _recuadros(_step(resultado, "ob-techo-arrastrado"))[0]
+    antes = _recuadros(_step(resultado, "rect-plantado"))[0]
+    despues = _recuadros(_step(resultado, "rect-techo-arrastrado"))[0]
 
     assert despues["y1"] > antes["y1"], "el arrastre iba hacia arriba"
     assert despues["y0"] == antes["y0"], "el suelo se queda donde estaba"
@@ -2947,74 +2997,94 @@ def test_arrastrar_por_dentro_mueve_el_recuadro_entero(
     run: ImpulseRun, tmp_path: Path
 ) -> None:
     resultado = _draw(run, tmp_path)
-    antes = _recuadros(_step(resultado, "ob-techo-arrastrado"))[0]
-    despues = _recuadros(_step(resultado, "ob-movido"))[0]
+    antes = _recuadros(_step(resultado, "rect-techo-arrastrado"))[0]
+    despues = _recuadros(_step(resultado, "rect-movido"))[0]
 
     assert despues["y1"] < antes["y1"] and despues["y0"] < antes["y0"], "bajó entero"
     assert _alto(despues) == pytest.approx(_alto(antes), abs=1e-3)
     assert despues["x0"] > antes["x0"] and despues["x1"] > antes["x1"], "y se fue a la derecha"
 
 
-def test_se_pueden_marcar_varios_recuadros(run: ImpulseRun, tmp_path: Path) -> None:
-    """En un mismo gráfico hay el OB de H4 y el de H1: enseñarlos de uno en uno
-    no dice lo que hay que decir."""
-    segundo = _step(_draw(run, tmp_path), "ob-segundo")
+def test_se_pueden_marcar_recuadros_de_nombres_distintos(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    """En un mismo gráfico hay el PUL y el UL: enseñarlos de uno en uno no dice
+    lo que hay que decir, y cada nombre va con su color."""
+    segundo = _step(_draw(run, tmp_path), "rect-segundo")
     recuadros = _recuadros(segundo)
 
     assert [recuadro["label"] for recuadro in recuadros] == [
-        "OB 1 (a mano)",
-        "OB 2 (a mano)",
+        "PUL 1 (a mano)",
+        "UL 1 (a mano)",
     ]
+    assert _rgb(recuadros[0]["color"]) == _rgb(HAND_RECTS["PUL"])
+    assert _rgb(recuadros[1]["color"]) == _rgb(HAND_RECTS["UL"])
     assert recuadros[1]["y1"] < recuadros[0]["y0"], "el segundo se plantó más abajo"
-    assert "OB marcados a mano: 2 recuadros" in segundo["notes"]
+    assert "recuadros marcados a mano: 2 (1 de PUL · 1 de UL)" in segundo["notes"]
+
+
+def test_los_recuadros_se_numeran_por_nombre(run: ImpulseRun, tmp_path: Path) -> None:
+    """El segundo PUL es «PUL 2» aunque entre los dos se haya plantado un UL: lo
+    que se cuenta al mirarlos es cuántos hay de cada cosa."""
+    tercero = _step(_draw(run, tmp_path), "rect-tercero")
+
+    assert [recuadro["label"] for recuadro in _recuadros(tercero)] == [
+        "PUL 1 (a mano)",
+        "UL 1 (a mano)",
+        "PUL 2 (a mano)",
+    ]
+    assert "recuadros marcados a mano: 3 (2 de PUL · 1 de UL)" in tercero["notes"]
 
 
 def test_quitar_el_ultimo_deja_los_demas(run: ImpulseRun, tmp_path: Path) -> None:
     resultado = _draw(run, tmp_path)
-    deshecho = _step(resultado, "ob-deshecho")
+    deshecho = _step(resultado, "rect-deshecho")
 
-    assert [recuadro["label"] for recuadro in _recuadros(deshecho)] == ["OB 1 (a mano)"]
-    assert not deshecho["obUndoDisabled"], "todavía queda uno que quitar"
+    assert [recuadro["label"] for recuadro in _recuadros(deshecho)] == [
+        "PUL 1 (a mano)",
+        "UL 1 (a mano)",
+    ]
+    assert not deshecho["rectUndoDisabled"], "todavía quedan que quitar"
 
 
 def test_quitar_todos_borra_los_recuadros_y_lo_que_decian(
     run: ImpulseRun, tmp_path: Path
 ) -> None:
-    limpio = _step(_draw(run, tmp_path), "ob-limpio")
+    limpio = _step(_draw(run, tmp_path), "rect-limpio")
 
     assert not _recuadros(limpio)
-    assert limpio["obUndoDisabled"] and limpio["obClearDisabled"], (
+    assert limpio["rectUndoDisabled"] and limpio["rectClearDisabled"], (
         "sin recuadros no hay nada que quitar"
     )
-    assert "OB marcados a mano" not in limpio["notes"]
+    assert "recuadros marcados a mano" not in limpio["notes"]
 
 
 def test_las_notas_dicen_que_el_recuadro_no_lo_ha_detectado_el_motor(
     run: ImpulseRun, tmp_path: Path
 ) -> None:
-    notas = _step(_draw(run, tmp_path), "ob-plantado")["notes"]
+    notas = _step(_draw(run, tmp_path), "rect-plantado")["notes"]
 
-    assert "OB marcados a mano: 1 recuadro" in notas
+    assert "recuadros marcados a mano: 1 (1 de PUL)" in notas
     assert "NO los ha detectado el motor" in notas
-    assert "no hay regla de OB en el proyecto" in notas
+    assert "no hay regla de PUL, UL ni APUL en el proyecto" in notas
 
 
 def test_los_recuadros_no_cuentan_como_capa_del_motor(
     run: ImpulseRun, tmp_path: Path
 ) -> None:
-    """Los rectángulos del OB no son sombreado del limbo: los recuentos de formas
+    """Los rectángulos a mano no son sombreado del limbo: los recuentos de formas
     del motor tienen que seguir diciendo lo mismo con ellos puestos."""
     resultado = _draw(run, tmp_path)
 
-    assert _step(resultado, "ob-segundo")["plot"]["shapes"] == (
-        _step(resultado, "ob-limpio")["plot"]["shapes"]
+    assert _step(resultado, "rect-tercero")["plot"]["shapes"] == (
+        _step(resultado, "rect-limpio")["plot"]["shapes"]
     )
 
 
 def test_sin_recuadros_los_botones_de_quitar_estan_apagados(
     run: ImpulseRun, tmp_path: Path
 ) -> None:
-    vacio = _step(_draw(run, tmp_path), "ob-sin-nada")
+    vacio = _step(_draw(run, tmp_path), "rect-sin-nada")
 
-    assert vacio["obUndoDisabled"] and vacio["obClearDisabled"]
-    assert not vacio["obArmed"]
+    assert vacio["rectUndoDisabled"] and vacio["rectClearDisabled"]
+    assert vacio["rectArmed"] is None

@@ -30,8 +30,9 @@ _COUNT = ",d"
 _PCT = ".1%"
 
 _COVERAGE = {
-    "impulsos": _COUNT, "con_ul": _COUNT, "con_pul": _COUNT, "sin_pul": _COUNT,
-    "pct_ul": _PCT, "pct_pul": _PCT, "pct_sin_pul": _PCT,
+    "impulsos": _COUNT, "con_ul": _COUNT, "con_pul": _COUNT, "con_apul": _COUNT,
+    "sin_zona": _COUNT,
+    "pct_ul": _PCT, "pct_pul": _PCT, "pct_apul": _PCT, "pct_sin_zona": _PCT,
 }
 _HEIGHTS = {
     "n": _COUNT,
@@ -40,6 +41,12 @@ _HEIGHTS = {
     **{f"pct_p{value}": ".4%" for value in HEIGHT_PERCENTILES},
     "altura_cero": _COUNT, "pct_altura_cero": _PCT,
     "extendidas": _COUNT, "pct_extendidas": _PCT,
+}
+#: Los nombres de cada bloque de altura: número de sección y etiqueta.
+_HEIGHT_SECTIONS = {
+    ZoneKind.LAST: ("7.3", "UL"),
+    ZoneKind.PENULTIMATE: ("7.4", "PUL"),
+    ZoneKind.ANTE_PENULTIMATE: ("7.4b", "APUL"),
 }
 _COMPARISON = {
     "pares": _COUNT, "ul_mediana_atr": ",.3f", "pul_mediana_atr": ",.3f",
@@ -81,6 +88,7 @@ def render_zone_report(
         _coverage_block(zones),
         _height_block(zones, ZoneKind.LAST),
         _height_block(zones, ZoneKind.PENULTIMATE),
+        _height_block(zones, ZoneKind.ANTE_PENULTIMATE),
         _comparison_block(zones),
         _overlap_block(zones),
         _survival_block(zones),
@@ -127,7 +135,8 @@ def _scope_block() -> str:
         "NO HACE: no cambia la detección del impulso dominante, no cambia la regla de\n"
         "rotura —que sigue siendo por línea—, no implementa FVG, y no emite señales,\n"
         "entradas, stops ni targets.\n\n"
-        "Las dos zonas, tal como las definió el propietario:\n\n"
+        "Las zonas, tal como las definió el propietario. Un ID lleva SIEMPRE UL y, en el\n"
+        "lado en contra, UNA sola de las otras dos:\n\n"
         "  UL  el extremo del ID, sobre la vela que fija `precio_extremo`. Va del borde\n"
         "      del CUERPO a la punta de la mecha: ocupa sólo el tramo de mecha y nunca\n"
         "      cubre el cuerpo. Su borde interior es exactamente la línea del extremo.\n"
@@ -136,11 +145,23 @@ def _scope_block() -> str:
         "  PUL el extremo del ID ANTERIOR, sobre la misma vela que llevaba su UL:\n"
         "      cuando un ID muere y nace el siguiente, el UL viejo se convierte en el\n"
         "      PUL del nuevo. Es el CUERPO de esa vela, de un borde al otro, y no cubre\n"
-        "      ninguna mecha. Sólo el primer ID del histórico se queda sin él.\n\n"
+        "      ninguna mecha. Sólo vale si ese ID anterior iba AL REVÉS que éste; si iba\n"
+        "      en el mismo sentido, su extremo cae en el lado a favor y no sirve.\n\n"
+        "  APUL el extremo del ÚLTIMO ID QUE IBA EN SENTIDO CONTRARIO, cuando no es el\n"
+        "      inmediatamente anterior. Aparece cuando el ID anterior iba en el MISMO\n"
+        "      sentido que éste —rotura a favor, o una constitución abortada que giró la\n"
+        "      pierna dos veces—: hay que retroceder hasta el último contrario. Es el\n"
+        "      TRAMO DE MECHA hacia el lado de la rotura en contra —la geometría del UL\n"
+        "      leída del otro lado—, no el cuerpo, y no se estira a ninguna vela de\n"
+        "      margen. Se va solo: en cuanto nace un ID cuyo anterior ya va al revés,\n"
+        "      vuelve a haber PUL.\n\n"
+        "  La regla que une a las dos, en una frase: EL NIVEL EN CONTRA ES EL ÚLTIMO\n"
+        "  EXTREMO DEL SENTIDO OPUESTO. La rotura en contra de un ID alcista baja, y lo\n"
+        "  que hay abajo son mínimos, que los fijan los ID bajistas.\n\n"
         "`borde_interior` es el que un precio que sale del rango encuentra primero y\n"
         "`borde_exterior` el que tiene que cruzar para dejar la zona atrás. El UL se\n"
-        "recorre a favor del impulso y el PUL en contra, que son los dos límites por los\n"
-        "que el módulo 1 ya rompe.\n"
+        "recorre a favor del impulso y el PUL o el APUL en contra, que son los dos\n"
+        "límites por los que el módulo 1 ya rompe.\n"
     )
 
 
@@ -155,8 +176,13 @@ def _coverage_block(zones: ZonesRun) -> str:
         "tiene extremo. Se cuenta igualmente porque cualquier cosa distinta del 100 %",
         "sería un fallo del motor y hay que poder verlo.",
         "",
-        ">>> `pct_sin_pul` ES LA CIFRA MÁS IMPORTANTE DE ESTA FASE. En la fase 2.1 esos",
-        ">>> impulsos se romperán POR LÍNEA, porque no tienen zona con la que romper.",
+        "El lado en contra tiene TRES estados y sólo tres: `con_pul`, `con_apul` y",
+        "`sin_zona`. Las tres columnas suman `impulsos`: un ID nunca lleva PUL y APUL a",
+        "la vez.",
+        "",
+        ">>> `pct_sin_zona` ES LA CIFRA MÁS IMPORTANTE DE ESTA FASE. En la fase 2.1 esos",
+        ">>> impulsos —y sólo ésos— se romperán POR LÍNEA en el lado en contra, porque",
+        ">>> no tienen ninguna zona con la que romper. Un ID con APUL SÍ tiene zona.",
         "",
     ]
     for timeframe, item in zones.per_timeframe.items():
@@ -169,9 +195,14 @@ def _coverage_block(zones: ZonesRun) -> str:
         ]
     lines += [
         "",
-        "Un ID se queda sin PUL sólo cuando no hay ID anterior del que sacarlo, que es",
-        "el primero de cada temporalidad y nadie más. Cualquier otra cifra distinta de",
-        "uno por temporalidad sería un fallo del motor.",
+        "Un ID se queda SIN ZONA en contra sólo mientras no ha habido ningún ID en el",
+        "sentido contrario: el arranque de cada temporalidad y nada más. Una cifra alta",
+        "aquí sería un fallo del motor.",
+        "",
+        "`con_apul` cuenta los ID cuyo ID ANTERIOR IBA EN EL MISMO SENTIDO —rotura a",
+        "favor, o una constitución abortada que giró la pierna dos veces—, y que por eso",
+        "tienen que retroceder un ID más para encontrar su nivel en contra. No es un",
+        "defecto ni una carencia: es la continuación de tendencia.",
     ]
     return "\n".join(lines) + "\n"
 
@@ -180,7 +211,7 @@ def _coverage_block(zones: ZonesRun) -> str:
 
 
 def _height_block(zones: ZonesRun, kind: ZoneKind) -> str:
-    number, name = ("7.3", "UL") if kind is ZoneKind.LAST else ("7.4", "PUL")
+    number, name = _HEIGHT_SECTIONS[kind]
     lines = [
         section(f"{number} · ALTURA DE LA ZONA {name} EN USD, ATR Y % DEL PRECIO"),
         "",
@@ -335,7 +366,8 @@ def _edge_cases_block(zones: ZonesRun) -> str:
         "",
         render_table(_edge_counts(zones), formats={
             "id": _COUNT, "ul_altura_cero": _COUNT, "ul_extendidos": _COUNT,
-            "sin_pul": _COUNT, "pul_doji": _COUNT, "pul_plano": _COUNT,
+            "sin_zona": _COUNT, "con_apul": _COUNT, "apul_plano": _COUNT,
+            "pul_doji": _COUNT, "pul_plano": _COUNT,
         }),
         "",
         "",
@@ -345,10 +377,23 @@ def _edge_cases_block(zones: ZonesRun) -> str:
         "que el ID no tiene UL, y sí lo tiene: lo que no tiene es mecha. Con la regla de",
         "la fase 2.1 esa zona se comportaría igual que la línea de la fase 1.",
         "",
-        "ID SIN PUL (`sin_pul`). Sólo el primero de cada temporalidad, que no tiene ID",
-        "anterior del que sacarlo. Estado legítimo y registrado: el libro de zonas",
-        "distingue «no existe» de «no lo he calculado», y preguntarlo lanza",
-        "`LookaheadError` en vez de devolver nada. Es la cifra de 7.1.",
+        "ID SIN ZONA EN CONTRA (`sin_zona`). Ni PUL ni APUL, porque todavía no ha habido",
+        "ningún ID en el sentido contrario del que sacar la vela: el arranque de cada",
+        "temporalidad. Estado legítimo y registrado: el libro de zonas distingue",
+        "«no existe» de «no lo he calculado», y preguntarlo lanza `LookaheadError` en vez",
+        "de devolver nada. Es la cifra de 7.1.",
+        "",
+        "ID CON APUL (`con_apul`). El ID anterior iba en el MISMO sentido que éste, así",
+        "que su extremo cae en el lado a favor y no sirve de nivel en contra: se retrocede",
+        "hasta el último ID contrario. DECISIÓN: las dos zonas nunca conviven; el APUL",
+        "SUSTITUYE al PUL y desaparece en cuanto el ID anterior vuelve a ir al revés.",
+        "Con tres o más ID seguidos en el mismo sentido se retrocede lo que haga falta:",
+        "el propietario sólo ha nombrado dos zonas, así que todo lo que no es el ID",
+        "inmediatamente anterior se llama APUL.",
+        "",
+        "APUL DE ALTURA CERO (`apul_plano`). La vela no dejó mecha en el lado de la",
+        "rotura en contra. DECISIÓN: la misma que en el UL —se conserva con los dos",
+        "bordes en el borde del cuerpo—, y entonces el nivel en contra es ese borde.",
         "",
         "DOJI EN POSICIÓN DE PUL (`pul_doji`). La vela del PUL es la que fijó el extremo",
         "del ID anterior, y el módulo 1 declara el doji neutro: no mueve ningún extremo,",
@@ -364,8 +409,8 @@ def _edge_cases_block(zones: ZonesRun) -> str:
 
 def _edge_counts(zones: ZonesRun) -> pd.DataFrame:
     columns = [
-        "temporalidad", "id", "ul_altura_cero", "ul_extendidos", "sin_pul", "pul_doji",
-        "pul_plano",
+        "temporalidad", "id", "ul_altura_cero", "ul_extendidos", "sin_zona", "con_apul",
+        "apul_plano", "pul_doji", "pul_plano",
     ]
     rows = [
         {
@@ -373,7 +418,13 @@ def _edge_counts(zones: ZonesRun) -> pd.DataFrame:
             "id": len(item.items),
             "ul_altura_cero": sum(1 for zoned in item.items if zoned.last.is_flat),
             "ul_extendidos": sum(1 for zoned in item.items if zoned.last.extended),
-            "sin_pul": len(item.without_penultimate),
+            "sin_zona": len(item.without_against_zone),
+            "con_apul": len(item.with_ante_penultimate),
+            "apul_plano": sum(
+                1
+                for zoned in item.items
+                if zoned.ante_penultimate is not None and zoned.ante_penultimate.is_flat
+            ),
             "pul_doji": sum(
                 1
                 for zoned in item.items

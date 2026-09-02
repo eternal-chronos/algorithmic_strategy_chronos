@@ -137,7 +137,10 @@ roto y que en su lugar rompe y gira la pierna."><input type="checkbox" id="layer
         <label class="toggle"><input type="checkbox" id="layer-mid"> Nivel 50 %</label>
         <label class="toggle" title="El MARCO de cada ID: un recuadro con la vela que lo
 CONSTITUYE y la que lo MATA en las dos verticales, y su ANCLA y su EXTREMO en las dos
-horizontales. Es lo que sustituye a las cajas de UL y de PUL, que tapaban el precio.
+horizontales. Es lo que sustituye a las cajas de las zonas, que tapaban el precio.
+El globo dice además QUÉ ZONA lleva el ID en su lado EN CONTRA: el último extremo del
+SENTIDO OPUESTO. Es el PUL cuando el ID anterior iba al revés que éste, y el APUL cuando
+iba en el mismo sentido y hay que retroceder hasta el último contrario.
 El COLOR lo pone la TEMPORALIDAD —violeta el Diario, naranja H4, azul H1—, no la
 dirección: en el mismo gráfico hay marcos de dos (el de H4 sobre H1, el de H1 sobre M15)
 y lo primero es saber de quién es cada uno. La dirección sigue en la línea del ID.
@@ -148,13 +151,16 @@ Obedece el selector de ID visibles.">
           <input type="checkbox" id="layer-frame" checked> Marco del ID</label>
         <span id="signal-layers" style="display:flex; gap:16px; flex-wrap:wrap;">
           <label class="toggle" title="Las tres señales sobre las zonas de los ID, en Diario y H4:
-pentágono = el precio TOCA el PUL DESDE FUERA; hexagrama = LLEGA al UL DESDE FUERA y lo
+pentágono = el precio TOCA la ZONA EN CONTRA (PUL o APUL) DESDE FUERA; hexagrama = LLEGA
+al UL DESDE FUERA y lo
 RECHAZA (no pasa de su borde exterior); rombo-estrella = ROMPE el UL (cierra más allá del
 borde exterior).
 Venir de fuera es parte de la señal: mientras el precio no haya salido de la zona —la vela
-que crea el UL cierra dentro de él, y una vela que abre dentro del PUL ya estaba ahí—
+que crea el UL cierra dentro de él, y una vela que abre dentro de la zona en contra ya
+estaba ahí—
 tocarla no cuenta y no se marca.
-El toque del PUL NO espera al cierre de la vela grande: la vela del ID dice si el precio
+El toque de la zona en contra NO espera al cierre de la vela grande: la vela del ID dice
+si el precio
 venía de fuera —una señal por visita— y la marca se planta en la vela fina (M15) en que
 entró, así que cae DENTRO de la vela de H4 o del Diario, en el minuto en que tocó.
 Son DIBUJO: se calculan sobre las zonas ya detectadas y no abren ni cierran ninguna
@@ -165,25 +171,29 @@ Obedecen el selector de ID visibles: con «ID actual» se ven las del ID vigente
         <span id="cascade-layers" style="display:flex; gap:16px; flex-wrap:wrap;">
           <label class="toggle" title="La cascada H4 → H1. Son DOS escalones: el Diario no es
 un paso, sólo veta. Cada marca va en el gráfico en el que se mira:
-  ✦ (H4) el precio TOCA el PUL de un ID de H4 → se baja a H1. No hace falta nada del
-     Diario para que se abra esta búsqueda;
-  ⋈ (H1) el ID DE H1 va ya en la misma dirección que el de H4 y tiene PUL:
-     se marca ESE PUL. No es un patrón de velas: en H1 hay ID propio, con el mismo
+  ✦ (H4) el precio TOCA la ZONA EN CONTRA de un ID de H4 → se baja a H1. No hace falta
+     nada del Diario para que se abra esta búsqueda;
+  ⋈ (H1) el ID DE H1 va ya en la misma dirección que el de H4 y tiene zona en contra:
+     se marca ESA ZONA. No es un patrón de velas: en H1 hay ID propio, con el mismo
      detector que el Diario y H4, y lo que se espera es a que deje de ir en contra.
      La vela del extremo anterior se dibuja además como CAJA punteada gris, del
      borde bajo de su cuerpo al alto;
-  ⬢ (H1) el precio TOCA ese PUL de H1 viniendo de fuera: AQUÍ SALTA LA SEÑAL. Es el
-     mismo TOQUE_PUL de la fase 2.0 leído sobre el PUL de H1, así que tampoco espera
+  ⬢ (H1) el precio TOCA esa zona de H1 viniendo de fuera: AQUÍ SALTA LA SEÑAL. Es el
+     mismo TOQUE_PUL de la fase 2.0 leído sobre la zona en contra de H1, así que tampoco
+     espera
      al cierre de la vela: va fechado en la vela fina (M15) en la que el precio
      entró en la zona y puede caer en mitad de una vela de H1. Se espera mientras
      VIVA EL ID DE H1, aunque la ventana de H4 ya se haya cerrado; un toque por
      confirmación y ni uno más;
-  ★ (Diario, gris) el precio está DENTRO del PUL de un ID diario. No abre ninguna
-     búsqueda: mientras dure, prohíbe todo lo que vaya en contra de esa dirección;
-  ✕ fino (H4, gris) toque de un PUL de H4 EN CONTRA de un PUL diario vigente: se desecha
-     hasta que el precio salga de esa zona diaria.
-El UL de H1 no interviene: el ID de H1 trae sus dos zonas, pero la cascada sólo lee el
-PUL. Ninguna de las dos se dibuja ya: lo que se ve del ID es su marco.
+  ★ (Diario, gris) el precio está DENTRO de la zona en contra de un ID diario. No abre
+     ninguna búsqueda: mientras dure, prohíbe todo lo que vaya en contra de esa dirección;
+  ✕ fino (H4, gris) toque de una zona de H4 EN CONTRA de una zona diaria vigente: se
+     desecha hasta que el precio salga de esa zona diaria.
+LA ZONA EN CONTRA ES EL PUL O EL APUL, NUNCA LAS DOS: es el último extremo del SENTIDO
+OPUESTO. PUL si es el del ID anterior; APUL si el anterior iba en el mismo sentido y hay
+que retroceder más. El globo de cada marca dice cuál de las dos es.
+El UL de H1 no interviene: el ID de H1 trae sus dos zonas, pero la cascada sólo lee la de
+en contra. Ninguna de las dos se dibuja ya: lo que se ve del ID es su marco.
 Una confirmación por ventana y ni una más: la primera cierra la búsqueda, así que lo que
 llegue después no se pinta aunque el motor lo vea.
 La raya punteada que sale de ✦ y de ★ es la VENTANA: hasta cuándo estuvo armada la
@@ -191,8 +201,8 @@ búsqueda, o vigente el veto. Se cierra en la primera vela de esa temporalidad q
 FUERA de la zona —el veto diario, en una vela DIARIA—, por el lado que sea, o con la
 muerte del ID. Cada visita nueva a la zona la rearma.
 SÓLO SE OPERA DE 03:00 A 12:00 HORA DE NUEVA YORK (Londres y la media sesión de NY,
-con horario de verano real): fuera de esa franja no se abre búsqueda al tocar el PUL de
-H4, no se marca el PUL de un ID de H1 y no salta ninguna señal. Lo descartado por la hora
+con horario de verano real): fuera de esa franja no se abre búsqueda al tocar la zona de
+H4, no se marca la de un ID de H1 y no salta ninguna señal. Lo descartado por la hora
 NO se dibuja: no hay marca gris que buscar, sencillamente no está. El veto del Diario sí
 corre a todas horas, porque prohibir no es operar.
 SON SEÑALES, NO ENTRADAS: no hay orden, ni stop, ni target, ni resultado detrás de
@@ -281,29 +291,26 @@ y el estado lo dice."></div>
         </div>
       </div>
     </div>
-    <div class="group" id="ob-group">
-      <span title="Un RECUADRO que dibujas TÚ para marcar dónde ves un OB. El botón ARMA y
-el clic siguiente sobre el gráfico lo PLANTA ahí; después se arrastra: los bordes de arriba
-y abajo mueven el techo y el suelo, los de los lados alargan el tramo y por dentro se
-desplaza entero. Escape desarma sin plantar nada.
-Se pueden marcar VARIOS —el OB de H4 y el de H1 en el mismo gráfico— y se numeran en el
-orden en que se plantan.
-Va en MAGENTA y punteado a propósito: ninguna capa del motor usa ese color, así que lo que
-se vea en magenta lo has puesto tú.
-NO ES UNA ZONA DEL MOTOR: no lo ha detectado nadie, no hay regla de OB en el proyecto, no
-sale de la pantalla y el motor no se entera de que existe. Sirve para mandar una captura
-señalando lo que aún no se detecta.">
-        Marcar OB
+    <div class="group" id="rect-group">
+      <span title="Tres RECUADROS que dibujas TÚ para marcar dónde ves un PUL, un UL o un
+APUL. Cada botón ARMA el suyo y el clic siguiente sobre el gráfico lo PLANTA ahí; después se
+arrastra: los bordes de arriba y abajo mueven el techo y el suelo, los de los lados alargan
+el tramo y por dentro se desplaza entero. Escape desarma sin plantar nada.
+Se pueden marcar VARIOS de cada nombre —el de H4 y el de H1 en el mismo gráfico— y se
+numeran por nombre en el orden en que se plantan.
+Cada nombre lleva SU COLOR y todos van punteados a propósito: ninguna capa del motor usa
+esos colores, así que lo que se vea así lo has puesto tú.
+NO SON ZONAS DEL MOTOR: no las ha detectado nadie, no hay regla de PUL, UL ni APUL en el
+proyecto, no salen de la pantalla y el motor no se entera de que existen. Sirven para mandar
+una captura señalando lo que aún no se detecta.">
+        Rectángulo
       </span>
       <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <div class="buttons" id="rect-buttons"></div>
         <div class="buttons">
-          <button type="button" id="ob-mark" title="Arma el recuadro: el clic siguiente
-sobre el gráfico lo planta. Escape desarma.">Marcar OB</button>
-        </div>
-        <div class="buttons">
-          <button type="button" id="ob-undo" title="Quita el último recuadro plantado">
+          <button type="button" id="rect-undo" title="Quita el último recuadro plantado">
             Quitar último</button>
-          <button type="button" id="ob-clear" title="Quita todos los recuadros">
+          <button type="button" id="rect-clear" title="Quita todos los recuadros">
             Quitar todos</button>
         </div>
       </div>
@@ -393,26 +400,27 @@ configuración, el historial y las estadísticas, en texto">Copiar</button>
       <b>Diario</b> sobre H4, el de <b>H4</b> sobre H1 y el de <b>H1</b> sobre M15</span>
     <span>el marco SE REMARCA mientras el ID vive: el lado derecho llega al presente y el
       del extremo sube o baja cada vez que el extremo se estira (§3.2)</span>
-    <span>las zonas UL y PUL ya no se dibujan: tapaban el precio. Siguen en los datos, en
+    <span>las zonas UL, PUL y APUL ya no se dibujan: tapaban el precio. Siguen en los datos, en
       los informes y debajo de las señales y de la cascada, que se calculan sobre
       ellas</span>
-    <span>✦ el precio toca el PUL de un ID de H4: se baja a H1. La cascada empieza AQUÍ,
+    <span>✦ el precio toca la zona en contra (PUL o APUL) de un ID de H4: se baja a H1. La cascada empieza AQUÍ,
       sin pedirle nada al Diario</span>
-    <span>⋈ = el ID de H1 va ya como el de H4 y tiene PUL: se marca ese PUL de H1</span>
-    <span>caja punteada gris en H1 = el PUL del ID de H1: el cuerpo de la vela que fijó el
+    <span>⋈ = el ID de H1 va ya como el de H4 y tiene zona en contra: se marca esa zona de H1</span>
+    <span>caja punteada gris en H1 = la zona en contra del ID de H1: PUL (cuerpo) o APUL
+      (mecha) de la vela que fijó el
       extremo del ID anterior, desde esa vela hasta aquella en la que se marcó</span>
-    <span>⬢ = el precio TOCA ese PUL de H1: aquí salta la SEÑAL. Fechada en la vela fina
-      (M15) del toque, sin esperar al cierre de la vela de H1, igual que el toque del PUL
+    <span>⬢ = el precio TOCA esa zona de H1: aquí salta la SEÑAL. Fechada en la vela fina
+      (M15) del toque, sin esperar al cierre de la vela de H1, igual que el toque de la zona
       en H4 y en el Diario. Se espera mientras viva el ID de H1</span>
-    <span>★ gris = el precio está DENTRO del PUL de un ID DIARIO. No abre nada: sólo
+    <span>★ gris = el precio está DENTRO de la zona en contra de un ID DIARIO. No abre nada: sólo
       prohíbe lo contrario a su dirección mientras dure</span>
-    <span>✕ fino gris = toque de un PUL de H4 EN CONTRA de un PUL diario vigente: desechado
+    <span>✕ fino gris = toque de una zona de H4 EN CONTRA de una zona diaria vigente: desechado
       sin mirarlo</span>
     <span>raya punteada gris a la derecha de ✦ o de ★ = la VENTANA en la que la búsqueda
       estuvo armada, o el veto diario vigente: termina cuando el precio cierra fuera de la
       zona (en el veto, con una vela DIARIA)</span>
     <span>la cascada sólo mira <b>de 03:00 a 12:00 hora de Nueva York</b> (Londres y la
-      media sesión de NY): fuera de esa franja no se busca, no se marca PUL de H1 y no
+      media sesión de NY): fuera de esa franja no se busca, no se marca zona de H1 y no
       hay señal. Lo descartado por la hora no se dibuja —no está, no es que esté gris—;
       el veto del Diario sí sigue corriendo a todas horas</span>
     <span>la cascada son SEÑALES y nada más: no hay entradas, ni stops, ni targets, ni
@@ -446,13 +454,16 @@ configuración, el historial y las estadísticas, en texto">Copiar</button>
       del precio. NO ES UNA OPERACIÓN: no hay orden, ni ejecución, ni resultado, y nadie
       comprueba si el precio llegó al objetivo o al stop. Es lo único del gráfico que
       dibuja el propietario y no el motor</span>
-    <span><i class="box" style="background:#c0359a; opacity:.5"></i>RECUADRO DE OB
-      marcado A MANO («Marcar OB»): magenta y punteado, numerado en el orden en que se
-      planta. El botón arma, el clic lo planta y después se arrastra: bordes de arriba y
-      abajo = techo y suelo, bordes de los lados = el tramo, por dentro = moverlo entero.
-      Escape desarma. NO ES UNA ZONA DEL MOTOR: no lo ha detectado nada, no hay regla de OB
-      en el proyecto y no sale de la pantalla. Es, con la caja simulada, lo único del
-      gráfico que dibuja el propietario</span>
+    <span><i class="box" style="background:#c0359a; opacity:.5"></i><b>PUL</b>
+      <i class="box" style="background:#0b8fa8; opacity:.5"></i><b>UL</b>
+      <i class="box" style="background:#7c8b12; opacity:.5"></i><b>APUL</b>: RECUADROS
+      marcados A MANO («Rectángulo»): cada nombre con su color, punteados y numerados por
+      nombre en el orden en que se plantan. El botón arma, el clic lo planta y después se
+      arrastra: bordes de arriba y abajo = techo y suelo, bordes de los lados = el tramo,
+      por dentro = moverlo entero. Escape desarma. NO SON ZONAS DEL MOTOR: no las ha
+      detectado nada, no hay regla de PUL, UL ni APUL en el proyecto y no salen de la
+      pantalla. Son, con la caja simulada, lo único del gráfico que dibuja el
+      propietario</span>
     <span>con «Cuenta simulada» cada caja lleva además <b>el dinero que se juega</b>: la
       verde, lo que suma si llega el objetivo; la roja, lo que resta si toca el stop, con el
       capital y el riesgo puestos en la barra. Los botones <b>Ganada · Perdida · BE</b>

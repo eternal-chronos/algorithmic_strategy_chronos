@@ -141,14 +141,14 @@ def test_toda_rotura_a_favor_es_por_zona(zoned: ImpulseRun) -> None:
         )
 
 
-def test_romper_por_linea_solo_ocurre_sin_pul(zoned: ImpulseRun) -> None:
+def test_romper_por_linea_solo_ocurre_sin_zona_en_contra(zoned: ImpulseRun) -> None:
     """§6.7 — la única forma de morir por línea con la regla nueva."""
     zones = detect_zones(zoned)
     for timeframe, analysis in zoned.analyses.items():
         measured = {item.id_num for item in zones.per_timeframe[timeframe].items}
         without_ob = {
             item.id_num
-            for item in zones.per_timeframe[timeframe].without_penultimate
+            for item in zones.per_timeframe[timeframe].without_against_zone
         }
         for event in analysis.events:
             if event.level_source is not BreakLevelSource.LINE:

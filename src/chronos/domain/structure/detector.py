@@ -44,10 +44,10 @@ describen uno a uno en `_open_leg`, `_extend_leg` y `_on_bar_in_limbo`.
 **Fase 2.1 · `break_by_zone`.** El único cambio de comportamiento del módulo
 desde que se fijó la línea base. Con el interruptor apagado todo lo anterior se
 lee tal cual. Con él encendido, la línea deja de ser el nivel de rotura cuando
-existe una zona que la sustituya: el UL manda el lado a favor y el PUL el lado en
-contra, y romper es cerrar más allá del borde **exterior**, atravesando la zona
-entera. Tres consecuencias, todas dentro de esta máquina y ninguna en un filtro
-posterior:
+existe una zona que la sustituya: el UL manda el lado a favor y el PUL —o el
+APUL— el lado en contra, y romper es cerrar más allá del borde **exterior**,
+atravesando la zona entera. Tres consecuencias, todas dentro de esta máquina y
+ninguna en un filtro posterior:
 
 - Una vela que antes rompía y ahora no deja el ID **vivo**, así que toda la
   historia posterior cambia: el ID sigue, el siguiente nace en otro sitio y con
@@ -61,6 +61,21 @@ posterior:
 - Con los dos niveles invertidos una misma vela puede cumplir las dos
   condiciones a la vez. `OverlapPriority` decide el orden de evaluación; el motor
   no elige por su cuenta y el informe cuenta cuántas veces decide.
+
+**El PUL y el APUL.** El lado en contra tiene dos zonas posibles y nunca las dos
+a la vez. La regla es una sola: **el nivel en contra es el último extremo del
+sentido opuesto**, porque la rotura en contra de un ID alcista baja y lo que hay
+abajo son mínimos, que los fijan los ID bajistas.
+
+Cuando el ID anterior iba al revés que éste —lo normal tras una rotura en
+contra—, su extremo es ese nivel y la zona se llama **PUL**: el UL viejo pasando
+a PUL. Cuando iba en el mismo sentido —rotura a favor, o una constitución
+abortada que giró la pierna dos veces—, su extremo cae en el lado *a favor* y no
+sirve: se retrocede hasta el último ID contrario y esa zona es el **APUL**. Del
+APUL se toma el tramo de mecha hacia el lado de la rotura en contra, no el
+cuerpo. Cuál de las dos gobierna se decide una sola vez, al constituir, y viaja
+en `against_source`: preguntarlo después daría otra respuesta, porque el ID
+anterior ya no es el último de la lista.
 """
 
 from __future__ import annotations
@@ -90,6 +105,8 @@ from chronos.domain.structure.impulse import (
     DominantImpulse,
 )
 from chronos.domain.structure.zone_break import (
+    AGAINST_BY_LINE,
+    AgainstZone,
     AvoidedBreak,
     BreakLevels,
     SideLevel,
@@ -99,6 +116,32 @@ from chronos.domain.structure.zone_break import (
 from chronos.domain.structure.zones import ZoneKind
 
 DEFAULT_WARMUP_BARS = 50
+
+#: Qué zona es cada nivel. La rotura evitada se etiqueta con la zona que la
+#: evitó, no con el lado: en contra pueden ser dos zonas distintas.
+_ZONE_OF_SOURCE: dict[BreakLevelSource, ZoneKind] = {
+    BreakLevelSource.LAST: ZoneKind.LAST,
+    BreakLevelSource.PENULTIMATE: ZoneKind.PENULTIMATE,
+    BreakLevelSource.ANTE_PENULTIMATE: ZoneKind.ANTE_PENULTIMATE,
+}
+
+
+#: El contador de cada gobierno del lado en contra, para no repetir el `if`.
+_AGAINST_COUNTER: dict[BreakLevelSource, str] = {
+    BreakLevelSource.PENULTIMATE: "impulsos_con_pul",
+    BreakLevelSource.ANTE_PENULTIMATE: "impulsos_con_apul",
+    BreakLevelSource.LINE: "impulsos_sin_zona_en_contra",
+}
+
+
+def _zone_of(source: BreakLevelSource) -> ZoneKind:
+    """La zona de la que salió un nivel. Sin zona no hay nada que evitar."""
+    zone = _ZONE_OF_SOURCE.get(source)
+    if zone is None:
+        raise StructureError(
+            "Una rotura evitada tiene que venir de una zona, no de la línea"
+        )
+    return zone
 
 
 @dataclass(slots=True)
@@ -237,6 +280,16 @@ class DominantImpulseDetector:
             #: Velas que habrían roto por línea y la zona ha salvado.
             "roturas_evitadas_a_favor": 0,
             "roturas_evitadas_en_contra": 0,
+            #: Qué zona lleva cada ID en su lado en contra al constituirse. Los
+            #: tres suman el total de impulsos: nunca hay PUL y APUL a la vez.
+            #: **No son roturas**: cuentan impulsos, y por eso no llevan el
+            #: sufijo `_por_linea`/`_por_zona` de los contadores de rotura, que
+            #: tienen que quedar en cero con `BREAK_BY_ZONE` apagado. Éstos se
+            #: cuentan con el interruptor puesto o quitado: clasificar la zona no
+            #: es aplicarla.
+            "impulsos_con_pul": 0,
+            "impulsos_con_apul": 0,
+            "impulsos_sin_zona_en_contra": 0,
             #: Veces que el extremo de un ID vigente se estiró tras salvarse.
             "extremos_extendidos": 0,
             #: Velas en que se cumplieron a la vez las dos condiciones de rotura:
@@ -586,10 +639,10 @@ class DominantImpulseDetector:
                 inner=anchor.price,
                 source=BreakLevelSource.LINE,
             )
-        return self._zones.penultimate_level(
+        return self._zones.against_level(
             direction=leg.direction,
             anchor=anchor.price,
-            index_penultimate=self._penultimate_index(),
+            against=self._against_zone(leg.direction),
             through=through,
         )
 
@@ -602,6 +655,49 @@ class DominantImpulseDetector:
         if not self._impulses:
             return None
         return self._impulses[-1].index_extreme_at_constitution
+
+    def _against_zone(self, direction: ImpulseDirection) -> AgainstZone:
+        """Qué gobierna el lado en contra del ID que está a punto de nacer.
+
+        La regla del propietario en una frase: **el nivel en contra es el último
+        extremo del sentido opuesto**. En un ID alcista la rotura en contra baja,
+        así que detrás tiene que haber un mínimo, y un mínimo lo fija el extremo
+        de un ID bajista.
+
+        De ahí salen las dos zonas, que nunca conviven:
+
+        - Si el ID anterior iba **al revés** que éste, su extremo es ese mínimo y
+          la zona es el **PUL**: el UL viejo pasando a PUL, tal cual.
+        - Si iba en el **mismo sentido** —rotura a favor, o una constitución
+          abortada que giró la pierna dos veces— su extremo cae en el lado *a
+          favor* y no sirve de nivel en contra: hay que retroceder hasta el
+          último ID contrario, y esa zona es el **APUL**.
+
+        Con tres o más ID seguidos en el mismo sentido se retrocede lo que haga
+        falta; el propietario sólo ha nombrado dos zonas, así que todo lo que no
+        es el ID inmediatamente anterior se llama APUL.
+
+        Sólo lee la lista de impulsos —ni una mecha—, así que se clasifica
+        también con `BREAK_BY_ZONE` apagado: ahí la zona no gobierna la rotura
+        pero la fase 2.0 la mide y la dibuja igual.
+        """
+        opposite = direction.opposite()
+        for position, impulse in enumerate(reversed(self._impulses)):
+            if impulse.direction is not opposite:
+                continue
+            return AgainstZone(
+                source=(
+                    BreakLevelSource.PENULTIMATE
+                    if position == 0
+                    else BreakLevelSource.ANTE_PENULTIMATE
+                ),
+                # El UL de aquel ID: la vela del extremo con la que se
+                # constituyó, que no se remarcó aunque su extremo se estirase.
+                index=impulse.index_extreme_at_constitution,
+            )
+        # Nunca ha habido un ID en contra: el principio del histórico. Ese lado
+        # se juzga por la línea del ancla, que es un estado legítimo.
+        return AGAINST_BY_LINE
 
     def _abort_constitution(
         self, index: int, bar: BodyBar, leg: _Leg, side: SideLevel
@@ -658,6 +754,19 @@ class DominantImpulseDetector:
         # del extremo con la que aquél se constituyó, que no se remarca aunque su
         # extremo se estirase después.
         penultimate_index = self._penultimate_index()
+        # Se clasifica siempre, encendido o apagado: sólo mira la lista de
+        # impulsos, no toca ni una mecha, y es lo que la fase 2.0 necesita para
+        # medir. Que **gobierne** la rotura es otra cosa, y ésa sí depende de
+        # `BREAK_BY_ZONE`: con el interruptor apagado manda la línea del ancla.
+        against = self._against_zone(leg.direction)
+        self._diagnostics[_AGAINST_COUNTER[against.source]] += 1
+        # La vela del APUL sólo existe cuando el APUL manda: es la del último ID
+        # contrario, que con el PUL de por medio no es ninguna vela distinta.
+        ante_penultimate_index = (
+            against.index
+            if against.source is BreakLevelSource.ANTE_PENULTIMATE
+            else None
+        )
         extreme_index = leg.extreme_index
         assert extreme_index is not None  # el extremo y su barra se fijan juntos
         impulse = DominantImpulse(
@@ -682,6 +791,13 @@ class DominantImpulseDetector:
             ts_penultimate=(
                 None if penultimate_index is None else self._bars[penultimate_index].timestamp
             ),
+            index_ante_penultimate=ante_penultimate_index,
+            ts_ante_penultimate=(
+                None
+                if ante_penultimate_index is None
+                else self._bars[ante_penultimate_index].timestamp
+            ),
+            against_source=against.source,
             limbo_bars=index - leg.limbo_start_index,
             constituting_body_size=bar.body_size,
             publishable=publishable,
@@ -712,7 +828,12 @@ class DominantImpulseDetector:
             # constitución y ahí se queda, aunque el extremo siga estirándose.
             index_extreme=impulse.index_extreme_at_constitution,
             anchor=impulse.anchor,
-            index_penultimate=impulse.index_penultimate,
+            # El lado en contra lo eligió la constitución. No se vuelve a
+            # preguntar: con este ID ya en la lista, mirar al anterior daría otra
+            # respuesta y el nivel cambiaría bajo los pies del ID vivo.
+            against=AgainstZone(
+                source=impulse.against_source, index=impulse.index_against
+            ),
             through=through,
         )
 
@@ -748,7 +869,8 @@ class DominantImpulseDetector:
         de la zona es exactamente la rotura que la fase 2.1 evita. Sólo puede
         pasar si ese lado tiene zona y la zona no es degenerada: con un UL de
         altura cero los dos bordes están en la línea y no hay nada que salvar
-        (§1.3), y sin PUL el ancla manda sola y ya habría roto.
+        (§1.3), y sin zona en contra —ni PUL ni APUL— el ancla manda sola y ya
+        habría roto.
         """
         if not self._break_by_zone:
             return
@@ -756,8 +878,8 @@ class DominantImpulseDetector:
         if self._is_beyond(
             bar.close, levels.against.line, impulse.direction.opposite()
         ):
-            # El PUL aguanta. El ancla no se mueve: la fija la vela del arranque
-            # de la pierna, y esa vela no cambia.
+            # La zona en contra aguanta. El ancla no se mueve: la fija la vela
+            # del arranque de la pierna, y esa vela no cambia.
             self._diagnostics["roturas_evitadas_en_contra"] += 1
             self._record_avoided(
                 BreakKind.EN_CONTRA, impulse, index, bar, levels.against, extended=False
@@ -800,7 +922,7 @@ class DominantImpulseDetector:
                 direction=impulse.direction,
                 close=bar.close,
                 line=side.line,
-                zone=ZoneKind.LAST if kind is BreakKind.A_FAVOR else ZoneKind.PENULTIMATE,
+                zone=_zone_of(side.source),
                 zone_inner=side.inner,
                 zone_outer=side.price,
                 extended_extreme=extended,

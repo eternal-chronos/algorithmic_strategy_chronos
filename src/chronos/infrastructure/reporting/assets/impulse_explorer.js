@@ -179,12 +179,13 @@
     /* El R:R con el que se planta y al que vuelve el objetivo cuando se mueve el
      * stop. `null` es «a mano»: lo dejó ahí un arrastre del objetivo. */
     ratio: 2,
-    /* Recuadros de OB marcados a mano (I.3). Cada uno es un rectángulo
-     * —`from`, `to`, `low`, `high`— que planta el PROPIETARIO para señalar
-     * dónde ve un order block. No sale del explorador y el motor no lo ve: en
-     * el proyecto no hay todavía ninguna regla de OB. `arming === "ob"` es el
-     * botón esperando el clic que planta el siguiente. */
-    obs: [],
+    /* Recuadros marcados a mano (I.3). Cada uno es un rectángulo —`kind`,
+     * `from`, `to`, `low`, `high`— que planta el PROPIETARIO para señalar dónde
+     * ve un PUL, un UL o un APUL. No salen del explorador y el motor no los ve:
+     * en el proyecto no hay todavía ninguna regla de esas tres cosas.
+     * `arming === "rect:PUL"` es el botón de ese nombre esperando el clic que
+     * planta el siguiente. */
+    rects: [],
     /* Cuenta simulada (I.2). El capital de partida, cómo se mide el riesgo de
      * cada operación y las que se llevan apuntadas. De cada una se guarda su
      * MÚLTIPLO DE RIESGO, no los euros: el dinero se recalcula entero en cada
@@ -942,7 +943,30 @@
       (extreme !== impulse.e
         ? "<br>el extremo del final es " + price(impulse.e) +
           ": el marco enseña el que estaba puesto en este tramo (§3.2)"
-        : "");
+        : "") +
+      againstNote(impulse);
+  }
+
+  /* Qué zona lleva el ID en su LADO EN CONTRA. Viene calculado (`az`) porque
+   * derivarlo aquí exigiría la cadena entera de impulsos hacia atrás. Sin
+   * `break_by_zone` la zona no manda la rotura y el globo lo dice: si no, un ID
+   * con APUL se leería como si el motor ya estuviera rompiendo por ahí. */
+  function againstNote(impulse) {
+    if (!impulse.az) { return ""; }
+    var manda = DATA.meta.breakByZone
+      ? " (es su nivel de rotura EN CONTRA)"
+      : " (con break_by_zone apagado NO manda: rompe por el ancla)";
+    if (impulse.az === "linea") {
+      return "<br>en contra: SIN ZONA, todavía no había ningún ID en sentido " +
+        "contrario del que salga la vela" +
+        "<br>rompe por la línea del ancla";
+    }
+    if (impulse.az === "APUL") {
+      return "<br>en contra: APUL" + manda +
+        "<br>NO tiene PUL: el ID anterior iba en su MISMO sentido, así que su " +
+        "extremo cae en el lado a favor y hay que retroceder al último contrario";
+    }
+    return "<br>en contra: PUL" + manda;
   }
 
   function frameTrace(timeframe, bucket, own) {
@@ -1090,22 +1114,27 @@
      * siempre —así la fase 1 se sigue leyendo igual, porque ahí todo es línea— y
      * el hueco marca la excepción: no había zona en ese lado. */
     traces.push(breakTrace(breaks, "favor", "linea", "ROTURA_A_FAVOR", "triangle-up", COLORS.ink));
-    traces.push(breakTrace(breaks, "favor", "zona", "ROTURA_A_FAVOR", "triangle-up-open", COLORS.ink));
+    traces.push(breakTrace(breaks, "favor", "UL", "ROTURA_A_FAVOR", "triangle-up-open", COLORS.ink));
     traces.push(breakTrace(breaks, "contra", "linea", "ROTURA_EN_CONTRA", "x", COLORS.muted));
-    traces.push(breakTrace(breaks, "contra", "zona", "ROTURA_EN_CONTRA", "x-open", COLORS.muted));
+    traces.push(breakTrace(breaks, "contra", "PUL", "ROTURA_EN_CONTRA", "x-open", COLORS.muted));
+    /* El APUL lleva SÍMBOLO PROPIO. Es una regla distinta —el ID que nace tras
+     * una rotura en contra no tiene PUL— y meterla en la misma traza que el PUL
+     * diría que el motor rompió por donde no rompió. */
+    traces.push(breakTrace(breaks, "contra", "APUL", "ROTURA_EN_CONTRA", "x-dot", COLORS.muted));
     return traces.filter(Boolean);
   }
 
-  /* `source` separa las roturas por el nivel que las produjo: `linea` es la
-   * regla de la fase 1 y `zona` (UL o PUL) la de la 2.1. Con `break_by_zone`
-   * apagado todas caen en `linea` y las dos trazas nuevas salen vacías. */
+  /* `source` es el ORIGEN EXACTO del nivel que rompió, tal como lo escribió el
+   * motor: `linea` es la regla de la fase 1 y `UL`, `PUL` o `APUL` la de la 2.1.
+   * Con `break_by_zone` apagado todas caen en `linea` y las demás salen
+   * vacías. */
   function breakTrace(breaks, kind, source, name, symbol, color) {
     var items = breaks.filter(function (item) {
-      return item.k === kind && (item.src === "linea") === (source === "linea");
+      return item.k === kind && item.src === source;
     });
     if (!items.length) { return null; }
     var suffix = DATA.meta.breakByZone
-      ? " · " + (source === "linea" ? "por línea" : "por zona")
+      ? " · " + (source === "linea" ? "por línea" : "por " + source)
       : "";
     return {
       type: "scatter", mode: "markers",
@@ -1115,9 +1144,14 @@
       text: items.map(function (item) {
         var how = item.src === "linea"
           ? (DATA.meta.breakByZone
-            ? "<br>por LÍNEA: ese lado no tenía zona (el primer ID no tiene PUL)"
+            ? "<br>por LÍNEA: ese lado no tenía zona (los primeros ID del " +
+              "histórico no tienen ni PUL ni APUL)"
             : "")
           : "<br>por ZONA " + item.src + ": la atravesó entera" +
+            (item.src === "APUL"
+              ? "<br>este ID no tenía PUL: el ID anterior iba en su MISMO sentido, " +
+                "así que su lado en contra lo llevaba el APUL, un ID más atrás"
+              : "") +
             "<br>línea del ID en " + price(item.ln);
         return name + " (" + primary() + ")<br>" + stamp(item.x) +
           "<br>ID roto: " + item.id + " (" + item.d + ")" +
@@ -1226,6 +1260,9 @@
    * color del ID al que pertenece la señal. */
   var SIGNAL_STYLE = {
     TOQUE_PUL: { symbol: "pentagon", size: 12, title: "TOQUE DE PUL" },
+    /* Misma señal, mismo lado del ID, otra zona: el motor la llama igual y lo
+     * que cambia es `z`. El título se compone con él para no decir «PUL» encima
+     * de un APUL. */
     RECHAZO_UL: { symbol: "hexagram", size: 12, title: "RECHAZO DEL UL" },
     ROTURA_UL: { symbol: "star-diamond", size: 13, title: "ROTURA DEL UL" }
   };
@@ -1274,7 +1311,8 @@
 
   function signalCaption(item) {
     var style = SIGNAL_STYLE[item.k];
-    var text = style.title + " (" + primary() + ")<br>" + stamp(item.x) +
+    var title = item.k === "TOQUE_PUL" ? "TOQUE DE " + item.z : style.title;
+    var text = title + " (" + primary() + ")<br>" + stamp(item.x) +
       "<br>ID nº " + item.id + " (" + item.d + ") · zona " + item.z +
       "<br>señal nº " + item.n + " de este tipo en este ID";
     if (item.k === "ROTURA_UL") {
@@ -1301,11 +1339,16 @@
    * detrás de ninguna de estas marcas: lo único que enseñan es dónde la máquina
    * ha bajado de temporalidad y qué ha visto al llegar.
    *
-   * La cascada son DOS escalones: el toque del PUL de H4 y, en H1, el ID que se
-   * pone en la dirección del de H4 y trae el PUL que se marca; y sobre ese PUL de
-   * H1, el toque que hace saltar la señal. El Diario no es un paso —no hay que
-   * tocar su PUL para poder mirar H4—: lo que hace es prohibir, y su tramo se
+   * La cascada son DOS escalones: el toque de la ZONA EN CONTRA de H4 y, en H1,
+   * el ID que se pone en la dirección del de H4 y trae la suya; y sobre esa zona
+   * de H1, el toque que hace saltar la señal. El Diario no es un paso —no hay que
+   * tocar su zona para poder mirar H4—: lo que hace es prohibir, y su tramo se
    * dibuja en gris para que se vea de dónde viene cada descarte.
+   *
+   * «Zona en contra» es el PUL o el APUL, nunca las dos: el nivel en contra es el
+   * último extremo del sentido opuesto, que es el del ID anterior cuando aquél
+   * iba al revés —PUL— y uno más atrás cuando iba igual —APUL—. Cuál es lo dice
+   * `zk` en cada marca; aquí no se deduce nada.
    *
    * El toque del PUL de H1 va fechado en la vela FINA en la que el precio entró
    * en la zona —igual que el de H4 y el del Diario—, así que se ve sin esperar a
@@ -1349,16 +1392,19 @@
   var CASCADE_STYLE = {
     ZONA_DIARIA: {
       symbol: "star", size: 13, muted: true,
-      title: "DENTRO DEL PUL DIARIO -> nada en contra se mira"
+      title: "DENTRO DE LA ZONA EN CONTRA DIARIA -> nada en contra se mira"
     },
-    BUSCAR_H1: { symbol: "star-square", size: 13, title: "TOCA EL PUL DE H4 -> buscar en H1" },
+    BUSCAR_H1: {
+      symbol: "star-square", size: 13,
+      title: "TOCA LA ZONA EN CONTRA DE H4 -> buscar en H1"
+    },
     CONFIRMA_PUL_H1: {
       symbol: "bowtie", size: 14,
-      title: "EL ID DE H1 YA VA COMO EL DE H4 -> su PUL"
+      title: "EL ID DE H1 YA VA COMO EL DE H4 -> su zona en contra"
     },
     TOQUE_PUL_H1: {
       symbol: "octagon", size: 15,
-      title: "TOCA EL PUL DE H1 -> SEÑAL"
+      title: "TOCA LA ZONA EN CONTRA DE H1 -> SEÑAL"
     },
     H4_DESCARTADO: { symbol: "x-thin", size: 11, muted: true, title: "H4 EN CONTRA: desechado" }
   };
@@ -1448,7 +1494,8 @@
   /* Por qué se cerró una ventana. Es la regla que se audita, así que la marca lo
    * dice en vez de dejar que se deduzca mirando las velas. */
   var WINDOW_END = {
-    ROTURA_PUL: "una vela de H4 cerró más allá del borde exterior del PUL: lo atravesó entero",
+    ROTURA_PUL: "una vela de H4 cerró más allá del borde exterior de la zona en " +
+      "contra (PUL o APUL): la atravesó entera",
     TOQUE_UL: "el precio llegó al UL de ese mismo ID de H4, que es el sitio al que iba",
     MUERTE_ID: "se acabó el ID",
     SALIDA_ZONA: "una vela DIARIA cerró fuera de la zona"
@@ -1478,6 +1525,19 @@
     };
   }
 
+  /* Cómo se llama la zona de un paso: `PUL` o `APUL`. Viene calculada (`zk`)
+   * porque el lado en contra de un ID lo lleva una de las dos y el navegador no
+   * puede saber cuál sin la cadena de impulsos. Los payloads viejos no la traen
+   * y ahí se dice `PUL`, que es lo que había cuando se generaron. */
+  function zoneName(item) { return item.zk || "PUL"; }
+
+  function anteNote(item) {
+    return item.zk === "APUL"
+      ? "<br>es un APUL, no un PUL: el ID anterior a ése iba en su mismo sentido, " +
+        "así que su lado en contra lo lleva el extremo del último ID contrario"
+      : "";
+  }
+
   function cascadeCaption(item) {
     var style = CASCADE_STYLE[item.k];
     var text = style.title + "<br>" + stamp(item.x) +
@@ -1489,15 +1549,17 @@
     }
     if (item.k === "ZONA_DIARIA" || item.k === "BUSCAR_H1" ||
         item.k === "H4_DESCARTADO" || item.k === "TOQUE_PUL_H1") {
-      text += "<br>zona PUL [" + price(item.lo) + ", " + price(item.hi) +
-        "] · borde interior " + price(item.lvl) +
-        "<br>la mecha llegó a " + price(item.r) + " · cierre " + price(item.c);
+      text += "<br>zona " + zoneName(item) + " [" + price(item.lo) + ", " +
+        price(item.hi) + "] · borde interior " + price(item.lvl) +
+        "<br>la mecha llegó a " + price(item.r) + " · cierre " + price(item.c) +
+        anteNote(item);
     }
     if (item.k === "H4_DESCARTADO") {
-      text += "<br>va EN CONTRA del PUL diario vigente: mientras el precio no salga " +
-        "de esa zona no se mira ninguna confirmación contraria";
+      text += "<br>va EN CONTRA de la zona diaria vigente: mientras el precio no " +
+        "salga de esa zona no se mira ninguna confirmación contraria";
     } else if (item.k === "ZONA_DIARIA") {
-      text += "<br>el precio está DENTRO del PUL diario: no abre ninguna búsqueda, " +
+      text += "<br>el precio está DENTRO de la zona en contra diaria: no abre " +
+        "ninguna búsqueda, " +
         "sólo prohíbe lo contrario a esta dirección" +
         "<br>vigente hasta " +
         (item.end === undefined
@@ -1508,18 +1570,19 @@
         (item.end === undefined
           ? "el final del histórico: no llegó a cerrarse"
           : iso(item.end).slice(0, 16) + " UTC · " + (WINDOW_END[item.why] || "")) +
-        "<br>salir del PUL a favor NO la cierra: se busca hasta romperlo o hasta " +
-        "llegar al UL";
+        "<br>salir de la zona a favor NO la cierra: se busca hasta romperla o " +
+        "hasta llegar al UL";
     } else if (item.k === "CONFIRMA_PUL_H1") {
-      text += "<br>el ID de H1 va ya en la misma dirección que el de H4: se marca SU PUL" +
-        "<br>PUL de H1 [" + price(item.lo) + ", " + price(item.hi) +
+      text += "<br>el ID de H1 va ya en la misma dirección que el de H4: se marca SU " +
+        zoneName(item) +
+        "<br>" + zoneName(item) + " de H1 [" + price(item.lo) + ", " + price(item.hi) +
         "] · borde interior " + price(item.lvl) +
-        " · la vela del extremo anterior es la de " + stamp(item.x0) +
-        "<br>se sabe en esta vela: la de la constitución del ID de H1, porque el " +
-        "PUL nace con él";
+        " · la vela que la define es la de " + stamp(item.x0) +
+        "<br>se sabe en esta vela: la de la constitución del ID de H1, porque la " +
+        "zona nace con él" + anteNote(item);
     } else if (item.k === "TOQUE_PUL_H1") {
-      text += "<br>el precio ENTRA en el PUL de ese ID de H1 viniendo de fuera: " +
-        "aquí salta la señal" +
+      text += "<br>el precio ENTRA en la zona en contra (" + zoneName(item) +
+        ") de ese ID de H1 viniendo de fuera: aquí salta la señal" +
         "<br>medido en la vela de " + label(item.src || "M15") +
         ", NO se espera al cierre de la vela de H1" +
         "<br>se esperaba mientras durase la ventana de H4: cerrada la búsqueda no " +
@@ -1819,10 +1882,10 @@
   }
 
   /* El botón que está armado, cuando es de los del simulador: `arming` lo
-   * comparten la caja simulada y el recuadro del OB (I.3) —no se puede estar
+   * comparten la caja simulada y los recuadros a mano (I.3) —no se puede estar
    * esperando dos clics a la vez— y los controles de cada uno sólo pueden
    * hablar del suyo. */
-  function simArming() { return state.arming === "ob" ? null : state.arming; }
+  function simArming() { return armedRect() ? null : state.arming; }
 
   function clearSim() {
     state.sim = null;
@@ -1973,7 +2036,8 @@
     if (!point) { return; }
     if (event.preventDefault) { event.preventDefault(); }
     if (event.stopPropagation) { event.stopPropagation(); }
-    if (state.arming === "ob") { plantOb(point); return; }
+    var armed = armedRect();
+    if (armed) { plantRect(armed, point); return; }
     plantSim(state.arming, point);
   }
 
@@ -2092,12 +2156,14 @@
   function hoverSim(event) {
     var chart = document.getElementById("chart");
     if (!chart || !chart.style || state.arming) { return; }
-    if (!state.sim && !state.obs.length) { return; }
+    if (!state.sim && !state.rects.length) { return; }
     var box = chartBox();
     var part = box && state.sim ? simHandleAt(box, event.clientX, event.clientY) : null;
     if (part) { chart.style.cursor = SIM_CURSORS[part] || ""; return; }
-    var hit = box && state.obs.length ? obHandleAt(box, event.clientX, event.clientY) : null;
-    chart.style.cursor = hit ? (OB_CURSORS[hit.part] || "") : "";
+    var hit = box && state.rects.length
+      ? rectHandleAt(box, event.clientX, event.clientY)
+      : null;
+    chart.style.cursor = hit ? (RECT_CURSORS[hit.part] || "") : "";
   }
 
   /* Qué caja hay puesta. Un rectángulo de colores sobre el precio se lee como
@@ -2158,24 +2224,55 @@
     document.addEventListener("mouseup", endSimDrag);
   }
 
-  /* --- El recuadro del OB (I.3) ----------------------------------------------
+  /* --- Los recuadros a mano (I.3) -------------------------------------------
    *
-   * Un rectángulo que planta el PROPIETARIO a mano encima del gráfico para
-   * decir DÓNDE VE UN OB. No es una zona del motor: las de la fase 2.0 se
-   * calculan, viajan en el payload y de ellas cuelgan las señales; ésta no la
-   * ve nadie más que quien la dibuja. Existe para poder mandar una captura
-   * señalando lo que todavía no hay regla que detecte.
+   * Tres rectángulos que planta el PROPIETARIO encima del gráfico para decir
+   * DÓNDE VE UN PUL, UN UL O UN APUL. No son zonas del motor: las de la fase
+   * 2.0 se calculan, viajan en el payload y de ellas cuelgan las señales; éstas
+   * no las ve nadie más que quien las dibuja. Existen para poder mandar una
+   * captura señalando lo que todavía no hay regla que detecte.
    *
-   * Por eso va en MAGENTA y con el borde punteado: ninguna capa calculada usa
-   * ese tono, así que lo que se vea en magenta lo ha puesto una mano.
+   * Cada nombre lleva SU COLOR y todos van punteados: ninguna capa calculada
+   * usa esos tres tonos, así que lo que se vea con ellos lo ha puesto una mano,
+   * y cuál de los tres es se lee sin abrir la leyenda.
    *
-   * Se marcan VARIOS: en un mismo gráfico hay el OB de H4 y el de H1, y
-   * enseñarlos de uno en uno no dice lo que hay que decir. El gesto es el mismo
-   * que el de la caja simulada —el botón ARMA, el clic PLANTA y después se
-   * arrastra por los bordes o por dentro—, y por eso comparten `arming`: no se
-   * puede estar esperando dos clics a la vez.
+   * Se marcan VARIOS de cada nombre: en un mismo gráfico hay el de H4 y el de
+   * H1, y enseñarlos de uno en uno no dice lo que hay que decir. El gesto es el
+   * mismo que el de la caja simulada —el botón ARMA, el clic PLANTA y después
+   * se arrastra por los bordes o por dentro—, y por eso comparten `arming`: no
+   * se puede estar esperando dos clics a la vez.
    */
-  var OB_CURSORS = {
+  var RECT_KINDS = [
+    {
+      id: "PUL", label: "PUL",
+      title: "Arma el recuadro del PUL: el clic siguiente sobre el gráfico lo\n" +
+        "planta ahí. Escape desarma. Lo dibujas tú: el motor no lo ve."
+    },
+    {
+      id: "UL", label: "UL",
+      title: "Arma el recuadro del UL: el clic siguiente sobre el gráfico lo\n" +
+        "planta ahí. Escape desarma. Lo dibujas tú: el motor no lo ve."
+    },
+    {
+      id: "APUL", label: "APUL",
+      title: "Arma el recuadro del APUL: el clic siguiente sobre el gráfico lo\n" +
+        "planta ahí. Escape desarma. Lo dibujas tú: el motor no lo ve."
+    }
+  ];
+
+  /* `arming` es UNO y lo comparten los tres botones y la caja simulada, así que
+   * el nombre del recuadro viaja dentro del propio valor. */
+  var RECT_ARM = "rect:";
+
+  function armedRect() {
+    var arming = state.arming;
+    if (!arming || String(arming).indexOf(RECT_ARM) !== 0) { return null; }
+    return String(arming).slice(RECT_ARM.length);
+  }
+
+  function rectColor(kind) { return COLORS.rects[kind]; }
+
+  var RECT_CURSORS = {
     high: "ns-resize", low: "ns-resize",
     from: "ew-resize", to: "ew-resize", body: "move"
   };
@@ -2183,41 +2280,48 @@
   /* Dónde empiezan los recuadros dentro de `layout.shapes`, igual que la caja
    * simulada: es lo que permite mover sólo el que se arrastra en vez de rehacer
    * la figura entera en cada píxel del gesto. */
-  var obIndex = null;
+  var rectIndex = null;
 
-  var obDrag = null;
+  var rectDrag = null;
 
-  function obShapes() {
-    return state.obs.map(function (ob, position) {
+  /* Se numeran POR NOMBRE: el segundo PUL es «PUL 2» aunque entre los dos se
+   * haya plantado un UL, porque lo que se cuenta al mirarlos es cuántos hay de
+   * cada cosa. */
+  function rectShapes() {
+    var seen = {};
+    return state.rects.map(function (rect, position) {
+      var color = rectColor(rect.kind);
+      seen[rect.kind] = (seen[rect.kind] || 0) + 1;
       return {
-        type: "rect", name: "ob-" + position, xref: "x", yref: "y",
-        x0: iso(ob.from), x1: iso(ob.to), y0: ob.low, y1: ob.high,
-        fillcolor: rgba(COLORS.ob, 0.14),
-        line: { color: COLORS.ob, width: 1.4, dash: "dot" },
+        type: "rect", name: "rect-" + position, xref: "x", yref: "y",
+        x0: iso(rect.from), x1: iso(rect.to), y0: rect.low, y1: rect.high,
+        fillcolor: rgba(color, 0.14),
+        line: { color: color, width: 1.4, dash: "dot" },
         layer: "above",
         label: {
-          text: "OB " + (position + 1) + " (a mano)",
+          text: rect.kind + " " + seen[rect.kind] + " (a mano)",
           textposition: "top left",
-          font: { size: 11, color: COLORS.ob }
+          font: { size: 11, color: color }
         }
       };
     });
   }
 
-  function armOb() {
-    state.arming = state.arming === "ob" ? null : "ob";
+  function armRect(kind) {
+    state.arming = armedRect() === kind ? null : RECT_ARM + kind;
     draw();
   }
 
   /* El recuadro de salida: alto un 4 % de lo que se ve y ancho un octavo de la
    * ventana, centrado en el precio del clic. Es un punto de partida para
    * arrastrar, no una propuesta: el motor no ha dicho nada de este precio. */
-  function plantOb(point) {
+  function plantRect(kind, point) {
     var y = viewRange("y"), x = viewRange("x");
     if (!y || !x) { return; }
     var half = (y[1] - y[0]) * 0.02;
     var width = Math.max(span(state.chart), Math.round((x[1] - x[0]) * 0.125));
-    state.obs.push({
+    state.rects.push({
+      kind: kind,
       from: point.minute,
       to: point.minute + width,
       low: round_(point.price - half),
@@ -2227,38 +2331,38 @@
     draw();
   }
 
-  function undoOb() {
-    if (!state.obs.length) { return; }
-    state.obs.pop();
+  function undoRect() {
+    if (!state.rects.length) { return; }
+    state.rects.pop();
     draw();
   }
 
-  function clearObs() {
-    state.obs = [];
-    if (state.arming === "ob") { state.arming = null; }
+  function clearRects() {
+    state.rects = [];
+    if (armedRect()) { state.arming = null; }
     draw();
   }
 
   /* Un recuadro no puede darse la vuelta: el arrastre que cruza el borde
    * contrario se queda a un pip —o a una vela, en horizontal—, que es lo que
    * impide un rectángulo de altura cero o del revés. */
-  function normalizeOb(ob) {
-    if (ob.high - ob.low < PIP) {
-      if (obDrag && obDrag.part === "low") { ob.low = round_(ob.high - PIP); }
-      else { ob.high = round_(ob.low + PIP); }
+  function normalizeRect(rect) {
+    if (rect.high - rect.low < PIP) {
+      if (rectDrag && rectDrag.part === "low") { rect.low = round_(rect.high - PIP); }
+      else { rect.high = round_(rect.low + PIP); }
     }
-    if (ob.to <= ob.from) {
-      if (obDrag && obDrag.part === "from") { ob.from = ob.to - span(state.chart); }
-      else { ob.to = ob.from + span(state.chart); }
+    if (rect.to <= rect.from) {
+      if (rectDrag && rectDrag.part === "from") { rect.from = rect.to - span(state.chart); }
+      else { rect.to = rect.from + span(state.chart); }
     }
   }
 
   /* Qué parte de un recuadro hay bajo el ratón. Los bordes ganan al interior:
    * con el recuadro estrecho, todo él cae dentro de la tolerancia y lo que se
    * quiere agarrar entonces es el borde más cercano. */
-  function obPartAt(box, ob, cx, cy) {
-    var corner = pixelAt(box, ob.from, ob.high);
-    var opposite = pixelAt(box, ob.to, ob.low);
+  function rectPartAt(box, rect, cx, cy) {
+    var corner = pixelAt(box, rect.from, rect.high);
+    var opposite = pixelAt(box, rect.to, rect.low);
     if (!corner || !opposite) { return null; }
     if (cx < corner.x - GRAB || cx > opposite.x + GRAB) { return null; }
     if (cy < corner.y - GRAB || cy > opposite.y + GRAB) { return null; }
@@ -2271,77 +2375,77 @@
 
   /* El último plantado es el que está encima, así que se busca del final al
    * principio: con dos recuadros solapados se agarra el que se ve. */
-  function obHandleAt(box, cx, cy) {
-    for (var index = state.obs.length - 1; index >= 0; index -= 1) {
-      var part = obPartAt(box, state.obs[index], cx, cy);
+  function rectHandleAt(box, cx, cy) {
+    for (var index = state.rects.length - 1; index >= 0; index -= 1) {
+      var part = rectPartAt(box, state.rects[index], cx, cy);
       if (part) { return { index: index, part: part }; }
     }
     return null;
   }
 
-  function startObDrag(event) {
+  function startRectDrag(event) {
     // La caja simulada se registra antes y tiene preferencia: si ella ha
     // agarrado el gesto, aquí no hay nada que hacer.
-    if (simDrag || axisDrag || state.arming || !state.obs.length) { return; }
+    if (simDrag || axisDrag || state.arming || !state.rects.length) { return; }
     var box = chartBox();
     if (!box) { return; }
-    var hit = obHandleAt(box, event.clientX, event.clientY);
+    var hit = rectHandleAt(box, event.clientX, event.clientY);
     if (!hit) { return; }
     var origin = dataAt(box, event.clientX, event.clientY, true);
     if (!origin) { return; }
-    var ob = state.obs[hit.index];
-    obDrag = {
+    var rect = state.rects[hit.index];
+    rectDrag = {
       index: hit.index, part: hit.part, origin: origin,
-      base: { from: ob.from, to: ob.to, low: ob.low, high: ob.high }
+      base: { from: rect.from, to: rect.to, low: rect.low, high: rect.high }
     };
     if (event.preventDefault) { event.preventDefault(); }
     if (event.stopPropagation) { event.stopPropagation(); }
   }
 
-  function moveObDrag(event) {
-    if (simDrag || !obDrag) { return; }
+  function moveRectDrag(event) {
+    if (simDrag || !rectDrag) { return; }
     var box = chartBox();
     var point = box && dataAt(box, event.clientX, event.clientY, true);
     if (!point) { return; }
-    applyObDrag(point);
+    applyRectDrag(point);
     if (event.preventDefault) { event.preventDefault(); }
   }
 
-  function applyObDrag(point) {
-    var ob = state.obs[obDrag.index], base = obDrag.base, part = obDrag.part;
+  function applyRectDrag(point) {
+    var rect = state.rects[rectDrag.index], base = rectDrag.base, part = rectDrag.part;
     if (part === "high") {
-      ob.high = round_(point.price);
+      rect.high = round_(point.price);
     } else if (part === "low") {
-      ob.low = round_(point.price);
+      rect.low = round_(point.price);
     } else if (part === "from") {
-      ob.from = point.minute;
+      rect.from = point.minute;
     } else if (part === "to") {
-      ob.to = point.minute;
+      rect.to = point.minute;
     } else {
       // Por dentro se mueve el recuadro ENTERO: su tamaño es lo que se acaba de
       // decidir y recolocarlo no puede cambiarlo por su cuenta.
-      var dy = point.price - obDrag.origin.price;
-      var dx = point.minute - obDrag.origin.minute;
-      ob.low = round_(base.low + dy);
-      ob.high = round_(base.high + dy);
-      ob.from = base.from + dx;
-      ob.to = base.to + dx;
+      var dy = point.price - rectDrag.origin.price;
+      var dx = point.minute - rectDrag.origin.minute;
+      rect.low = round_(base.low + dy);
+      rect.high = round_(base.high + dy);
+      rect.from = base.from + dx;
+      rect.to = base.to + dx;
     }
-    normalizeOb(ob);
-    redrawObs();
+    normalizeRect(rect);
+    redrawRects();
   }
 
   /* Igual que la caja simulada: durante el arrastre se mueven sólo las formas
    * de los recuadros, no la figura entera. */
-  function redrawObs() {
+  function redrawRects() {
     var chart = document.getElementById("chart");
-    if (obIndex === null || !chart || typeof Plotly === "undefined" || !Plotly.relayout) {
+    if (rectIndex === null || !chart || typeof Plotly === "undefined" || !Plotly.relayout) {
       draw();
       return;
     }
     var update = {};
-    obShapes().forEach(function (shape, position) {
-      var key = "shapes[" + (obIndex + position) + "]";
+    rectShapes().forEach(function (shape, position) {
+      var key = "shapes[" + (rectIndex + position) + "]";
       update[key + ".x0"] = shape.x0;
       update[key + ".x1"] = shape.x1;
       update[key + ".y0"] = shape.y0;
@@ -2350,37 +2454,65 @@
     Plotly.relayout(chart, update);
   }
 
-  function endObDrag() {
-    if (!obDrag) { return; }
-    obDrag = null;
+  function endRectDrag() {
+    if (!rectDrag) { return; }
+    rectDrag = null;
     draw();
+  }
+
+  /* Cuántos hay de cada nombre, en el orden de los botones y sin nombrar los
+   * que no se han puesto. */
+  function rectCounts() {
+    var counts = {};
+    state.rects.forEach(function (rect) {
+      counts[rect.kind] = (counts[rect.kind] || 0) + 1;
+    });
+    return RECT_KINDS.filter(function (kind) {
+      return counts[kind.id];
+    }).map(function (kind) {
+      return counts[kind.id] + " de " + kind.id;
+    }).join(" · ");
   }
 
   /* Qué recuadros hay puestos. Un rectángulo encima del precio se lee como algo
    * que el motor ha encontrado: el estado tiene que decir que lo ha puesto una
    * mano y que detrás no hay ninguna regla. */
-  function obCaption() {
-    if (state.arming === "ob") {
-      return "RECUADRO DE OB ARMADO: pulsa sobre el gráfico para plantarlo, o " +
-        "Escape para dejarlo";
+  function rectCaption() {
+    var armed = armedRect();
+    if (armed) {
+      return "RECUADRO DE " + armed + " ARMADO: pulsa sobre el gráfico para " +
+        "plantarlo, o Escape para dejarlo";
     }
-    if (!state.obs.length) { return null; }
-    return "OB marcados a mano: " + state.obs.length +
-      (state.obs.length === 1 ? " recuadro" : " recuadros") +
-      " · los dibuja el propietario para señalar dónde ve un order block: NO los " +
-      "ha detectado el motor, no hay regla de OB en el proyecto y no salen de la " +
-      "pantalla";
+    if (!state.rects.length) { return null; }
+    return "recuadros marcados a mano: " + state.rects.length +
+      " (" + rectCounts() + ")" +
+      " · los dibuja el propietario para señalar dónde ve un PUL, un UL o un " +
+      "APUL: NO los ha detectado el motor, no hay regla de PUL, UL ni APUL en " +
+      "el proyecto y no salen de la pantalla";
   }
 
-  function bindOb() {
+  function buildRectButtons() {
+    var container = document.getElementById("rect-buttons");
+    if (!container) { return; }
+    RECT_KINDS.forEach(function (kind) {
+      var button = document.createElement("button");
+      button.type = "button";
+      button.textContent = kind.label;
+      button.dataset.kind = kind.id;
+      button.title = kind.title;
+      button.addEventListener("click", function () { armRect(kind.id); });
+      container.appendChild(button);
+    });
+  }
+
+  function bindRects() {
     var chart = document.getElementById("chart");
-    document.getElementById("ob-mark").addEventListener("click", armOb);
-    document.getElementById("ob-undo").addEventListener("click", undoOb);
-    document.getElementById("ob-clear").addEventListener("click", clearObs);
+    document.getElementById("rect-undo").addEventListener("click", undoRect);
+    document.getElementById("rect-clear").addEventListener("click", clearRects);
     if (!chart || !chart.addEventListener || !document.addEventListener) { return; }
-    chart.addEventListener("mousedown", startObDrag, true);
-    document.addEventListener("mousemove", moveObDrag);
-    document.addEventListener("mouseup", endObDrag);
+    chart.addEventListener("mousedown", startRectDrag, true);
+    document.addEventListener("mousemove", moveRectDrag);
+    document.addEventListener("mouseup", endRectDrag);
   }
 
   /* --- Cuenta simulada (I.2) -------------------------------------------------
@@ -2859,13 +2991,13 @@
     return shapes.concat(box);
   }
 
-  /* Y encima de todo, los recuadros del OB (I.3): los planta el propietario y
+  /* Y encima de todo, los recuadros a mano (I.3): los planta el propietario y
    * tienen que verse sobre lo que dibuja el motor. Se apunta dónde empiezan por
    * lo mismo que la caja simulada: para poder arrastrar uno sin rehacer la
    * figura entera. */
-  function obShapes_(shapes) {
-    var boxes = obShapes();
-    obIndex = boxes.length ? shapes.length : null;
+  function rectShapes_(shapes) {
+    var boxes = rectShapes();
+    rectIndex = boxes.length ? shapes.length : null;
     return shapes.concat(boxes);
   }
 
@@ -2886,7 +3018,7 @@
       dragmode: "pan",
       showlegend: true,
       legend: { orientation: "h", y: 1.04, x: 0, font: { size: 11 } },
-      shapes: obShapes_(simShapes_(limboShapes(range))),
+      shapes: rectShapes_(simShapes_(limboShapes(range))),
       xaxis: {
         type: "date", gridcolor: COLORS.grid, rangeslider: { visible: false },
         // El rango va siempre con su `autorange`: si se diera uno sin apagar el
@@ -2981,16 +3113,17 @@
     // Y la cuenta, cuando hay algo que contar: un saldo que se mueve sin decir
     // de dónde sale se lee como un resultado del motor.
     var cuenta = accountCaption();
-    // Y los recuadros de OB, por lo mismo: son lo otro que dibuja el propietario
-    // y en la ciega marcar dónde se ve un OB es justo el gesto de la prueba.
-    var obs = obCaption();
+    // Y los recuadros a mano, por lo mismo: son lo otro que dibuja el
+    // propietario y en la ciega marcar dónde se ve una zona es justo el gesto
+    // de la prueba.
+    var recuadros = rectCaption();
     if (blindfolded()) {
       return "AUDITORÍA CIEGA · semilla " + state.seed + " · " + label(state.chart) + " · " +
         range.from + " → " + range.to + " · " + visible.toLocaleString("es-ES") +
         " velas. Marca tus impulsos y pulsa Revelar. Sorteada dentro de " +
         state.scope.from + " → " + state.scope.to + "." +
         (simulada ? " · " + simulada : "") +
-        (obs ? " · " + obs : "") +
+        (recuadros ? " · " + recuadros : "") +
         (cuenta ? " · " + cuenta : "");
     }
     var dibujados = overlays().filter(isVisible).map(function (timeframe) {
@@ -3059,9 +3192,13 @@
     if (zonesAvailable()) {
       // UL y PUL ya no se pintan. Decirlo es parte del dibujo: quien viene de la
       // fase 2.0 buscaría las cajas y leería su ausencia como un fallo.
-      text += " · las zonas UL y PUL no se dibujan: siguen en los datos, en los " +
-        "informes y bajo las señales y la cascada" +
-        (DATA.meta.breakByZone ? " (fase 2.1: además deciden la rotura)" : "");
+      text += " · las zonas UL, PUL y APUL no se dibujan: siguen en los datos, en " +
+        "los informes y bajo las señales y la cascada" +
+        (DATA.meta.breakByZone ? " (fase 2.1: además deciden la rotura)" : "") +
+        " · el lado EN CONTRA de cada ID es el último extremo del SENTIDO OPUESTO: " +
+        "PUL si es el del ID anterior, APUL si el anterior iba en el mismo sentido " +
+        "y hay que retroceder más · el globo del marco dice cuál, y la rotura por " +
+        "APUL va con su propio símbolo";
     }
     if (hasSignals() && state.signals && zonesAvailable()) {
       var senales = visibleSignals(edges);
@@ -3151,7 +3288,7 @@
       text += " · revelado de la ventana ciega con semilla " + state.seed;
     }
     if (simulada) { text += " · " + simulada; }
-    if (obs) { text += " · " + obs; }
+    if (recuadros) { text += " · " + recuadros; }
     if (cuenta) { text += " · " + cuenta; }
     return text;
   }
@@ -3596,12 +3733,19 @@
     var canvas = document.getElementById("chart");
     if (canvas && canvas.style) { canvas.style.cursor = state.arming ? "crosshair" : ""; }
 
-    // I.3 — el recuadro del OB: el botón dice si está esperando el clic, y sin
-    // recuadros puestos no hay nada que quitar.
-    document.getElementById("ob-mark")
-      .setAttribute("aria-pressed", String(state.arming === "ob"));
-    document.getElementById("ob-undo").disabled = !state.obs.length;
-    document.getElementById("ob-clear").disabled = !state.obs.length;
+    // I.3 — los recuadros a mano: cada botón dice si está esperando el clic y
+    // se pinta del color de su recuadro, y sin recuadros puestos no hay nada
+    // que quitar.
+    document.querySelectorAll("#rect-buttons button").forEach(function (button) {
+      var kind = button.dataset.kind;
+      var pressed = armedRect() === kind;
+      button.setAttribute("aria-pressed", String(pressed));
+      button.style.color = pressed ? COLORS.surface : rectColor(kind);
+      button.style.background = pressed ? rectColor(kind) : "";
+      button.style.borderColor = pressed ? rectColor(kind) : "";
+    });
+    document.getElementById("rect-undo").disabled = !state.rects.length;
+    document.getElementById("rect-clear").disabled = !state.rects.length;
 
     document.getElementById("layer-frame").checked = state.frame;
     if (hasSignals()) {
@@ -3796,13 +3940,14 @@
   buildPresetButtons();
   buildImpulseLayers();
   buildSimButtons();
+  buildRectButtons();
   buildRatioButtons();
   buildAccountButtons();
   buildRiskModes();
   bindControls();
   bindAxisScaling();
   bindSim();
-  bindOb();
+  bindRects();
   bindAccount();
   draw();
 })();

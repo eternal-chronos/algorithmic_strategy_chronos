@@ -1,4 +1,4 @@
-"""Zonas UL y PUL de un impulso dominante (fase 2.0). **Sólo detección.**
+"""Zonas UL, PUL y APUL de un impulso dominante. **Sólo geometría.**
 
 El módulo 1 traza la estructura por **cuerpos**: `max(open, close)` y
 `min(open, close)`. Estas dos zonas son lo contrario, un asunto de **mechas**, y
@@ -10,7 +10,8 @@ módulo, así que ninguna regla del módulo 1 puede leer una zona ni por descuid
 En la fase 2.1 las zonas pasarán a decidir la vida y la muerte de los impulsos;
 hasta que el propietario audite lo que se dibuja aquí, no deciden nada.
 
-Las dos zonas, tal como las define el propietario:
+Las zonas, tal como las define el propietario. Un ID tiene siempre UL, y en el
+lado en contra tiene **una** de las otras dos, nunca las dos:
 
 **UL (último)** — el extremo del ID, sobre la vela que fija `precio_extremo`.
 Va del **borde del cuerpo** a la **punta de la mecha**, así que ocupa sólo el
@@ -28,7 +29,20 @@ punta, el PUL toma la base— y juntas van del `open` a la punta de la mecha.
 El primer ID del histórico no tiene ID anterior y por tanto no tiene PUL, que es
 un estado legítimo y se registra.
 
-`interior` y `exterior` significan lo mismo en las dos: el borde **interior** es
+**APUL (antes penúltimo)** — el extremo del último ID que iba en sentido
+**contrario** a éste, cuando ese ID no es el inmediatamente anterior. Aparece
+cuando el ID anterior iba en el **mismo** sentido que éste —rotura a favor, o una
+constitución abortada que giró la pierna dos veces—: su extremo cae en el lado a
+favor y no sirve de nivel en contra, así que se retrocede hasta el último ID
+contrario. La regla que las une es una sola: **el nivel en contra es el último
+extremo del sentido opuesto**.
+
+Geometría del UL leída del otro lado: **tramo de mecha** hacia el lado de la
+rotura en contra, del borde del cuerpo a la punta de la mecha, sin cubrir el
+cuerpo. No se estira a la vela de margen. El APUL se va en cuanto nace un ID cuyo
+anterior ya va al revés, que vuelve a tener PUL.
+
+`interior` y `exterior` significan lo mismo en las tres: el borde **interior** es
 el que un precio que sale del rango encuentra primero, y el **exterior** el que
 tiene que cruzar para dejar la zona atrás. En un ID alcista el UL se recorre
 hacia arriba (cuerpo -> mecha) y el PUL hacia abajo (borde alto del cuerpo ->
@@ -56,6 +70,9 @@ class ZoneKind(StrEnum):
     LAST = "UL"
     #: Extremo del ID anterior: el cuerpo de la vela que fijaba su UL.
     PENULTIMATE = "PUL"
+    #: Extremo del ID **anterior a ése**: el tramo de mecha de su vela hacia el
+    #: lado de la rotura en contra. Sustituye al PUL, no lo acompaña.
+    ANTE_PENULTIMATE = "APUL"
 
 
 @dataclass(frozen=True, slots=True)
@@ -321,6 +338,54 @@ def penultimate_zone(
     )
 
 
+def ante_penultimate_zone(
+    series: CandleSeries,
+    *,
+    id_num: int,
+    timeframe: str,
+    direction: ImpulseDirection,
+    index_ante_penultimate: int | None,
+    ts_constitution: datetime,
+) -> Zone | None:
+    """Zona APUL del ID, o `None` si no hay de dónde sacarla.
+
+    La vela es la del extremo del último ID que iba en sentido **contrario** a
+    éste, cuando ese ID no es el inmediatamente anterior. De ella se toma el
+    **tramo de mecha** hacia el lado por el que se rompe en contra: del borde del
+    cuerpo a la punta de la mecha, sin cubrir nada del cuerpo. Es la geometría
+    del UL, leída del otro lado: en un ID alcista la rotura en contra baja, así
+    que el borde interior es el borde bajo del cuerpo y el exterior, la punta de
+    la mecha inferior.
+
+    A diferencia del UL, el APUL **no** se estira a la vela siguiente: aquella
+    regla es del extremo recién fijado, y esta vela cerró mucho antes de que el
+    ID naciera.
+
+    Devolver `None` es lo normal en un ID con PUL —no hay APUL que marcar— y le
+    pasa además a los primeros ID del histórico, que no tienen ningún ID
+    contrario detrás. Esos se rompen por línea en el lado en contra.
+    """
+    if index_ante_penultimate is None:
+        return None
+
+    inner = series.body_edge_towards(index_ante_penultimate, direction.opposite())
+    outer = series.wick_tip_towards(index_ante_penultimate, direction.opposite())
+
+    return Zone(
+        kind=ZoneKind.ANTE_PENULTIMATE,
+        id_num=id_num,
+        timeframe=timeframe,
+        direction=direction,
+        index_defining=index_ante_penultimate,
+        ts_defining=series.at(index_ante_penultimate),
+        defining_body=series.direction_of(index_ante_penultimate),
+        inner=inner,
+        outer=outer,
+        ts_outer_known=series.at(index_ante_penultimate),
+        ts_birth=ts_constitution,
+    )
+
+
 def _is_beyond(price: float, level: float, direction: ImpulseDirection) -> bool:
     """"Más allá" es estricto, igual que en la rotura del módulo 1."""
     return price > level if direction is ImpulseDirection.ALCISTA else price < level
@@ -390,6 +455,7 @@ __all__ = [
     "Zone",
     "ZoneBook",
     "ZoneKind",
+    "ante_penultimate_zone",
     "last_zone",
     "penultimate_zone",
 ]

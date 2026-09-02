@@ -70,8 +70,11 @@ class ZoneCapture:
     constituted: pd.Timestamp
     ul_usd: float
     ul_atr: float
-    pul_usd: float | None
-    pul_atr: float | None
+    #: La zona del lado en contra —PUL o APUL— y cuál de las dos es. `None`
+    #: cuando el ID no tiene ninguna: el primero de cada temporalidad.
+    against_kind: str | None
+    against_usd: float | None
+    against_atr: float | None
     note: str
 
 
@@ -106,7 +109,7 @@ def _lots(zones: ZonesRun) -> list[tuple[str, list[Pick]]]:
         ("bien_formados_alcista", _well_formed(zones, "alcista")),
         ("bien_formados_bajista", _well_formed(zones, "bajista")),
         ("ul_extendido", _extended(zones)),
-        ("sin_pul", _without_penultimate(zones)),
+        ("sin_zona_en_contra", _without_against_zone(zones)),
         ("ul_altura_cero", _flat(zones)),
         ("pul_mas_alto", _extreme_penultimates(zones, biggest=True)),
         ("pul_mas_bajo", _extreme_penultimates(zones, biggest=False)),
@@ -166,12 +169,17 @@ def _extended(zones: ZonesRun) -> list[Pick]:
     return ordered[:EXTENDED]
 
 
-def _without_penultimate(zones: ZonesRun) -> list[Pick]:
-    """§8.3 — los ID sin PUL: el primero de cada temporalidad. Es la cifra de 7.1."""
+def _without_against_zone(zones: ZonesRun) -> list[Pick]:
+    """§8.3 — los ID sin zona en contra: ni PUL ni APUL. Es la cifra de 7.1.
+
+    Son los primeros de cada temporalidad, que no tienen ID detrás del que salga
+    la vela. Un ID con APUL **no** entra aquí: tiene zona, sólo que no es la que
+    se esperaba.
+    """
     pool = [
         (timeframe, zoned)
         for timeframe, zoned in _candidates(zones)
-        if not zoned.has_penultimate
+        if zoned.against is None
     ]
     return pool[:WITHOUT_ORDER_BLOCK]
 
@@ -218,7 +226,7 @@ def _write_one(
     path = folder / f"{name}.png"
     figure.write_image(str(path), width=WIDTH, height=HEIGHT, scale=SCALE)
 
-    block = zoned.penultimate
+    block = zoned.against
     return ZoneCapture(
         path=path,
         lot=lot,
@@ -228,8 +236,9 @@ def _write_one(
         constituted=stamp,
         ul_usd=zoned.last.height,
         ul_atr=_ratio(zoned.last.height, zoned.atr),
-        pul_usd=None if block is None else block.height,
-        pul_atr=None if block is None else _ratio(block.height, zoned.atr),
+        against_kind=None if block is None else block.kind.value,
+        against_usd=None if block is None else block.height,
+        against_atr=None if block is None else _ratio(block.height, zoned.atr),
         note=note,
     )
 
@@ -240,11 +249,13 @@ def _figure(
     last_index = len(analysis.bars) - 1
     end = zoned.index_end if zoned.index_end is not None else last_index
     # La ventana arranca en la vela más antigua que define una zona: sin ella la
-    # captura enseñaría un rectángulo que empieza fuera del encuadre. La vela del
-    # PUL es anterior al ID, así que casi siempre es ella.
+    # captura enseñaría un rectángulo que empieza fuera del encuadre. La vela de
+    # la zona en contra es anterior al ID —un ID atrás en el PUL y dos en el
+    # APUL—, así que casi siempre es ella.
     first = min(zoned.index_constitution, zoned.last.index_defining)
-    if zoned.penultimate is not None:
-        first = min(first, zoned.penultimate.index_defining)
+    against = zoned.against
+    if against is not None:
+        first = min(first, against.index_defining)
 
     request = CaptureRequest(
         name=f"zonas_id{zoned.id_num}",
@@ -302,7 +313,7 @@ def draw_zones(
     if ul.is_flat:
         notes.append("UL de altura cero")
 
-    block = zoned.penultimate
+    block = zoned.against
     if block is not None:
         _rectangle(figure, block, zoned, first, last, labels, colour, dashed=False)
         _annotate(
@@ -310,24 +321,46 @@ def draw_zones(
             labels,
             block.index_defining - first,
             block.outer,
-            f"<b>PUL {block.inner:,.{DECIMALS}f} → {block.outer:,.{DECIMALS}f}</b>"
-            f"<br>cuerpo de la vela del extremo anterior"
-            + ("<br>ALTURA CERO: la vela abrió y cerró igual" if block.is_flat else ""),
+            f"<b>{block.kind.value} {block.inner:,.{DECIMALS}f} → "
+            f"{block.outer:,.{DECIMALS}f}</b>"
+            + (
+                "<br>cuerpo de la vela del extremo anterior"
+                if block.kind is ZoneKind.PENULTIMATE
+                else "<br>mecha en contra de la vela del extremo del último ID contrario"
+            )
+            + (
+                "<br>ALTURA CERO: "
+                + (
+                    "la vela abrió y cerró igual"
+                    if block.kind is ZoneKind.PENULTIMATE
+                    else "la vela no dejó mecha en ese lado"
+                )
+                if block.is_flat
+                else ""
+            ),
             colour,
             above=zoned.direction.value != "alcista",
         )
+        if block.kind is ZoneKind.ANTE_PENULTIMATE:
+            notes.append(
+                "no tiene PUL: el ID anterior iba en su mismo sentido, así que "
+                "su zona en contra es el APUL del último ID contrario"
+            )
     else:
-        notes.append("el primer ID de la temporalidad: no tiene PUL")
+        notes.append(
+            "el arranque de la temporalidad: todavía no hay ningún ID contrario "
+            "detrás, así que no tiene ni PUL ni APUL"
+        )
 
-    return " · ".join(notes) if notes else "UL y PUL bien formados"
+    return " · ".join(notes) if notes else "las dos zonas bien formadas"
 
 
 def _birth_index(zoned: ImpulseZones) -> int:
     """Barra en la que la zona empieza a existir.
 
     Las dos nacen con la constitución del ID. La vela que define cada una es
-    anterior —la del extremo en el UL, la del extremo del ID anterior en el
-    PUL— y ese tramo NO es zona.
+    anterior —la del extremo en el UL, la del extremo de un ID previo en el PUL
+    y en el APUL— y ese tramo NO es zona.
     """
     return zoned.index_constitution
 
@@ -456,13 +489,14 @@ def _subtitle(zoned: ImpulseZones, session_timezone: str) -> str:
     stamp = pd.Timestamp(zoned.ts_constitution)
     local = stamp.tz_convert(session_timezone)
     zona = session_label(session_timezone)
-    block = zoned.penultimate
+    block = zoned.against
     ob = (
-        "sin PUL: es el primer ID de la temporalidad"
+        "sin zona en contra: es el primer ID de la temporalidad"
         if block is None
         else (
-            f"PUL {block.height:,.2f} USD = {_ratio(block.height, zoned.atr):.3f} ATR · "
-            f"cuerpo de la vela de {block.ts_defining:%Y-%m-%d %H:%M} UTC"
+            f"{block.kind.value} {block.height:,.2f} USD = "
+            f"{_ratio(block.height, zoned.atr):.3f} ATR · "
+            f"vela de {block.ts_defining:%Y-%m-%d %H:%M} UTC"
         )
     )
     return (
@@ -502,7 +536,8 @@ def _write_readme(captures: Sequence[ZoneCapture], folder: Path) -> None:
         "                   con mecha. Se eligen los MÁS CERCANOS A LA MEDIANA de altura",
         "                   del UL en ATR, no los mayores: son casos representativos.",
         "  ul_extendido     los que se estiraron a la vela siguiente",
-        "  sin_pul          los que no tienen PUL: el primero de cada temporalidad",
+        "  sin_zona_en_contra  los que no tienen ni PUL ni APUL: el primero de cada"
+        "\n                   temporalidad",
         "  ul_altura_cero   los UL cuya vela del extremo no dejó mecha",
         "  pul_mas_alto/bajo los PUL extremos por altura en ATR",
         "",
@@ -511,9 +546,10 @@ def _write_readme(captures: Sequence[ZoneCapture], folder: Path) -> None:
         lines.append("(no se escribió ninguna captura)")
     for capture in captures:
         ob = (
-            "sin PUL"
-            if capture.pul_usd is None
-            else f"PUL {capture.pul_usd:,.2f} USD / {capture.pul_atr:.3f} ATR"
+            "sin zona en contra"
+            if capture.against_usd is None
+            else f"{capture.against_kind} {capture.against_usd:,.2f} USD / "
+            f"{capture.against_atr:.3f} ATR"
         )
         lines.append(
             f"{capture.path.name}  ·  {capture.timeframe} ID {capture.id_num}  ·  "

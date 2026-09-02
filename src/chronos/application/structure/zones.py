@@ -1,4 +1,4 @@
-"""Caso de uso: calcular las zonas UL y PUL de los impulsos ya detectados (fase 2.0).
+"""Caso de uso: calcular las zonas de los impulsos ya detectados (fase 2.0).
 
 **Esto mide y dibuja; no decide nada.** La tabla de impulsos, los eventos de
 rotura y el estado barra a barra salen exactamente iguales con este módulo dentro
@@ -6,11 +6,17 @@ que fuera, y hay un test que lo fija. En la fase 2.1 las zonas pasarán a decidi
 la vida y la muerte de los impulsos; hasta que el propietario audite lo que se
 dibuja aquí, la rotura sigue siendo por línea.
 
+Cada ID lleva **dos** zonas: el UL en el lado a favor, siempre, y en el lado en
+contra el PUL o el APUL, nunca los dos. El nivel en contra es el último extremo
+del **sentido opuesto**: el del ID anterior cuando aquél iba al revés que éste
+—PUL—, y uno más atrás cuando iba en el mismo sentido —APUL—. Cuál es lo decidió
+el detector al constituir y aquí no se re-deriva: se lee de `against_source`.
+
 Las zonas no necesitan volver a recorrer la historia: el detector ya registró
-qué vela fija cada nivel —`index_extreme` para el UL y `index_penultimate`, la
-vela del extremo del ID anterior, para el PUL—, así que se derivan de esas dos
-velas y del OHLC de la temporalidad. Por eso este módulo no toca el detector ni
-lo vuelve a ejecutar.
+qué vela fija cada nivel —`index_extreme` para el UL, `index_penultimate` para el
+PUL e `index_ante_penultimate` para el APUL—, así que se derivan de esas velas y
+del OHLC de la temporalidad. Por eso este módulo no toca el detector ni lo vuelve
+a ejecutar.
 
 Sobre las tres unidades de altura: el oro pasó de ~1.200 a ~4.300 USD en el
 histórico, así que una altura en dólares no es comparable entre 2018 y 2025. El
@@ -35,6 +41,7 @@ from chronos.domain.structure.zones import (
     Zone,
     ZoneBook,
     ZoneKind,
+    ante_penultimate_zone,
     last_zone,
     penultimate_zone,
 )
@@ -87,17 +94,26 @@ SURVIVAL_COLUMNS = (
 
 @dataclass(frozen=True, slots=True)
 class ImpulseZones:
-    """Las dos zonas de un impulso. El UL siempre existe; el PUL puede no existir."""
+    """Las dos zonas de un impulso: el UL, y una sola en el lado en contra.
+
+    El UL existe siempre. En contra hay PUL, APUL o nada, y los tres estados son
+    legítimos; `against` devuelve la que haya sin que quien pregunte tenga que
+    saber cuál es.
+    """
 
     id_num: int
     timeframe: str
     direction: ImpulseDirection
     year: int
     last: Zone
-    #: `None` cuando el ID no tiene ID anterior del que salga —sólo el primero
-    #: del histórico—. Es un estado legítimo, no un fallo: en la fase 2.1 esos
-    #: impulsos se romperán por línea.
+    #: `None` cuando el ID no lleva PUL: o no hay ningún ID contrario detrás
+    #: —el principio del histórico— o el ID anterior iba en el mismo sentido que
+    #: éste y en su lugar lleva APUL. Es un estado legítimo, no un fallo.
     penultimate: Zone | None
+    #: La otra zona del lado en contra, y nunca a la vez que el PUL: `None`
+    #: salvo cuando el ID anterior iba en el mismo sentido y hubo que retroceder
+    #: hasta el último ID contrario.
+    ante_penultimate: Zone | None
     #: ATR previo a la constitución del ID, el mismo con el que la fase 1
     #: normaliza su rango. Las dos zonas del ID comparten denominador para que
     #: la comparación de alturas de 7.5 sea entre ellas y no entre dos ATR.
@@ -117,20 +133,31 @@ class ImpulseZones:
         return self.penultimate is not None
 
     @property
+    def has_ante_penultimate(self) -> bool:
+        return self.ante_penultimate is not None
+
+    @property
+    def against(self) -> Zone | None:
+        """La zona del lado en contra, sea cual sea. `None` si se rompe por línea."""
+        return self.penultimate if self.penultimate is not None else self.ante_penultimate
+
+    @property
     def zones_overlap(self) -> bool:
-        """§7.6 — el UL y el PUL del mismo ID se pisan en precio.
+        """§7.6 — las dos zonas del mismo ID se pisan en precio.
 
         Se espera que no ocurra casi nunca: el UL vive pegado al extremo del ID
-        y el PUL en el extremo anterior, que son los dos límites opuestos del
-        rango. Cuando ocurre, el ID es tan corto que sus dos velas definitorias
-        se solapan.
+        y la zona en contra en un extremo anterior, que son los dos límites
+        opuestos del rango. Cuando ocurre, el ID es tan corto que sus dos velas
+        definitorias se solapan.
         """
-        if self.penultimate is None:
+        against = self.against
+        if against is None:
             return False
-        return self.last.low <= self.penultimate.high and self.penultimate.low <= self.last.high
+        return self.last.low <= against.high and against.low <= self.last.high
 
     def zones(self) -> tuple[Zone, ...]:
-        return (self.last,) if self.penultimate is None else (self.last, self.penultimate)
+        against = self.against
+        return (self.last,) if against is None else (self.last, against)
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,8 +176,16 @@ class TimeframeZones:
         return tuple(item for item in self.items if item.has_penultimate)
 
     @property
-    def without_penultimate(self) -> tuple[ImpulseZones, ...]:
-        return tuple(item for item in self.items if not item.has_penultimate)
+    def with_ante_penultimate(self) -> tuple[ImpulseZones, ...]:
+        return tuple(item for item in self.items if item.has_ante_penultimate)
+
+    @property
+    def without_against_zone(self) -> tuple[ImpulseZones, ...]:
+        """ID sin **ninguna** zona en contra: ni PUL ni APUL, así que rompen por
+        línea en ese lado. Son los primeros de cada temporalidad, mientras no ha
+        habido todavía ningún ID en sentido contrario.
+        """
+        return tuple(item for item in self.items if item.against is None)
 
 
 @dataclass(frozen=True, slots=True)
@@ -223,7 +258,7 @@ def _zones_of(analysis: TimeframeAnalysis, config_hash: str) -> TimeframeZones:
     zones = tuple(zone for item in items for zone in item.zones())
     book = ZoneBook(analysis.timeframe, zones)
     for item in items:
-        if not item.has_penultimate:
+        if item.against is None:
             book.record_missing_penultimate(item.id_num)
 
     return TimeframeZones(
@@ -254,14 +289,35 @@ def _zones_of_impulse(
             ts_constitution=impulse.ts_constitution,
         ),
         # El PUL sale de la vela del extremo del ID anterior: el UL viejo, que
-        # el detector ya dejó apuntado al constituir éste.
-        penultimate=penultimate_zone(
-            series,
-            id_num=impulse.id_num,
-            timeframe=impulse.timeframe,
-            direction=impulse.direction,
-            index_previous_extreme=impulse.index_penultimate,
-            ts_constitution=impulse.ts_constitution,
+        # el detector ya dejó apuntado al constituir éste. Sólo se marca si ese
+        # ID iba al revés que éste; si iba en el mismo sentido su extremo cae en
+        # el lado a favor y lo que lleva el ID es el APUL. Quién manda lo decidió
+        # el detector y no se re-deriva aquí: `against_source` es la respuesta.
+        penultimate=(
+            penultimate_zone(
+                series,
+                id_num=impulse.id_num,
+                timeframe=impulse.timeframe,
+                direction=impulse.direction,
+                index_previous_extreme=impulse.index_penultimate,
+                ts_constitution=impulse.ts_constitution,
+            )
+            if impulse.has_penultimate
+            else None
+        ),
+        # El APUL sale de más atrás: la vela del extremo del último ID contrario,
+        # y de ella su tramo de mecha hacia el lado de la rotura en contra.
+        ante_penultimate=(
+            ante_penultimate_zone(
+                series,
+                id_num=impulse.id_num,
+                timeframe=impulse.timeframe,
+                direction=impulse.direction,
+                index_ante_penultimate=impulse.index_ante_penultimate,
+                ts_constitution=impulse.ts_constitution,
+            )
+            if impulse.has_ante_penultimate
+            else None
         ),
         atr=atr_by_id.get(impulse.id_num, float("nan")),
         anchor=impulse.anchor,
@@ -364,7 +420,7 @@ def _survivals(
                 "zona": (
                     ZoneKind.LAST.value
                     if event.kind is BreakKind.A_FAVOR
-                    else ZoneKind.PENULTIMATE.value
+                    else _against_kind(item)
                 ),
                 "borde_interior": None if zone is None else zone.inner,
                 "borde_exterior": None if zone is None else zone.outer,
@@ -382,7 +438,17 @@ def _survivals(
 def _zone_for(item: ImpulseZones, event: BreakEvent) -> Zone | None:
     if event.kind is BreakKind.A_FAVOR:
         return item.last
-    return item.penultimate
+    return item.against
+
+
+def _against_kind(item: ImpulseZones) -> str:
+    """Nombre de la zona que le tocaba a la rotura en contra de este ID.
+
+    Sin zona el nombre sigue siendo `PUL`: es la que **faltaba**, y la columna
+    `sin_zona` de al lado ya dice que no había ninguna.
+    """
+    against = item.against
+    return ZoneKind.PENULTIMATE.value if against is None else against.kind.value
 
 
 def _safe_ratio(numerator: float, denominator: float) -> float:
@@ -408,15 +474,19 @@ HEIGHT_UNITS = (
 
 
 def coverage_by_year(measurement: TimeframeZones) -> pd.DataFrame:
-    """§7.1 — cuántos ID tienen UL y cuántos tienen PUL.
+    """§7.1 — qué lleva cada ID en cada uno de sus dos lados.
 
-    **La cifra que manda de la fase 2.0 es `pct_sin_pul`**: en la fase 2.1 esos
-    impulsos se romperán por línea porque no tienen zona con la que romper. Con
-    el PUL sólo puede quedarse sin zona el primer ID del histórico, así que la
-    columna es una comprobación del motor más que una medición del mercado.
+    El lado en contra tiene tres estados y sólo tres: PUL, APUL, o nada. Van en
+    columnas separadas porque significan cosas distintas: el APUL **sí** es una
+    zona con la que romper, y meterlo en `sin_pul` diría que ese ID se rompe por
+    línea, que es justo lo contrario.
+
+    **La cifra que manda de la fase 2.0 es `pct_sin_zona`**: en la fase 2.1 esos
+    impulsos —y sólo ésos— se romperán por línea en el lado en contra.
     """
     columns = [
-        "anio", "impulsos", "con_ul", "pct_ul", "con_pul", "pct_pul", "sin_pul", "pct_sin_pul",
+        "anio", "impulsos", "con_ul", "pct_ul", "con_pul", "pct_pul",
+        "con_apul", "pct_apul", "sin_zona", "pct_sin_zona",
     ]
     if not measurement.items:
         return pd.DataFrame(columns=columns)
@@ -424,6 +494,8 @@ def coverage_by_year(measurement: TimeframeZones) -> pd.DataFrame:
     def row(label: str, group: Sequence[ImpulseZones]) -> dict[str, object]:
         total = len(group)
         with_pul = sum(1 for item in group if item.has_penultimate)
+        with_apul = sum(1 for item in group if item.has_ante_penultimate)
+        without = total - with_pul - with_apul
         return {
             "anio": label,
             "impulsos": total,
@@ -434,8 +506,10 @@ def coverage_by_year(measurement: TimeframeZones) -> pd.DataFrame:
             "pct_ul": 1.0 if total else float("nan"),
             "con_pul": with_pul,
             "pct_pul": with_pul / total if total else float("nan"),
-            "sin_pul": total - with_pul,
-            "pct_sin_pul": (total - with_pul) / total if total else float("nan"),
+            "con_apul": with_apul,
+            "pct_apul": with_apul / total if total else float("nan"),
+            "sin_zona": without,
+            "pct_sin_zona": without / total if total else float("nan"),
         }
 
     rows = [row(str(year), group) for year, group in _by_year(measurement.items)]
@@ -444,15 +518,21 @@ def coverage_by_year(measurement: TimeframeZones) -> pd.DataFrame:
 
 
 def heights_by_year(measurement: TimeframeZones, kind: ZoneKind) -> pd.DataFrame:
-    """§7.3 y §7.4 — altura de una zona en las tres unidades, por año.
+    """§7.3, §7.4 y §7.4b — altura de una zona en las tres unidades, por año.
 
     El UL añade dos columnas que el PUL no puede tener: las zonas de altura cero
-    —la vela del extremo no tenía mecha— y las estiradas a la vela siguiente.
+    —la vela del extremo no tenía mecha— y las estiradas a la vela siguiente. El
+    APUL también es tramo de mecha, así que lleva la primera y no la segunda: no
+    se estira nunca.
     """
     units = [f"{name}_p{value}" for name, _ in HEIGHT_UNITS for value in HEIGHT_PERCENTILES]
     columns = ["anio", "n", *units]
     if kind is ZoneKind.LAST:
         columns += ["altura_cero", "pct_altura_cero", "extendidas", "pct_extendidas"]
+    elif kind is ZoneKind.ANTE_PENULTIMATE:
+        # El APUL es tramo de mecha como el UL, así que puede salir plano —la
+        # vela no tenía mecha en ese lado—, cosa que al PUL no le pasa.
+        columns += ["altura_cero", "pct_altura_cero"]
 
     table = measurement.table
     if table.empty:
@@ -468,11 +548,12 @@ def heights_by_year(measurement: TimeframeZones, kind: ZoneKind) -> pd.DataFrame
             values = _clean(group[column])
             for value in HEIGHT_PERCENTILES:
                 item[f"{name}_p{value}"] = _percentile(values, value)
-        if kind is ZoneKind.LAST:
+        if kind in (ZoneKind.LAST, ZoneKind.ANTE_PENULTIMATE):
             flat = int(group["altura_cero"].sum())
-            extended = int(group["extendida_a_vela_siguiente"].fillna(False).sum())
             item["altura_cero"] = flat
             item["pct_altura_cero"] = flat / len(group) if len(group) else float("nan")
+        if kind is ZoneKind.LAST:
+            extended = int(group["extendida_a_vela_siguiente"].fillna(False).sum())
             item["extendidas"] = extended
             item["pct_extendidas"] = extended / len(group) if len(group) else float("nan")
         return item
@@ -581,7 +662,9 @@ def overlap_profile(measurement: TimeframeZones) -> pd.DataFrame:
     """
     columns = ["poblacion", "pares", "rango_id_atr_mediano", "ul_mediana_atr", "pul_mediana_atr"]
     pairs = [
-        (item, item.penultimate) for item in measurement.items if item.penultimate is not None
+        (item, zone)
+        for item in measurement.items
+        if (zone := item.against) is not None
     ]
     if not pairs:
         return pd.DataFrame(columns=columns)
@@ -618,7 +701,7 @@ def overlap_profile(measurement: TimeframeZones) -> pd.DataFrame:
 def overlaps(measurement: TimeframeZones) -> pd.DataFrame:
     """§7.6 — ID cuyas dos zonas se pisan en precio."""
     columns = ["anio", "pares", "se_solapan", "pct_solape"]
-    pairs = [item for item in measurement.items if item.has_penultimate]
+    pairs = [item for item in measurement.items if item.against is not None]
     if not pairs:
         return pd.DataFrame(columns=columns)
 

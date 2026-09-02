@@ -72,7 +72,7 @@ def test_los_cinco_lotes_del_enunciado(zones: ZonesRun) -> None:
         "bien_formados_alcista",
         "bien_formados_bajista",
         "ul_extendido",
-        "sin_pul",
+        "sin_zona_en_contra",
         "ul_altura_cero",
         "pul_mas_alto",
         "pul_mas_bajo",
@@ -99,7 +99,7 @@ def test_los_bien_formados_son_de_h4_y_tienen_las_dos_zonas(zones: ZonesRun) -> 
 def test_cada_lote_selecciona_lo_que_promete(zones: ZonesRun) -> None:
     lots = dict(_lots(zones))
     assert all(zoned.last.extended for _, zoned in lots["ul_extendido"])
-    assert all(not zoned.has_penultimate for _, zoned in lots["sin_pul"])
+    assert all(zoned.against is None for _, zoned in lots["sin_zona_en_contra"])
     assert all(zoned.last.is_flat for _, zoned in lots["ul_altura_cero"])
 
 
@@ -190,24 +190,36 @@ def test_el_subtitulo_lleva_las_dos_alturas_y_las_dos_horas(
     assert "UTC" in texto and "Europe/Athens" in texto
 
 
-def test_un_id_sin_pul_lo_dice_en_la_nota(run: ImpulseRun, zones: ZonesRun) -> None:
-    sin_pul = zones.per_timeframe[H4].without_penultimate
-    if not sin_pul:
-        pytest.skip("esta fixture no produjo ningún ID sin PUL")
-    _, nota = _figure(run.analyses[H4], sin_pul[0], "UTC")
-    assert "no tiene PUL" in nota
+def test_un_id_sin_zona_en_contra_lo_dice_en_la_nota(
+    run: ImpulseRun, zones: ZonesRun
+) -> None:
+    sin_zona = zones.per_timeframe[H4].without_against_zone
+    if not sin_zona:
+        pytest.skip("esta fixture no produjo ningún ID sin zona en contra")
+    _, nota = _figure(run.analyses[H4], sin_zona[0], "UTC")
+    assert "ni PUL ni APUL" in nota
 
 
-def test_un_id_sin_pul_dibuja_solo_su_ul(run: ImpulseRun, zones: ZonesRun) -> None:
-    """Sin ID anterior no hay zona que dibujar, y no se inventa una candidata."""
+def test_un_id_con_apul_lo_dice_en_la_nota(run: ImpulseRun, zones: ZonesRun) -> None:
+    """El APUL no es un PUL: la captura tiene que decir cuál está viendo."""
+    con_apul = zones.per_timeframe[H4].with_ante_penultimate
+    assert con_apul, "sin APUL en la fixture no hay nada que auditar"
+    _, nota = _figure(run.analyses[H4], con_apul[0], "UTC")
+    assert "APUL" in nota
+
+
+def test_un_id_sin_zona_en_contra_dibuja_solo_su_ul(
+    run: ImpulseRun, zones: ZonesRun
+) -> None:
+    """Sin ID contrario detrás no hay zona que dibujar, y no se inventa una."""
     analysis = run.analyses[H4]
-    sin_pul = zones.per_timeframe[H4].without_penultimate
-    if not sin_pul:
-        pytest.skip("esta fixture no produjo ningún ID sin PUL")
+    sin_zona = zones.per_timeframe[H4].without_against_zone
+    if not sin_zona:
+        pytest.skip("esta fixture no produjo ningún ID sin zona en contra")
 
-    for zoned in sin_pul[:10]:
+    for zoned in sin_zona[:10]:
         figure, nota = _figure(analysis, zoned, "UTC")
-        assert "no tiene PUL" in nota
+        assert "ni PUL ni APUL" in nota
         rectangulos = [shape for shape in figure.layout.shapes if shape.type == "rect"]
         # Sólo los del UL: el tramo atenuado y el relleno.
         assert len(rectangulos) <= 2

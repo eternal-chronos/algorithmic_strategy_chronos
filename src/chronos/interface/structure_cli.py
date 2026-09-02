@@ -449,16 +449,18 @@ def _print_zones(zones: ZonesRun) -> None:
     table.add_column("Temporalidad", style="dim")
     table.add_column("ID", justify="right")
     table.add_column("Con PUL", justify="right")
-    table.add_column("SIN PUL", justify="right")
+    table.add_column("Con APUL", justify="right")
+    table.add_column("SIN ZONA", justify="right")
     table.add_column("UL altura cero", justify="right")
     table.add_column("UL extendidos", justify="right")
     for timeframe, item in zones.per_timeframe.items():
         total = len(item.items)
-        without = len(item.without_penultimate)
+        without = len(item.without_against_zone)
         table.add_row(
             timeframe,
             f"{total:,}",
             f"{len(item.with_penultimate):,}",
+            f"{len(item.with_ante_penultimate):,}",
             f"{without:,} ({without / total:.1%})" if total else "—",
             f"{sum(1 for zoned in item.items if zoned.last.is_flat):,}",
             f"{sum(1 for zoned in item.items if zoned.last.extended):,}",
@@ -466,8 +468,8 @@ def _print_zones(zones: ZonesRun) -> None:
     console.print("\n[bold]Zonas de la fase 2.0:[/bold]")
     console.print(table)
     console.print(
-        "[dim]El % sin PUL es la cifra que manda: en la fase 2.1 esos ID se romperán "
-        "por línea.[/dim]"
+        "[dim]El % SIN ZONA es la cifra que manda: en la fase 2.1 esos ID —ni PUL ni "
+        "APUL— se romperán por línea en el lado en contra.[/dim]"
     )
 
 

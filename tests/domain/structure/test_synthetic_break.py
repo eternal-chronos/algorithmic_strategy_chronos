@@ -25,6 +25,8 @@ from chronos.domain.structure.enums import (
 from chronos.domain.structure.errors import LookaheadError
 from chronos.domain.structure.synthetic_break import (
     MIRROR_CENTRE,
+    SYNTHETIC_ANTE_DOWN,
+    SYNTHETIC_ANTE_UP,
     SYNTHETIC_BREAK_DOWN,
     SYNTHETIC_BREAK_UP,
     SYNTHETIC_OVERLAP_DOWN,
@@ -496,3 +498,151 @@ def test_sin_la_regla_nueva_esa_misma_vela_no_constituye() -> None:
     assert fallida.new_leg_direction is ImpulseDirection.BAJISTA
     assert fallida.level == pytest.approx(1978.00)
     assert fallida.level_source is BreakLevelSource.LINE
+
+
+# --- Casos 11, 12 y 13: el APUL ----------------------------------------------
+
+
+def test_caso_11_el_id_que_continua_tendencia_lleva_apul_y_no_pul() -> None:
+    """El ID#2 nace de un giro y lleva PUL; el ID#3 continúa y lleva APUL.
+
+    La regla es una sola: el nivel en contra es el último extremo del SENTIDO
+    OPUESTO. Para el ID#2 alcista ése es el extremo del ID#1 bajista, que es el
+    anterior, así que se llama PUL. Para el ID#3 alcista el anterior es el ID#2,
+    también alcista, y su extremo (2005) cae arriba: hay que retroceder al ID#1.
+    """
+    _, detector = run_break(SYNTHETIC_ANTE_UP)
+    primero, segundo, tercero = detector.impulses
+
+    assert primero.direction is ImpulseDirection.BAJISTA
+    assert segundo.direction is ImpulseDirection.ALCISTA
+    assert tercero.direction is ImpulseDirection.ALCISTA
+
+    assert primero.against_source is BreakLevelSource.LINE
+    assert primero.index_penultimate is None
+    assert primero.index_ante_penultimate is None
+
+    assert segundo.against_source is BreakLevelSource.PENULTIMATE
+    assert segundo.index_penultimate == 2
+    assert segundo.index_ante_penultimate is None
+
+    assert tercero.against_source is BreakLevelSource.ANTE_PENULTIMATE
+    # La vela del APUL es la MISMA que la del PUL del ID#2 —el extremo del ID#1—,
+    # leída del otro lado: el PUL toma el cuerpo y el APUL, la mecha.
+    assert tercero.index_ante_penultimate == 2
+    assert tercero.index_against == 2
+
+
+def test_caso_11_el_apul_es_la_mecha_y_el_pul_de_la_misma_vela_es_el_cuerpo() -> None:
+    """a2 vale para los dos, y cada zona lee de ella una cosa distinta."""
+    series, detector = run_break(SYNTHETIC_ANTE_UP)
+    niveles = ZoneBreakLevels(series, timeframe="H4")
+    niveles.advance(len(series) - 1)
+
+    pul = niveles.penultimate_level(
+        direction=ImpulseDirection.ALCISTA,
+        anchor=1976.00,
+        index_penultimate=2,
+        through=11,
+    )
+    assert pul.source is BreakLevelSource.PENULTIMATE
+    assert pul.inner == pytest.approx(1986.00)  # cuerpo alto de a2
+    assert pul.price == pytest.approx(1976.00)  # cuerpo bajo de a2
+
+    apul = niveles.ante_penultimate_level(
+        direction=ImpulseDirection.ALCISTA,
+        anchor=2003.00,
+        index_ante_penultimate=2,
+        through=11,
+    )
+    assert apul.source is BreakLevelSource.ANTE_PENULTIMATE
+    assert apul.inner == pytest.approx(1976.00)  # cuerpo bajo de a2: donde acaba el PUL
+    assert apul.price == pytest.approx(1975.00)  # punta de la mecha de a2
+    assert apul.line == pytest.approx(2003.00)
+    assert not apul.is_flat
+
+    assert detector.impulses[2].anchor == pytest.approx(2003.00)
+
+
+def test_caso_12_cierre_bajo_la_linea_pero_dentro_del_apul_no_rompe() -> None:
+    """a10 cierra en 1990: bajo el ancla 2003 y muy por encima del borde 1975."""
+    _, detector = run_break(SYNTHETIC_ANTE_UP)
+    evitadas = [item for item in detector.avoided_breaks if item.index == 10]
+
+    assert len(evitadas) == 1
+    evitada = evitadas[0]
+    assert evitada.kind is BreakKind.EN_CONTRA
+    assert evitada.zone is ZoneKind.ANTE_PENULTIMATE
+    assert evitada.close == pytest.approx(1990.00)
+    assert evitada.line == pytest.approx(2003.00)
+    assert evitada.zone_inner == pytest.approx(1976.00)
+    assert evitada.zone_outer == pytest.approx(1975.00)
+    # El lado en contra no estira nada: el ancla la fija el arranque de la pierna.
+    assert evitada.extended_extreme is False
+    # Y el ID sigue vivo después de a10: muere una vela más tarde, no aquí.
+    assert detector.impulses[2].index_end == 11
+
+
+def test_caso_13_cierre_mas_alla_del_apul_mata_el_id() -> None:
+    """a11 cierra en 1974.50, por debajo de la punta de la mecha de a2 (1975)."""
+    _, detector = run_break(SYNTHETIC_ANTE_UP)
+    tercero = detector.impulses[2]
+
+    assert tercero.index_end == 11
+    assert tercero.exit_break_kind is BreakKind.EN_CONTRA
+    assert tercero.exit_level_source is BreakLevelSource.ANTE_PENULTIMATE
+
+    rotura = detector.events[-1]
+    assert rotura.broken_id_num == tercero.id_num
+    assert rotura.level_source is BreakLevelSource.ANTE_PENULTIMATE
+    assert rotura.level == pytest.approx(1975.00)
+    assert rotura.line == pytest.approx(2003.00)
+    assert rotura.close == pytest.approx(1974.50)
+
+
+def test_el_recuento_de_gobiernos_del_lado_en_contra_suma_los_impulsos() -> None:
+    _, detector = run_break(SYNTHETIC_ANTE_UP)
+    diagnostico = detector.diagnostics
+
+    assert diagnostico["impulsos_con_pul"] == 1
+    assert diagnostico["impulsos_con_apul"] == 1
+    assert diagnostico["impulsos_sin_zona_en_contra"] == 1
+    total = (
+        diagnostico["impulsos_con_pul"]
+        + diagnostico["impulsos_con_apul"]
+        + diagnostico["impulsos_sin_zona_en_contra"]
+    )
+    assert total == len(detector.impulses)
+
+
+def test_el_apul_no_se_clasifica_distinto_con_las_zonas_apagadas() -> None:
+    """`BREAK_BY_ZONE` decide si la zona MANDA, no cuál es.
+
+    Con el interruptor apagado la rotura vuelve a ser por línea y la historia es
+    otra, pero cada ID sigue sabiendo qué zona le tocaría: es lo que la fase 2.0
+    mide y dibuja sin cambiar ni un impulso.
+    """
+    _, detector = run_break(SYNTHETIC_ANTE_UP, break_by_zone=False)
+    fuentes = [impulse.against_source for impulse in detector.impulses]
+
+    assert BreakLevelSource.ANTE_PENULTIMATE in fuentes
+    assert all(
+        impulse.exit_level_source in (None, BreakLevelSource.LINE)
+        for impulse in detector.impulses
+    )
+
+
+def test_el_espejo_del_apul_produce_la_historia_reflejada() -> None:
+    """La serie bajista no se escribe a mano: es la alcista en el espejo."""
+    _, alcista = run_break(SYNTHETIC_ANTE_UP)
+    _, bajista = run_break(SYNTHETIC_ANTE_DOWN)
+
+    assert len(alcista.impulses) == len(bajista.impulses)
+    for arriba, abajo in zip(alcista.impulses, bajista.impulses, strict=True):
+        assert abajo.direction is arriba.direction.opposite()
+        assert abajo.against_source is arriba.against_source
+        assert abajo.index_against == arriba.index_against
+        assert abajo.anchor == pytest.approx(_mirrored(arriba.anchor))
+        assert abajo.extreme == pytest.approx(_mirrored(arriba.extreme))
+        assert abajo.index_end == arriba.index_end
+        assert abajo.exit_level_source is arriba.exit_level_source
