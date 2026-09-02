@@ -1,4 +1,4 @@
-"""Zonas UL y OB sobre una corrida completa (fase 2.0).
+"""Zonas UL y PUL sobre una corrida completa (fase 2.0).
 
 Lo que más se comprueba aquí no es lo que las zonas producen sino lo que **no**
 tocan: con el interruptor apagado la fase 1 tiene que salir byte a byte como
@@ -157,13 +157,14 @@ def test_los_id_de_calentamiento_no_llevan_zonas(
         assert not (sin_publicar & publicados)
 
 
-def test_el_ob_solo_esta_si_se_confirmo(measured: ZonesRun) -> None:
+def test_el_pul_esta_en_todos_menos_en_el_primero(measured: ZonesRun) -> None:
     item = measured.per_timeframe[H4]
-    obs = item.table[item.table["tipo"] == ZoneKind.ORDER_BLOCK.value]
+    puls = item.table[item.table["tipo"] == ZoneKind.PENULTIMATE.value]
 
-    assert len(obs) == len(item.with_order_block)
-    assert obs["ts_confirmacion"].notna().all()
-    assert set(obs["id_num"]) == {zoned.id_num for zoned in item.with_order_block}
+    assert len(puls) == len(item.with_penultimate)
+    assert set(puls["id_num"]) == {zoned.id_num for zoned in item.with_penultimate}
+    # Sólo el primer ID publicado se queda sin PUL.
+    assert len(item.without_penultimate) <= 1
 
 
 def test_las_tres_unidades_de_altura_estan_siempre(measured: ZonesRun) -> None:
@@ -184,13 +185,13 @@ def test_la_altura_es_la_distancia_entre_los_dos_bordes(measured: ZonesRun) -> N
 
 
 def test_solo_el_ul_declara_si_se_extendio(measured: ZonesRun) -> None:
-    """En el OB la columna va a `None`: decir "no se extendió" sugeriría que podía."""
+    """En el PUL la columna va a `None`: decir "no se extendió" sugeriría que podía."""
     table = measured.table()
     uls = table[table["tipo"] == ZoneKind.LAST.value]
-    obs = table[table["tipo"] == ZoneKind.ORDER_BLOCK.value]
+    puls = table[table["tipo"] == ZoneKind.PENULTIMATE.value]
 
     assert uls["extendida_a_vela_siguiente"].isin([True, False]).all()
-    assert obs["extendida_a_vela_siguiente"].isna().all()
+    assert puls["extendida_a_vela_siguiente"].isna().all()
 
 
 def test_ninguna_zona_nace_antes_de_su_id(run: ImpulseRun, measured: ZonesRun) -> None:
@@ -206,19 +207,24 @@ def test_ninguna_zona_nace_antes_de_su_id(run: ImpulseRun, measured: ZonesRun) -
             assert nacimiento >= constituciones[int(id_num)]
 
 
-def test_el_ob_nace_cuando_se_confirma_si_es_mas_tarde(measured: ZonesRun) -> None:
+def test_el_pul_nace_con_su_id_y_su_vela_queda_detras(measured: ZonesRun) -> None:
+    """No espera a nada: la vela que lo define cerró antes de que el ID naciera."""
     table = measured.table()
-    obs = table[table["tipo"] == ZoneKind.ORDER_BLOCK.value]
-    for confirmacion, constitucion, nacimiento in zip(
-        obs["ts_confirmacion"], obs["ts_constitucion_id"], obs["ts_nacimiento_zona"], strict=True
+    puls = table[table["tipo"] == ZoneKind.PENULTIMATE.value]
+    for definitoria, constitucion, nacimiento in zip(
+        puls["ts_vela_definitoria"],
+        puls["ts_constitucion_id"],
+        puls["ts_nacimiento_zona"],
+        strict=True,
     ):
-        assert nacimiento == max(confirmacion, constitucion)
+        assert nacimiento == constitucion
+        assert definitoria < constitucion
 
 
 def test_la_vela_definitoria_es_la_que_registro_la_fase_1(
     run: ImpulseRun, measured: ZonesRun
 ) -> None:
-    """Las zonas no re-derivan nada: usan `ts_extreme` y `ts_anchor` del detector."""
+    """Las zonas no re-derivan nada: usan `ts_extreme` y `ts_penultimate` del detector."""
     analysis = run.analyses[H4]
     por_id = {impulse.id_num: impulse for impulse in analysis.published}
     table = measured.per_timeframe[H4].table
@@ -228,7 +234,7 @@ def test_la_vela_definitoria_es_la_que_registro_la_fase_1(
     ):
         impulse = por_id[int(id_num)]
         esperado = (
-            impulse.ts_extreme if tipo == ZoneKind.LAST.value else impulse.ts_anchor
+            impulse.ts_extreme if tipo == ZoneKind.LAST.value else impulse.ts_penultimate
         )
         assert definitoria == esperado
 
@@ -236,10 +242,10 @@ def test_la_vela_definitoria_es_la_que_registro_la_fase_1(
 # --- Anti-lookahead sobre la corrida entera ---------------------------------
 
 
-def test_el_libro_de_cada_temporalidad_conoce_los_id_sin_ob(measured: ZonesRun) -> None:
+def test_el_libro_de_cada_temporalidad_conoce_los_id_sin_pul(measured: ZonesRun) -> None:
     for item in measured.per_timeframe.values():
-        assert item.book.without_order_block == {
-            zoned.id_num for zoned in item.without_order_block
+        assert item.book.without_penultimate == {
+            zoned.id_num for zoned in item.without_penultimate
         }
 
 
@@ -261,12 +267,7 @@ def test_la_cobertura_dice_que_todos_tienen_ul(measured: ZonesRun) -> None:
     total = tabla[tabla["anio"] == zone_tables.TOTAL_ROW].iloc[0]
 
     assert total["pct_ul"] == 1.0
-    assert total["con_ob"] + total["sin_ob"] == total["impulsos"]
-
-
-def test_la_demora_de_confirmacion_nunca_baja_de_una_barra(measured: ZonesRun) -> None:
-    tabla = zone_tables.confirmation_delay(measured.per_timeframe[H4])
-    assert (tabla["mediana"] >= 1).all()
+    assert total["con_pul"] + total["sin_pul"] == total["impulsos"]
 
 
 def test_la_comparativa_de_alturas_empareja_solo_los_id_con_las_dos_zonas(
@@ -276,25 +277,25 @@ def test_la_comparativa_de_alturas_empareja_solo_los_id_con_las_dos_zonas(
     tabla = zone_tables.height_comparison(item)
     total = tabla[tabla["anio"] == zone_tables.TOTAL_ROW].iloc[0]
 
-    assert total["pares"] == len(item.with_order_block)
-    assert total["ob_mayor"] + total["empates"] + total["ul_mayor"] == total["pares"]
+    assert total["pares"] == len(item.with_penultimate)
+    assert total["pul_mayor"] + total["empates"] + total["ul_mayor"] == total["pares"]
 
 
 def test_el_anticipo_de_la_fase_21_reparte_cada_rotura_a_su_zona(
     run: ImpulseRun, measured: ZonesRun
 ) -> None:
-    """A favor se cruza el extremo, y ahí está el UL; en contra, el ancla y el OB."""
+    """A favor se cruza el extremo, y ahí está el UL; en contra, el ancla y el PUL."""
     detalle = measured.per_timeframe[H4].survivals
     for tipo, zona in (
         (BreakKind.A_FAVOR.value, ZoneKind.LAST.value),
-        (BreakKind.EN_CONTRA.value, ZoneKind.ORDER_BLOCK.value),
+        (BreakKind.EN_CONTRA.value, ZoneKind.PENULTIMATE.value),
     ):
         subset = detalle[detalle["tipo_rotura"] == tipo]
         assert (subset["zona"] == zona).all()
 
 
-def test_una_rotura_sin_ob_no_cuenta_como_superviviente(measured: ZonesRun) -> None:
-    """Sin OB confirmado el ID se rompe por línea: no es lo mismo que cerrar fuera."""
+def test_una_rotura_sin_pul_no_cuenta_como_superviviente(measured: ZonesRun) -> None:
+    """Sin PUL el ID se rompe por línea: no es lo mismo que cerrar fuera."""
     detalle = measured.per_timeframe[H4].survivals
     sin_zona = detalle[detalle["sin_zona"]]
     assert not sin_zona["cerro_dentro"].any()

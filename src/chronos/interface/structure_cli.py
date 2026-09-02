@@ -278,7 +278,7 @@ def zones_evidence(
 
     Los mismos casos que cubre pytest, pero con las dos columnas a la vista y
     corridos sobre el histórico de verdad: el día sintético del §6 en sus dos
-    direcciones, el doji en posición de OB, las cuatro vías del `LookaheadError`,
+    direcciones, las cuatro vías del `LookaheadError`,
     el apagado y la regresión de la línea base **con las zonas encendidas**.
     """
     with _handled():
@@ -293,7 +293,7 @@ def zones_evidence(
                 if timeframe in run_config.charts.detected
             },
         )
-        console.print(render_evidence(collected, "Z. Evidencia de la fase 2.0 · zonas UL y OB"))
+        console.print(render_evidence(collected, "Z. Evidencia de la fase 2.0 · zonas UL y PUL"))
         if not collected.ok:
             raise typer.Exit(code=1)
 
@@ -315,7 +315,7 @@ def zones_command(
     ] = False,
     skip_tz_audit: Annotated[bool, typer.Option("--skip-tz-audit")] = False,
 ) -> None:
-    """Fase 2.0: detecta y dibuja las zonas UL y OB de cada impulso (§7 y §8).
+    """Fase 2.0: detecta y dibuja las zonas UL y PUL de cada impulso (§7 y §8).
 
     **Sólo detección.** No cambia la detección del impulso dominante, no cambia
     la regla de rotura —que sigue siendo por línea— y no emite ninguna señal. La
@@ -376,7 +376,7 @@ def zones_command(
         # los números. Es el mismo panel que imprime `zonas-evidencia`.
         evidence = zone_evidence.collect(run_config, aggregated)
         (output / "evidencia_zonas.txt").write_text(
-            render_evidence(evidence, "Z. Evidencia de la fase 2.0 · zonas UL y OB"), encoding="utf-8"
+            render_evidence(evidence, "Z. Evidencia de la fase 2.0 · zonas UL y PUL"), encoding="utf-8"
         )
         if not evidence.ok:
             console.print(
@@ -448,17 +448,17 @@ def _print_zones(zones: ZonesRun) -> None:
     table = Table(box=None, pad_edge=False)
     table.add_column("Temporalidad", style="dim")
     table.add_column("ID", justify="right")
-    table.add_column("Con OB", justify="right")
-    table.add_column("SIN OB", justify="right")
+    table.add_column("Con PUL", justify="right")
+    table.add_column("SIN PUL", justify="right")
     table.add_column("UL altura cero", justify="right")
     table.add_column("UL extendidos", justify="right")
     for timeframe, item in zones.per_timeframe.items():
         total = len(item.items)
-        without = len(item.without_order_block)
+        without = len(item.without_penultimate)
         table.add_row(
             timeframe,
             f"{total:,}",
-            f"{len(item.with_order_block):,}",
+            f"{len(item.with_penultimate):,}",
             f"{without:,} ({without / total:.1%})" if total else "—",
             f"{sum(1 for zoned in item.items if zoned.last.is_flat):,}",
             f"{sum(1 for zoned in item.items if zoned.last.extended):,}",
@@ -466,7 +466,7 @@ def _print_zones(zones: ZonesRun) -> None:
     console.print("\n[bold]Zonas de la fase 2.0:[/bold]")
     console.print(table)
     console.print(
-        "[dim]El % sin OB es la cifra que manda: en la fase 2.1 esos ID se romperán "
+        "[dim]El % sin PUL es la cifra que manda: en la fase 2.1 esos ID se romperán "
         "por línea.[/dim]"
     )
 
@@ -621,18 +621,19 @@ def entries_command(
     Lo único que produce es el explorador con la capa de la cascada encendida,
     para que el propietario mire si la máquina está viendo lo que ve él.
 
-    La búsqueda arranca en el toque del OB de un ID de H4 y baja a H1, donde se
-    espera a que el ID de H1 se ponga en la dirección del de H4 para marcar su OB;
-    la señal salta cuando el precio toca ese OB de H1, en el instante del toque y
+    La búsqueda arranca en el toque del PUL de un ID de H4 y baja a H1, donde se
+    espera a que el ID de H1 se ponga en la dirección del de H4 para marcar su PUL;
+    la señal salta cuando el precio toca ese PUL de H1, en el instante del toque y
     sin esperar al cierre de la vela, igual que en H4 y en el Diario. El Diario no
-    es un escalón, sólo prohíbe lo que vaya en contra de su OB mientras el precio
+    es un escalón, sólo prohíbe lo que vaya en contra de su PUL mientras el precio
     esté dentro de él.
 
-    Corre el módulo con las zonas encendidas, con la rotura por zona —que es la
-    regla vigente de la fase 2.1— y con **ID propio en H1**, que es lo que esta
-    fase añade al reparto: el hash de configuración es por tanto otro, y a
-    propósito, para que ninguna corrida de esta fase se confunda con la línea base
-    de la fase 1.
+    Corre el módulo con las zonas encendidas, con **ID propio en H1** —lo que esta
+    fase añade al reparto— y con la rotura **por línea**: el ID muere cuando una
+    vela de su misma temporalidad cierra más allá de su extremo o de su ancla, no
+    cuando el precio atraviesa el UL o el PUL. El hash de configuración es por
+    tanto otro, y a propósito, para que ninguna corrida de esta fase se confunda
+    con la línea base de la fase 1.
     """
     with _handled():
         corrida = _cascade_pipeline(config, skip_tz_audit)
@@ -659,7 +660,7 @@ def entries_command(
 def _cascade_pipeline(
     config: Path, skip_tz_audit: bool
 ) -> tuple[ImpulseConfig, ImpulseRun, ZonesRun, CascadeRun] | None:
-    """La corrida de la fase 3.0: rotura por zona, zonas encendidas e ID en H1.
+    """La corrida de la fase 3.0: rotura por línea, zonas encendidas e ID en H1.
 
     La comparten el explorador de la cascada y su estadística: son la misma
     corrida vista de dos maneras, y calcularla con configuraciones distintas
@@ -684,12 +685,18 @@ def _cascade_pipeline(
 
     cascade_config = replace(
         run_config,
-        rules=replace(run_config.rules, break_by_zone=True),
+        # El ID se rompe POR LÍNEA. Lo mata una vela de SU MISMA temporalidad que
+        # CIERRA más allá de una de sus dos líneas —el extremo por el lado a
+        # favor, el ancla por el contrario—: la mecha no cuenta, y una vela que
+        # la perfora y vuelve a cerrar dentro no rompe nada. Las zonas siguen
+        # encendidas porque de ellas cuelgan el toque del PUL y el veto diario,
+        # pero ya no deciden la vida del ID.
+        rules=replace(run_config.rules, break_by_zone=False),
         zones=ZonesConfig(enabled=True),
         charts=with_hourly_structure(run_config.charts),
     )
     console.print(
-        "[dim]Corrida con la rotura por ZONA, las zonas encendidas y "
+        "[dim]Corrida con la rotura por LÍNEA (cierre), las zonas encendidas y "
         "el ID de H1...[/dim]"
     )
     run = DetectDominantImpulses(cascade_config).execute(
@@ -719,6 +726,11 @@ def _print_cascade(cascade: CascadeRun) -> None:
     console.print("\n[bold]Cascada H4 → H1 (el Diario sólo veta):[/bold]")
     console.print(table)
     console.print(
+        f"[dim]Sólo se opera de {cascade.window.label}: fuera de esa franja no se "
+        "busca ni se señala nada, y lo descartado por la hora no se cuenta ni se "
+        "dibuja. El veto del Diario sí corre a todas horas.[/dim]"
+    )
+    console.print(
         "[dim]SON SEÑALES: no hay entradas, ni stops, ni targets, ni resultados. "
         "Se auditan en el explorador, capa «Cascada de entrada».[/dim]"
     )
@@ -745,8 +757,8 @@ def entries_stats(
     curva de capital. Ninguna cifra que salga de aquí es una rentabilidad.
 
     Contesta dos preguntas del propietario, cada una con su bloque: si bajar a H1
-    mejora los toques del OB de H4, y qué otras formas de confirmar en H1 dan
-    mejores números que esperar el toque de su OB.
+    mejora los toques del PUL de H4, y qué otras formas de confirmar en H1 dan
+    mejores números que esperar el toque de su PUL.
     """
     with _handled():
         corrida = _cascade_pipeline(config, skip_tz_audit)
@@ -778,9 +790,9 @@ def _print_study(study: SignalStudy) -> None:
     if study.funnel is not None:
         funnel = study.funnel
         console.print(
-            f"\nEmbudo: {funnel.touches:,} toques de OB de H4 "
+            f"\nEmbudo: {funnel.touches:,} toques de PUL de H4 "
             f"({funnel.vetoed:,} vetados por el Diario) → "
-            f"{funnel.confirmed:,} con OB de H1 confirmado → "
+            f"{funnel.confirmed:,} con PUL de H1 marcado → "
             f"[bold]{funnel.signalled:,} señales[/bold]."
         )
     for block in study.sections:

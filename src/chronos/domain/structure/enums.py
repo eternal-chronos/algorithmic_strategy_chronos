@@ -149,22 +149,23 @@ class BreakLevelSource(StrEnum):
     Con `BREAK_BY_ZONE = false` es siempre `linea` y la columna no dice nada
     nuevo. Con la regla nueva separa las dos formas de morir: atravesando una
     zona entera, o por línea porque en ese lado no había zona que la sustituyera
-    —lo que sólo le pasa al ancla de un ID cuyo OB nunca llegó a confirmarse—.
+    —lo que sólo le pasa al ancla del primer ID del histórico, que no tiene ID
+    anterior del que sacar su PUL—.
     """
 
     #: El nivel es la línea del ID: el extremo a favor, el ancla en contra.
     LINE = "linea"
     #: Borde exterior de la zona UL, pegada al extremo.
     LAST = "UL"
-    #: Borde exterior de la zona OB, la vela del ancla entera.
-    ORDER_BLOCK = "OB"
+    #: Borde exterior de la zona PUL: el cuerpo de la vela del extremo anterior.
+    PENULTIMATE = "PUL"
 
 
 class OverlapPriority(StrEnum):
     """Qué lado se evalúa primero cuando una vela rompe por los dos (fase 2.1).
 
-    Con las zonas UL y OB solapadas en precio —impulsos cuyo rango cabe dentro de
-    la vela del ancla— un mismo cierre puede quedar más allá de los dos bordes
+    Con las zonas UL y PUL solapadas en precio —impulsos cuyo rango cabe dentro de
+    el cuerpo del extremo anterior— un mismo cierre puede quedar más allá de los dos bordes
     exteriores a la vez. El orden decide de qué muere el ID y, con él, la
     dirección de la pierna que abre el limbo: no es cosmético mientras no se
     demuestre con datos que lo es. **El motor no elige**: los dos órdenes se

@@ -164,12 +164,12 @@ def _scope_block() -> str:
     return (
         f"{section('Alcance de esta fase')}\n\n"
         "Cambia la REGLA DE ROTURA del impulso dominante y nada más. No se ha tocado\n"
-        "cómo se detectan las zonas UL y OB (fase 2.0, ya auditada), ni el ancla, ni el\n"
+        "cómo se detectan las zonas UL y PUL (fase 2.0, ya auditada), ni el ancla, ni el\n"
         "modo de arranque de pierna, ni el corte de sesión. No hay FVG, ni señales, ni\n"
         "entradas, ni stops, ni targets, ni optimización de ningún parámetro.\n\n"
         "La regla nueva, literal:\n\n"
         "  lado a favor (extremo) -> manda el UL, que existe siempre\n"
-        "  lado en contra (ancla) -> manda el OB si está confirmado; si no, la línea\n"
+        "  lado en contra (ancla) -> manda el PUL si el ID tiene uno; si no, la línea\n"
         "  romper una zona     -> CERRAR más allá de su borde EXTERIOR, atravesándola\n"
         "                         entera. Perforarla con mecha y cerrar dentro no rompe;\n"
         "                         cerrar dentro tampoco.\n\n"
@@ -247,13 +247,13 @@ def _timeframe_block(timeframe: str, item: TimeframeBreakComparison) -> str:
         (
             "Con la regla nueva, morir 'por línea' significa una sola cosa: que en ese\n"
             "lado no había zona que sustituyera a la línea. Sólo le puede pasar al lado\n"
-            "en contra de un ID cuyo OB nunca llegó a confirmarse; el UL existe siempre."
+            "en contra del primer ID del histórico, que no tiene PUL; el UL existe siempre."
         ),
         render_table(item.breaks, formats=_BREAKS),
         "",
         section("6.8 · ZONAS SOLAPADAS · PRIORITARIA", level=2),
         (
-            "ID cuyas zonas UL y OB se pisan en precio, antes y después. La hipótesis a\n"
+            "ID cuyas zonas UL y PUL se pisan en precio, antes y después. La hipótesis a\n"
             "comprobar es que esos impulsos enanos desaparecen solos, porque nacían de\n"
             "roturas prematuras que la regla nueva ya no permite."
         ),
@@ -351,7 +351,7 @@ def _priority_block(comparison: BreakRuleComparison) -> str:
         "condiciones de rotura. Para cumplirlas hacen falta los dos bordes exteriores\n"
         "INVERTIDOS, y unas zonas que se pisan los tienen justo en el otro orden. En un\n"
         "ID alcista se cumple siempre\n\n"
-        "    borde exterior del UL >= extremo > ancla >= borde exterior del OB\n\n"
+        "    borde exterior del UL >= extremo > ancla >= borde exterior del PUL\n\n"
         "mientras el rango del ID sea positivo, y ninguna vela puede cerrar por encima\n"
         "del primero y por debajo del segundo a la vez. El orden sólo decide algo con\n"
         "impulsos de rango NO POSITIVO, que es lo que produce un hueco que se salta el\n"

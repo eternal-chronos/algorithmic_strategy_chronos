@@ -27,12 +27,10 @@ from chronos.domain.structure.synthetic_break import (
     MIRROR_CENTRE,
     SYNTHETIC_BREAK_DOWN,
     SYNTHETIC_BREAK_UP,
-    SYNTHETIC_ORDER_BLOCK_DOWN,
-    SYNTHETIC_ORDER_BLOCK_UP,
     SYNTHETIC_OVERLAP_DOWN,
     SYNTHETIC_OVERLAP_UP,
-    SYNTHETIC_WITHOUT_ORDER_BLOCK_DOWN,
-    SYNTHETIC_WITHOUT_ORDER_BLOCK_UP,
+    SYNTHETIC_PENULTIMATE_DOWN,
+    SYNTHETIC_PENULTIMATE_UP,
 )
 from chronos.domain.structure.zone_break import ZoneBreakLevels
 from chronos.domain.structure.zones import ZoneKind
@@ -168,87 +166,85 @@ def test_con_la_regla_vieja_el_primer_id_muere_dos_barras_antes() -> None:
     assert old.impulses[1].extreme == pytest.approx(2018.00)
 
 
-# --- Casos 4, 5 y 6: el lado en contra y el OB -------------------------------
+# --- Casos 4, 5 y 6: el lado en contra y el PUL ------------------------------
 
 
-def test_caso_4_las_tres_velas_contra_el_ob() -> None:
-    """c4 cierra dentro, c5 perfora con mecha y cierra dentro, c6 atraviesa."""
-    _, detector = run_break(SYNTHETIC_ORDER_BLOCK_UP)
-    avoided = [item for item in detector.avoided_breaks if item.id_num == 1]
-    first = detector.impulses[0]
+def test_caso_4_las_tres_velas_contra_el_pul() -> None:
+    """e8 cierra dentro, e9 perfora con mecha y cierra dentro, e10 atraviesa."""
+    _, detector = run_break(SYNTHETIC_PENULTIMATE_UP)
+    second = detector.impulses[1]
+    avoided = [item for item in detector.avoided_breaks if item.id_num == second.id_num]
 
-    assert [item.index for item in avoided] == [4, 5]
+    assert [item.index for item in avoided] == [8, 9]
     assert all(item.kind is BreakKind.EN_CONTRA for item in avoided)
-    assert all(item.zone is ZoneKind.ORDER_BLOCK for item in avoided)
-    assert avoided[0].line == pytest.approx(1995.00)
-    assert avoided[0].zone_inner == pytest.approx(2002.00)
-    assert avoided[0].zone_outer == pytest.approx(1980.00)
+    assert all(item.zone is ZoneKind.PENULTIMATE for item in avoided)
+    assert avoided[0].line == pytest.approx(1978.00)
+    assert avoided[0].zone_inner == pytest.approx(1986.00)
+    assert avoided[0].zone_outer == pytest.approx(1976.00)
     # Salvarse por el lado en contra no mueve nada: el ancla la fija la vela del
     # arranque de la pierna y esa vela no cambia.
     assert all(item.extended_extreme is False for item in avoided)
-    assert first.extreme_extensions == 0
+    assert second.extreme_extensions == 0
 
-    assert first.index_end == 6
-    assert first.exit_break_kind is BreakKind.EN_CONTRA
-    assert first.exit_level_source is BreakLevelSource.ORDER_BLOCK
-
-
-def test_caso_6_con_el_ob_confirmado_el_id_ya_no_muere_por_linea() -> None:
-    """c8 cierra en 2011, sobre la línea 2010, pero dentro del OB [2004, 2012]."""
-    _, detector = run_break(SYNTHETIC_ORDER_BLOCK_UP)
-    second = detector.impulses[1]
-    last = detector.avoided_breaks[-1]
-
-    assert second.direction is ImpulseDirection.BAJISTA
-    assert second.anchor == pytest.approx(2010.00)
-    assert second.index_anchor == 2
-    assert second.is_open  # sobrevive hasta el final de la serie
-    assert detector.state is MachineState.ID_VIGENTE
-
-    assert last.index == 8
-    assert last.id_num == 2
-    assert last.kind is BreakKind.EN_CONTRA
-    assert last.close == pytest.approx(2011.00)
-    assert last.line == pytest.approx(2010.00)
-    assert last.zone_inner == pytest.approx(2004.00)
-    assert last.zone_outer == pytest.approx(2012.00)
-
-
-def test_caso_5_sin_ob_confirmado_el_mismo_id_muere_por_linea() -> None:
-    """Las mismas velas, con la mecha del ancla fuera de alcance: no hay OB."""
-    _, detector = run_break(SYNTHETIC_WITHOUT_ORDER_BLOCK_UP)
-    second = detector.impulses[1]
-
-    # El ID es el mismo: el módulo 1 sólo mira cuerpos y ninguno ha cambiado.
-    assert second.direction is ImpulseDirection.BAJISTA
-    assert second.anchor == pytest.approx(2010.00)
-    assert second.index_constitution == 7
-    # Pero ahora c8 lo mata, y lo mata por línea.
-    assert second.index_end == 8
+    assert second.index_end == 10
     assert second.exit_break_kind is BreakKind.EN_CONTRA
-    assert second.exit_level_source is BreakLevelSource.LINE
+    assert second.exit_level_source is BreakLevelSource.PENULTIMATE
+
+
+def test_el_pul_es_el_cuerpo_de_la_vela_del_extremo_anterior() -> None:
+    """La vela del PUL del ID#2 es e2, la misma que llevaba el UL del ID#1."""
+    _, detector = run_break(SYNTHETIC_PENULTIMATE_UP)
+    first, second = detector.impulses[0], detector.impulses[1]
+
+    assert second.index_penultimate == 2 == first.index_extreme_at_constitution
+    assert first.index_penultimate is None
+
+
+def test_caso_6_con_el_pul_el_id_ya_no_muere_por_linea() -> None:
+    """e8 cierra en 1977, bajo la línea 1978, pero dentro del PUL [1976, 1986]."""
+    _, detector = run_break(SYNTHETIC_PENULTIMATE_UP)
+    second = detector.impulses[1]
+    saved = detector.avoided_breaks[0]
+
+    assert second.direction is ImpulseDirection.ALCISTA
+    assert second.anchor == pytest.approx(1978.00)
+    assert second.index_constitution == 7
+
+    assert saved.index == 8
+    assert saved.id_num == second.id_num
+    assert saved.kind is BreakKind.EN_CONTRA
+    assert saved.close == pytest.approx(1977.00)
+    assert saved.line == pytest.approx(1978.00)
+    # Con la regla de la fase 1 esta vela habría matado al ID.
+    assert saved.close < saved.line
+
+
+def test_caso_5_sin_pul_el_primer_id_muere_por_linea() -> None:
+    """El ID#1 no tiene ID anterior del que sacar zona: ese lado es la línea."""
+    _, detector = run_break(SYNTHETIC_PENULTIMATE_UP)
+    first = detector.impulses[0]
+
+    assert first.index_penultimate is None
+    assert first.index_end == 5
+    assert first.exit_break_kind is BreakKind.EN_CONTRA
+    assert first.exit_level_source is BreakLevelSource.LINE
     assert detector.diagnostics["roturas_en_contra_por_linea"] == 1
     assert detector.diagnostics["roturas_en_contra_por_zona"] == 1
 
 
-def test_las_dos_series_del_ob_solo_se_diferencian_en_el_ob() -> None:
-    """Mismos impulsos, mismas líneas, misma numeración: sólo cambia quién muere."""
-    _, with_ob = run_break(SYNTHETIC_ORDER_BLOCK_UP)
-    _, without = run_break(SYNTHETIC_WITHOUT_ORDER_BLOCK_UP)
+def test_solo_el_primer_id_se_queda_sin_pul() -> None:
+    """Todos los demás heredan el UL del que murió antes."""
+    _, detector = run_break(SYNTHETIC_PENULTIMATE_UP)
 
-    for left, right in zip(with_ob.impulses, without.impulses, strict=True):
-        assert left.id_num == right.id_num
-        assert left.direction is right.direction
-        assert left.index_constitution == right.index_constitution
-        assert left.anchor == pytest.approx(right.anchor)
-        assert left.extreme == pytest.approx(right.extreme)
+    sin_pul = [item.id_num for item in detector.impulses if item.index_penultimate is None]
+    assert sin_pul == [detector.impulses[0].id_num]
 
 
 # --- Caso 8: la vela que cumple las dos condiciones a la vez -----------------
 
 
 def test_caso_8_el_conflicto_lo_resuelve_overlap_priority() -> None:
-    """d5 cierra en 2060: sobre el borde del UL (2050) y bajo el del OB (2080)."""
+    """d5 cierra en 2060: sobre el borde del UL (2050) y bajo la línea (2090)."""
     _, favor = run_break(
         SYNTHETIC_OVERLAP_UP, overlap_priority=OverlapPriority.A_FAVOR_FIRST
     )
@@ -265,27 +261,27 @@ def test_caso_8_el_conflicto_lo_resuelve_overlap_priority() -> None:
 
     assert against.impulses[0].index_end == 5
     assert against.impulses[0].exit_break_kind is BreakKind.EN_CONTRA
-    assert against.impulses[0].exit_level_source is BreakLevelSource.ORDER_BLOCK
+    assert against.impulses[0].exit_level_source is BreakLevelSource.LINE
 
 
-def test_caso_8_el_conflicto_exige_rango_no_positivo_y_zonas_que_no_se_solapan() -> None:
-    """Lo que invierte los bordes no es el solape: es el hueco que cruza el ancla."""
+def test_caso_8_el_conflicto_exige_rango_no_positivo_y_niveles_separados() -> None:
+    """Lo que invierte los niveles no es el solape: es el hueco que cruza el ancla."""
     series, detector = run_break(SYNTHETIC_OVERLAP_UP)
     impulse = detector.impulses[0]
 
     assert impulse.range_usd == pytest.approx(-50.00)
     assert detector.diagnostics["impulsos_rango_no_positivo"] == 1
+    # El ID#1 es el primero del histórico: en el lado en contra manda la línea.
+    assert impulse.index_penultimate is None
 
     up = ImpulseDirection.ALCISTA
     ul_low = series.body_edge_towards(2, up)
     ul_high = series.wick_tip_towards(2, up)
-    ob_low = series.wick_tip_towards(0, up.opposite())
-    ob_high = series.wick_tip_towards(0, up)
     assert (ul_low, ul_high) == pytest.approx((2040.00, 2050.00))
-    assert (ob_low, ob_high) == pytest.approx((2080.00, 2105.00))
-    # Las dos zonas están separadas en precio. Un solape las habría hecho
-    # imposibles de cruzar a la vez, que es justo lo contrario de lo que se temía.
-    assert ul_high < ob_low
+    assert impulse.anchor == pytest.approx(2090.00)
+    # Los dos niveles están separados en precio y en el orden invertido: por eso
+    # una misma vela puede cerrar más allá de los dos.
+    assert ul_high < impulse.anchor
 
 
 # --- Caso 10: lo mismo del revés --------------------------------------------
@@ -295,8 +291,7 @@ def test_caso_8_el_conflicto_exige_rango_no_positivo_y_zonas_que_no_se_solapan()
     ("up", "down"),
     [
         (SYNTHETIC_BREAK_UP, SYNTHETIC_BREAK_DOWN),
-        (SYNTHETIC_ORDER_BLOCK_UP, SYNTHETIC_ORDER_BLOCK_DOWN),
-        (SYNTHETIC_WITHOUT_ORDER_BLOCK_UP, SYNTHETIC_WITHOUT_ORDER_BLOCK_DOWN),
+        (SYNTHETIC_PENULTIMATE_UP, SYNTHETIC_PENULTIMATE_DOWN),
         (SYNTHETIC_OVERLAP_UP, SYNTHETIC_OVERLAP_DOWN),
     ],
 )
@@ -341,8 +336,7 @@ def test_la_version_bajista_es_el_espejo_exacto(
     "candles",
     [
         SYNTHETIC_BREAK_UP,
-        SYNTHETIC_ORDER_BLOCK_UP,
-        SYNTHETIC_WITHOUT_ORDER_BLOCK_UP,
+        SYNTHETIC_PENULTIMATE_UP,
         SYNTHETIC_OVERLAP_UP,
     ],
 )
@@ -422,16 +416,16 @@ def test_lookahead_preguntar_los_niveles_de_rotura_en_limbo() -> None:
         detector.current_break_levels()
 
 
-def test_lookahead_el_ob_antes_de_que_su_vela_de_ancla_cierre() -> None:
-    series, _ = run_break(SYNTHETIC_ORDER_BLOCK_UP)
+def test_lookahead_el_pul_antes_de_que_su_vela_cierre() -> None:
+    series, _ = run_break(SYNTHETIC_PENULTIMATE_UP)
     levels = ZoneBreakLevels(series, timeframe="H4")
     levels.advance(4)
 
-    with pytest.raises(LookaheadError, match="la vela del ancla"):
-        levels.order_block_level(
-            direction=ImpulseDirection.BAJISTA,
-            anchor=2010.00,
-            index_anchor=4,
+    with pytest.raises(LookaheadError, match="la vela del PUL"):
+        levels.penultimate_level(
+            direction=ImpulseDirection.ALCISTA,
+            anchor=1978.00,
+            index_penultimate=4,
             through=3,
         )
 
@@ -455,41 +449,50 @@ def test_el_doji_no_rompe_ni_estira_el_extremo() -> None:
 
 # --- Nadie nace roto, también con la regla nueva ------------------------------
 
-#: La contraria cierra ENTRE la línea del ancla y el borde exterior del OB. Con
-#: la línea el ID nacería roto y no llega a nacer; con la zona el OB lo salva y
+#: La contraria cierra ENTRE la línea del ancla y el borde exterior del PUL. Con
+#: la línea el ID nacería roto y no llega a nacer; con la zona el PUL lo salva y
 #: nace igual que cualquier otro. Escrito a mano:
-#:   c0 (2000, 2010, 1998, 2004) verde · ancla A1 del ID = 2004 y OB = [1998, 2010]
-#:   c1 (2004, 2006, 2002, 2003) roja  · abre la pierna bajista
-#:   c2 (2003, 2004, 1990, 1992) roja  · extremo 1992; su 1990 < 1998 CONFIRMA el OB
-#:   c3 (1992, 2008, 1991, 2007) verde · contraria: 2007 > 2004 (línea) y < 2010 (OB)
+#:   f0 (1990, 1996, 1989, 1995) verde · semilla; ancla del ID#1 = 1995
+#:   f1 (1995, 1996, 1985, 1986) roja  · abre la pierna bajista
+#:   f2 (1986, 1987, 1975, 1976) roja  · extremo del ID#1; su cuerpo será el PUL#2
+#:   f3 (1976, 1981, 1975, 1980) verde · CONSTITUYE ID#1 bajista
+#:   f4 (1980, 1981, 1977, 1978) roja  · retroceso; ancla A1 del ID#2 = 1978
+#:   f5 (1978, 1998, 1977, 1997) verde · mata al ID#1 por línea y abre la alcista
+#:   f6 (1997, 2000, 1996, 1999) verde · extremo del ID#2
+#:   f7 (1999, 2000, 1976.50, 1977) roja · contraria: 1977 < 1978 (línea) y
+#:                                         > 1976 (borde exterior del PUL)
 BORN_BROKEN_ONLY_BY_LINE: tuple[tuple[float, float, float, float], ...] = (
-    (2000.00, 2010.00, 1998.00, 2004.00),
-    (2004.00, 2006.00, 2002.00, 2003.00),
-    (2003.00, 2004.00, 1990.00, 1992.00),
-    (1992.00, 2008.00, 1991.00, 2007.00),
+    (1990.00, 1996.00, 1989.00, 1995.00),
+    (1995.00, 1996.00, 1985.00, 1986.00),
+    (1986.00, 1987.00, 1975.00, 1976.00),
+    (1976.00, 1981.00, 1975.00, 1980.00),
+    (1980.00, 1981.00, 1977.00, 1978.00),
+    (1978.00, 1998.00, 1977.00, 1997.00),
+    (1997.00, 2000.00, 1996.00, 1999.00),
+    (1999.00, 2000.00, 1976.50, 1977.00),
 )
 
 
-def test_el_ob_confirmado_deja_nacer_al_id_que_la_linea_habria_impedido() -> None:
+def test_el_pul_deja_nacer_al_id_que_la_linea_habria_impedido() -> None:
     _, detector = run_break(BORN_BROKEN_ONLY_BY_LINE)
 
     assert detector.diagnostics["constituciones_abortadas_por_nacer_roto"] == 0
-    impulse = detector.impulses[0]
-    assert impulse.direction is ImpulseDirection.BAJISTA
-    assert impulse.index_constitution == 3
-    assert impulse.anchor == pytest.approx(2004.00)
-    assert impulse.extreme == pytest.approx(1992.00)
+    impulse = detector.impulses[1]
+    assert impulse.direction is ImpulseDirection.ALCISTA
+    assert impulse.index_constitution == 7
+    assert impulse.anchor == pytest.approx(1978.00)
+    assert impulse.index_penultimate == 2
 
 
 def test_sin_la_regla_nueva_esa_misma_vela_no_constituye() -> None:
-    """Las mismas velas por línea: 2007 ya está más allá del ancla, no nace nada."""
+    """Las mismas velas por línea: 1977 ya está más allá del ancla, el ID#2 no nace."""
     _, detector = run_break(BORN_BROKEN_ONLY_BY_LINE, break_by_zone=False)
 
-    assert detector.impulses == ()
+    assert len(detector.impulses) == 1  # sólo el ID#1, que sí nació
     assert detector.diagnostics["constituciones_abortadas_por_nacer_roto"] == 1
     fallida = detector.aborted_constitutions[0]
-    assert fallida.index == 3
-    assert fallida.aborted_direction is ImpulseDirection.BAJISTA
-    assert fallida.new_leg_direction is ImpulseDirection.ALCISTA
-    assert fallida.level == pytest.approx(2004.00)
+    assert fallida.index == 7
+    assert fallida.aborted_direction is ImpulseDirection.ALCISTA
+    assert fallida.new_leg_direction is ImpulseDirection.BAJISTA
+    assert fallida.level == pytest.approx(1978.00)
     assert fallida.level_source is BreakLevelSource.LINE

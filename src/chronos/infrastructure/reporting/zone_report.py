@@ -1,4 +1,4 @@
-"""Informe de la fase 2.0 en texto plano (§7): zonas UL y OB.
+"""Informe de la fase 2.0 en texto plano (§7): zonas UL y PUL.
 
 Se lee junto a las capturas del propietario, así que dice siempre lo mismo antes
 de cualquier número: que esta fase **sólo detecta y dibuja**, que ninguna zona ha
@@ -30,13 +30,8 @@ _COUNT = ",d"
 _PCT = ".1%"
 
 _COVERAGE = {
-    "impulsos": _COUNT, "con_ul": _COUNT, "con_ob": _COUNT, "sin_ob": _COUNT,
-    "pct_ul": _PCT, "pct_ob": _PCT, "pct_sin_ob": _PCT,
-}
-_DELAY = {
-    "n": _COUNT, "mediana": ",.1f", "p10": ",.1f", "p90": ",.1f", "maximo": ",.0f",
-    "mediana_desde_constitucion": ",.1f", "ya_confirmado_al_nacer": _COUNT,
-    "pct_ya_confirmado": _PCT,
+    "impulsos": _COUNT, "con_ul": _COUNT, "con_pul": _COUNT, "sin_pul": _COUNT,
+    "pct_ul": _PCT, "pct_pul": _PCT, "pct_sin_pul": _PCT,
 }
 _HEIGHTS = {
     "n": _COUNT,
@@ -47,13 +42,13 @@ _HEIGHTS = {
     "extendidas": _COUNT, "pct_extendidas": _PCT,
 }
 _COMPARISON = {
-    "pares": _COUNT, "ul_mediana_atr": ",.3f", "ob_mediana_atr": ",.3f",
-    "ob_mayor": _COUNT, "pct_ob_mayor": _PCT, "empates": _COUNT,
+    "pares": _COUNT, "ul_mediana_atr": ",.3f", "pul_mediana_atr": ",.3f",
+    "pul_mayor": _COUNT, "pct_pul_mayor": _PCT, "empates": _COUNT,
     "ul_mayor": _COUNT, "pct_ul_mayor": _PCT,
 }
 _OVERLAP = {"pares": _COUNT, "se_solapan": _COUNT, "pct_solape": _PCT}
 _PROFILE = {
-    "pares": _COUNT, "ul_mediana_atr": ",.3f", "ob_mediana_atr": ",.3f",
+    "pares": _COUNT, "ul_mediana_atr": ",.3f", "pul_mediana_atr": ",.3f",
     "rango_id_atr_mediano": ",.3f", "ul_extendidos": _COUNT, "pct_extendidos": _PCT,
 }
 _SURVIVAL = {
@@ -62,7 +57,7 @@ _SURVIVAL = {
 }
 _SURVIVAL_YEAR = {
     "roturas": _COUNT, "favor_dentro": _COUNT, "favor_total": _COUNT,
-    "contra_dentro": _COUNT, "contra_total": _COUNT, "contra_sin_ob": _COUNT,
+    "contra_dentro": _COUNT, "contra_total": _COUNT, "contra_sin_pul": _COUNT,
     "sobrevivirian": _COUNT, "pct": _PCT,
 }
 
@@ -73,7 +68,7 @@ def render_zone_report(
     """Devuelve el informe completo de la fase 2.0 en texto plano."""
     if not zones.enabled:
         return (
-            "FASE 2.0 · ZONAS UL Y OB\n"
+            "FASE 2.0 · ZONAS UL Y PUL\n"
             "========================\n\n"
             "Las zonas están DESACTIVADAS por configuración (`zones.enabled: false`).\n"
             "No se ha calculado ninguna y el módulo 1 sale exactamente como en la fase 1.\n"
@@ -84,9 +79,8 @@ def render_zone_report(
         _header(run, zones, generated_at),
         _scope_block(),
         _coverage_block(zones),
-        _delay_block(zones),
         _height_block(zones, ZoneKind.LAST),
-        _height_block(zones, ZoneKind.ORDER_BLOCK),
+        _height_block(zones, ZoneKind.PENULTIMATE),
         _comparison_block(zones),
         _overlap_block(zones),
         _survival_block(zones),
@@ -115,7 +109,7 @@ def _header(run: ImpulseRun, zones: ZonesRun, generated_at: datetime) -> str:
         for timeframe, item in zones.per_timeframe.items()
     )
     return (
-        "FASE 2.0 · ZONAS UL Y OB · SÓLO DETECCIÓN\n"
+        "FASE 2.0 · ZONAS UL Y PUL · SÓLO DETECCIÓN\n"
         "=========================================\n\n"
         f"{body}\n\n"
         f"{counts}\n\n"
@@ -139,13 +133,13 @@ def _scope_block() -> str:
         "      cubre el cuerpo. Su borde interior es exactamente la línea del extremo.\n"
         "      Si la vela inmediatamente posterior llega más lejos en la misma\n"
         "      dirección, la zona se estira hasta ella: UNA vela de margen, no más.\n\n"
-        "  OB  la vela donde arranca la pierna, la que fija `precio_ancla`. La vela\n"
-        "      ENTERA, de `low` a `high`: a diferencia del UL, sí cubre el cuerpo. No\n"
-        "      existe hasta que una vela posterior DEL COLOR DEL IMPULSO la supera\n"
-        "      incluyendo mecha.\n\n"
+        "  PUL el extremo del ID ANTERIOR, sobre la misma vela que llevaba su UL:\n"
+        "      cuando un ID muere y nace el siguiente, el UL viejo se convierte en el\n"
+        "      PUL del nuevo. Es el CUERPO de esa vela, de un borde al otro, y no cubre\n"
+        "      ninguna mecha. Sólo el primer ID del histórico se queda sin él.\n\n"
         "`borde_interior` es el que un precio que sale del rango encuentra primero y\n"
         "`borde_exterior` el que tiene que cruzar para dejar la zona atrás. El UL se\n"
-        "recorre a favor del impulso y el OB en contra, que son los dos límites por los\n"
+        "recorre a favor del impulso y el PUL en contra, que son los dos límites por los\n"
         "que el módulo 1 ya rompe.\n"
     )
 
@@ -155,13 +149,13 @@ def _scope_block() -> str:
 
 def _coverage_block(zones: ZonesRun) -> str:
     lines = [
-        section("7.1 · ID CON UL Y CON OB CONFIRMADO  ***LA CIFRA QUE MANDA***"),
+        section("7.1 · ID CON UL Y CON PUL  ***LA CIFRA QUE MANDA***"),
         "",
         "El UL existe siempre: lo fija la misma vela que fija el extremo, y todo ID",
         "tiene extremo. Se cuenta igualmente porque cualquier cosa distinta del 100 %",
         "sería un fallo del motor y hay que poder verlo.",
         "",
-        ">>> `pct_sin_ob` ES LA CIFRA MÁS IMPORTANTE DE ESTA FASE. En la fase 2.1 esos",
+        ">>> `pct_sin_pul` ES LA CIFRA MÁS IMPORTANTE DE ESTA FASE. En la fase 2.1 esos",
         ">>> impulsos se romperán POR LÍNEA, porque no tienen zona con la que romper.",
         "",
     ]
@@ -175,38 +169,10 @@ def _coverage_block(zones: ZonesRun) -> str:
         ]
     lines += [
         "",
-        "Un ID se queda sin OB cuando ninguna vela del color del impulso llega a superar",
-        "la mecha de la vela del ancla mientras el ID está vigente. Ocurre cuando esa",
-        "vela tiene una mecha muy larga en la dirección del impulso: el ancla sale de su",
-        "cuerpo, pero la confirmación exige superar su mecha.",
+        "Un ID se queda sin PUL sólo cuando no hay ID anterior del que sacarlo, que es",
+        "el primero de cada temporalidad y nadie más. Cualquier otra cifra distinta de",
+        "uno por temporalidad sería un fallo del motor.",
     ]
-    return "\n".join(lines) + "\n"
-
-
-# --- 7.2 --------------------------------------------------------------------
-
-
-def _delay_block(zones: ZonesRun) -> str:
-    lines = [
-        section("7.2 · BARRAS QUE TARDA EL OB EN CONFIRMARSE"),
-        "",
-        "`mediana`, `p10`, `p90` y `maximo` se cuentan desde la VELA DEL OB, que es",
-        "cuando empieza la espera, y por eso nunca bajan de 1.",
-        "",
-        "`mediana_desde_constitucion` cuenta desde el nacimiento del ID y puede salir",
-        "NEGATIVA: significa que el OB ya estaba confirmado cuando el ID nació, porque",
-        "la vela que lo confirma suele ser la que arranca la pierna. `ya_confirmado_al",
-        "_nacer` cuenta cuántos están en ese caso.",
-        "",
-    ]
-    for timeframe, item in zones.per_timeframe.items():
-        lines += [
-            "",
-            f"--- {timeframe} ---",
-            "",
-            render_table(tables.confirmation_delay(item), formats=_DELAY),
-            "",
-        ]
     return "\n".join(lines) + "\n"
 
 
@@ -214,7 +180,7 @@ def _delay_block(zones: ZonesRun) -> str:
 
 
 def _height_block(zones: ZonesRun, kind: ZoneKind) -> str:
-    number, name = ("7.3", "UL") if kind is ZoneKind.LAST else ("7.4", "OB")
+    number, name = ("7.3", "UL") if kind is ZoneKind.LAST else ("7.4", "PUL")
     lines = [
         section(f"{number} · ALTURA DE LA ZONA {name} EN USD, ATR Y % DEL PRECIO"),
         "",
@@ -235,7 +201,7 @@ def _height_block(zones: ZonesRun, kind: ZoneKind) -> str:
     else:
         lines += [
             "",
-            "El OB no tiene columna de altura cero ni de extensión: cubre la vela entera,",
+            "El PUL no tiene columna de altura cero ni de extensión: cubre la vela entera,",
             "así que sólo sería plano si la vela no tuviera recorrido, y no se extiende",
             "nunca.",
         ]
@@ -256,11 +222,11 @@ def _height_block(zones: ZonesRun, kind: ZoneKind) -> str:
 
 def _comparison_block(zones: ZonesRun) -> str:
     lines = [
-        section("7.5 · ALTURA DEL UL FRENTE A LA DEL OB"),
+        section("7.5 · ALTURA DEL UL FRENTE A LA DEL PUL"),
         "",
-        "Sólo entran los ID que tienen las dos zonas. Se espera que el OB salga",
-        "sistemáticamente mayor, porque incluye el cuerpo de su vela mientras que el UL",
-        "ocupa sólo el tramo de mecha. `ul_mayor` cuenta las excepciones.",
+        "Sólo entran los ID que tienen las dos zonas. Se espera que el PUL salga",
+        "sistemáticamente mayor, porque es el cuerpo entero de su vela mientras que el",
+        "UL ocupa sólo el tramo de mecha. `ul_mayor` cuenta las excepciones.",
         "",
     ]
     for timeframe, item in zones.per_timeframe.items():
@@ -277,13 +243,10 @@ def _comparison_block(zones: ZonesRun) -> str:
         ]
     lines += [
         "",
-        "QUÉ SON LAS EXCEPCIONES. Aritméticamente, `UL > OB` es que la mecha de la vela",
-        "del extremo —más el margen, si la zona se extendió— sea más larga que TODA la",
-        "vela del ancla. La tabla de arriba separa las dos poblaciones para que se vea de",
-        "qué lado viene la diferencia. La extensión del UL apenas la explica: su",
-        "porcentaje se mueve poco entre una población y otra. Lo que cambia de verdad es",
-        "que en las excepciones el UL es mucho más alto de lo normal Y el OB, más bajo:",
-        "una vela de extremo con mechazo contra una vela de ancla pequeña.",
+        "QUÉ SON LAS EXCEPCIONES. Aritméticamente, `UL > PUL` es que la mecha de la vela",
+        "del extremo —más el margen, si la zona se extendió— sea más larga que el CUERPO",
+        "de la vela del extremo anterior. La tabla de arriba separa las dos poblaciones",
+        "para que se vea de qué lado viene la diferencia.",
     ]
     return "\n".join(lines) + "\n"
 
@@ -293,7 +256,7 @@ def _comparison_block(zones: ZonesRun) -> str:
 
 def _overlap_block(zones: ZonesRun) -> str:
     lines = [
-        section("7.6 · SOLAPE ENTRE LA ZONA UL Y LA ZONA OB DEL MISMO ID"),
+        section("7.6 · SOLAPE ENTRE LA ZONA UL Y LA ZONA PUL DEL MISMO ID"),
         "",
         "Se cuenta como solape que los dos intervalos de precio se toquen.",
         "",
@@ -312,14 +275,12 @@ def _overlap_block(zones: ZonesRun) -> str:
         ]
     lines += [
         "",
-        "POR QUÉ NO SALE CERO. El UL vive pegado al extremo y el OB a la vela del ancla,",
-        "que son los dos límites opuestos del rango: en un ID con recorrido no pueden",
-        "tocarse. La tabla de perfiles enseña de dónde salen los que sí se tocan sin que",
-        "haya que creerse nada — su rango de ID es unas tres veces menor que el de los",
-        "demás, mientras que las dos alturas son las de siempre. Son ID tan cortos que su",
-        "rango cabe dentro de la vela del ancla, así que la mecha del OB alcanza el",
-        "extremo. Es la misma población enana que la fase 1 ya contaba en C.5, mirada",
-        "desde otro sitio.",
+        "POR QUÉ NO SALE CERO. El UL vive pegado al extremo del ID y el PUL en el",
+        "extremo anterior, que son los dos límites opuestos del rango: en un ID con",
+        "recorrido no pueden tocarse. La tabla de perfiles enseña de dónde salen los que",
+        "sí se tocan sin que haya que creerse nada: son ID tan cortos que su rango cabe",
+        "dentro del cuerpo de la vela del extremo anterior. Es la misma población enana",
+        "que la fase 1 ya contaba en C.5, mirada desde otro sitio.",
     ]
     return "\n".join(lines) + "\n"
 
@@ -342,9 +303,9 @@ def _survival_block(zones: ZonesRun) -> str:
         "",
         "Qué zona le toca a cada rotura no es una elección: la rotura A FAVOR cruza el",
         "extremo, y la zona pegada al extremo es el UL; la rotura EN CONTRA cruza el",
-        "ancla, y la zona de la vela del ancla es el OB.",
+        "ancla, y la zona que hay detrás en ese lado es el PUL.",
         "",
-        ">>> `sin_zona` son roturas en contra de un ID SIN OB CONFIRMADO. Ésas no",
+        ">>> `sin_zona` son roturas en contra de un ID SIN PUL. Ésas no",
         ">>> sobreviven: sin zona, la fase 2.1 las rompe por línea. No es lo mismo que",
         ">>> cerrar fuera de la zona, y por eso van en su propia columna.",
         "",
@@ -374,8 +335,7 @@ def _edge_cases_block(zones: ZonesRun) -> str:
         "",
         render_table(_edge_counts(zones), formats={
             "id": _COUNT, "ul_altura_cero": _COUNT, "ul_extendidos": _COUNT,
-            "sin_ob": _COUNT, "ob_doji": _COUNT, "ob_confirma_al_constituir": _COUNT,
-            "ob_ya_confirmado_al_nacer": _COUNT,
+            "sin_pul": _COUNT, "pul_doji": _COUNT, "pul_plano": _COUNT,
         }),
         "",
         "",
@@ -385,43 +345,27 @@ def _edge_cases_block(zones: ZonesRun) -> str:
         "que el ID no tiene UL, y sí lo tiene: lo que no tiene es mecha. Con la regla de",
         "la fase 2.1 esa zona se comportaría igual que la línea de la fase 1.",
         "",
-        "ID QUE MUERE SIN OB CONFIRMADO (`sin_ob`). Estado legítimo y registrado: el",
-        "libro de zonas distingue «no existe» de «no lo he calculado», y preguntarlo",
-        "lanza `LookaheadError` en vez de devolver nada. Es la cifra de 7.1.",
+        "ID SIN PUL (`sin_pul`). Sólo el primero de cada temporalidad, que no tiene ID",
+        "anterior del que sacarlo. Estado legítimo y registrado: el libro de zonas",
+        "distingue «no existe» de «no lo he calculado», y preguntarlo lanza",
+        "`LookaheadError` en vez de devolver nada. Es la cifra de 7.1.",
         "",
-        "LA VELA QUE CONFIRMA ES LA QUE CONSTITUYE (`ob_confirma_al_constituir`).",
-        "IMPOSIBLE POR CONSTRUCCIÓN, y por eso la columna sale en cero. La vela que",
-        "constituye un ID es la primera CONTRARIA a la pierna, y la dirección del ID es",
-        "la de la pierna: en un ID alcista constituye una vela roja. La confirmación del",
-        "OB exige una vela DEL COLOR DEL IMPULSO, verde en un ID alcista. Las dos",
-        "condiciones se excluyen. No se ha inventado una lectura alternativa: se ha",
-        "implementado la regla literal y se cuenta el resultado. Hay un test que fija la",
-        "imposibilidad para que salte si alguien cambia la regla.",
+        "DOJI EN POSICIÓN DE PUL (`pul_doji`). La vela del PUL es la que fijó el extremo",
+        "del ID anterior, y el módulo 1 declara el doji neutro: no mueve ningún extremo,",
+        "así que la columna sale en cero. Se cuenta igualmente porque cualquier otra",
+        "cifra sería un fallo del motor.",
         "",
-        "VARIAS VELAS PODRÍAN CONFIRMAR. Se toma la primera cronológicamente, como pide",
-        "el enunciado.",
-        "",
-        "DOJI EN POSICIÓN DE OB (`ob_doji`). DECISIÓN: el doji es un OB perfectamente",
-        "válido —la zona es la vela entera y la regla sólo mira el color de QUIEN la",
-        "supera, no el suyo— pero con el `ANCHOR_MODE = A1` del proyecto no puede",
-        "ocurrir, y por eso la columna sale en cero: A1 busca la última vela CONTRARIA",
-        "previa a la pierna, y `is_counter_to` no considera contrario a un doji. Con A2",
-        "sí ocurre, porque el ancla es la primera vela de la pierna y los dojis no cortan",
-        "la racha. El día sintético lo construye en las dos lecturas.",
-        "",
-        "EL OB YA CONFIRMADO AL NACER EL ID (`ob_ya_confirmado_al_nacer`). No es un caso",
-        "límite sino el caso corriente, y conviene tenerlo a la vista al leer 7.2: la",
-        "vela que confirma suele caer dentro de la pierna, antes de la constitución. La",
-        "zona no nace ahí de todos modos: durante el limbo no existe ninguna zona, así",
-        "que el OB nace con el ID.",
+        "PUL DE ALTURA CERO (`pul_plano`). La vela del extremo anterior abrió y cerró en",
+        "el mismo precio. DECISIÓN: la misma que en el UL —se conserva con los dos bordes",
+        "en el mismo precio— y entonces el lado en contra se comporta igual que la línea.",
     ]
     return "\n".join(lines) + "\n"
 
 
 def _edge_counts(zones: ZonesRun) -> pd.DataFrame:
     columns = [
-        "temporalidad", "id", "ul_altura_cero", "ul_extendidos", "sin_ob", "ob_doji",
-        "ob_confirma_al_constituir", "ob_ya_confirmado_al_nacer",
+        "temporalidad", "id", "ul_altura_cero", "ul_extendidos", "sin_pul", "pul_doji",
+        "pul_plano",
     ]
     rows = [
         {
@@ -429,23 +373,17 @@ def _edge_counts(zones: ZonesRun) -> pd.DataFrame:
             "id": len(item.items),
             "ul_altura_cero": sum(1 for zoned in item.items if zoned.last.is_flat),
             "ul_extendidos": sum(1 for zoned in item.items if zoned.last.extended),
-            "sin_ob": len(item.without_order_block),
-            "ob_doji": sum(
+            "sin_pul": len(item.without_penultimate),
+            "pul_doji": sum(
                 1
                 for zoned in item.items
-                if zoned.order_block is not None
-                and zoned.order_block.defining_body is BodyDirection.DOJI
+                if zoned.penultimate is not None
+                and zoned.penultimate.defining_body is BodyDirection.DOJI
             ),
-            "ob_confirma_al_constituir": sum(
+            "pul_plano": sum(
                 1
                 for zoned in item.items
-                if zoned.order_block is not None
-                and zoned.order_block.index_confirmation == zoned.index_constitution
-            ),
-            "ob_ya_confirmado_al_nacer": sum(
-                1
-                for zoned in item.items
-                if zoned.bars_to_confirmation is not None and zoned.bars_to_confirmation <= 0
+                if zoned.penultimate is not None and zoned.penultimate.is_flat
             ),
         }
         for timeframe, item in zones.per_timeframe.items()

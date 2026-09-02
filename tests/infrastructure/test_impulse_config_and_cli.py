@@ -277,3 +277,35 @@ def test_el_hash_de_la_corrida_queda_en_el_csv_y_en_run_json(workspace: Path) ->
     ).fingerprint()
     assert set(tabla["config_hash"]) == {esperado}
     assert esperado in (carpeta / "run.json").read_text(encoding="utf-8")
+
+
+# --- Fase 3.0 · con qué regla de rotura corre la cascada ---------------------
+
+
+def test_las_entradas_corren_con_la_rotura_por_linea(workspace: Path) -> None:
+    """El ID muere cuando una vela de su temporalidad CIERRA más allá de una de
+    sus dos líneas, no cuando el precio atraviesa el UL o el PUL.
+
+    La regla la fija la corrida de la fase, no el YAML: el explorador la declara
+    en su cabecera y es ahí donde se comprueba, porque es lo que lee quien audita.
+    """
+    salida = workspace / "fase30"
+    resultado = runner.invoke(
+        app,
+        [
+            "structure",
+            "entradas",
+            "--config",
+            str(workspace / "impulse.yaml"),
+            "--salida",
+            str(salida),
+        ],
+    )
+
+    assert resultado.exit_code == 0, resultado.stdout
+    assert "rotura por LÍNEA" in resultado.stdout
+    explorador = (salida / "explorador_entradas.html").read_text(encoding="utf-8")
+    assert "rotura por línea" in explorador
+    assert "rotura por ZONA" not in explorador
+    # Y las zonas siguen encendidas: de ellas cuelgan el toque del PUL y el veto.
+    assert '"hasZones":true' in explorador

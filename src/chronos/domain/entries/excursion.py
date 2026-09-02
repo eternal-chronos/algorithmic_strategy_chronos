@@ -9,7 +9,7 @@ recorrerlo antes de que la señal quedara desmentida.
 **La vara es `R`**: la distancia del precio de la señal al borde **exterior** de
 la zona que la produjo, que es el sitio donde esa señal deja de tener sentido —el
 precio ha atravesado la zona entera—. Medir en R es lo que permite poner en la
-misma tabla un OB de tres dólares y uno de treinta sin inventarse un tamaño de
+misma tabla un PUL de tres dólares y uno de treinta sin inventarse un tamaño de
 posición ni una gestión que todavía no existe.
 
 **Desmentir es cerrar, no perforar.** Igual que en la fase 2.1: la señal queda

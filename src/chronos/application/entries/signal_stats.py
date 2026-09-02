@@ -9,8 +9,8 @@ señal sin decidir todavía cómo se opera.
 **La vara.** Cada señal trae su propia zona, y `R` es la distancia del precio de
 la señal al borde **exterior** de esa zona: el sitio donde el precio ha
 atravesado la zona entera y la señal deja de significar nada. No es un stop —no
-hay stop— sino la unidad natural de esa señal, la que permite comparar un OB de
-H1 de tres dólares con un OB de H4 de treinta. Cuando dos grupos miden en R
+hay stop— sino la unidad natural de esa señal, la que permite comparar un PUL de
+H1 de tres dólares con un PUL de H4 de treinta. Cuando dos grupos miden en R
 distinto se dice: cada tabla lleva la mediana de R **en dólares** al lado, y una
 columna en ATR de H1 para poder compararlos con una vara común.
 
@@ -60,13 +60,13 @@ ATR_PERIOD = 14
 
 # --- Nombres de los grupos. Salen tal cual al informe -------------------------
 
-G_H4 = "H4 · toque del OB (sin bajar a H1)"
+G_H4 = "H4 · toque del PUL (sin bajar a H1)"
 G_H4_CON = "H4 · toques que acabaron dando señal en H1"
 G_H4_SIN = "H4 · toques que no la dieron"
 G_H4_VETADO = "H4 · toques vetados por el Diario"
-G_SENAL = "SEÑAL · toque del OB de H1 (la del propietario)"
+G_SENAL = "SEÑAL · toque del PUL de H1 (la del propietario)"
 G_CONFIRMA = "H1 · confirmar y no esperar al toque"
-G_CIERRE = "H1 · primer cierre a favor dentro del OB de H4"
+G_CIERRE = "H1 · primer cierre a favor dentro del PUL de H4"
 G_AZAR = "AZAR · mismo riesgo y dirección, instante al azar"
 
 
@@ -229,7 +229,7 @@ class _Study:
                 StudySection(
                     title="¿Aporta algo bajar a H1?",
                     question=(
-                        "Todos medidos desde el toque del OB de H4 y con el R del OB "
+                        "Todos medidos desde el toque del PUL de H4 y con el R del PUL "
                         "de H4: misma vara y mismo punto de partida, así que la única "
                         "diferencia entre las filas es el filtro."
                     ),
@@ -253,7 +253,7 @@ class _Study:
                 StudySection(
                     title="Cortes de la señal del propietario",
                     question=(
-                        "La misma población del toque del OB de H1, partida en dos por "
+                        "La misma población del toque del PUL de H1, partida en dos por "
                         "cada criterio. Todas las filas comparten vara."
                     ),
                     groups=self._splits(signal),
@@ -276,8 +276,8 @@ class _Study:
     def _funnel(self) -> Funnel:
         searched = self._of(CascadeStep.BUSCAR_H1)
         vetoed = self._of(CascadeStep.H4_DESCARTADO)
-        confirmed = self._of(CascadeStep.CONFIRMA_OB_H1)
-        signalled = self._of(CascadeStep.TOQUE_OB_H1)
+        confirmed = self._of(CascadeStep.CONFIRMA_PUL_H1)
+        signalled = self._of(CascadeStep.TOQUE_PUL_H1)
         to_confirm: list[float] = []
         to_signal: list[float] = []
         for mark in confirmed:
@@ -312,8 +312,8 @@ class _Study:
                 groups[G_H4_VETADO].append(point)
 
         for origin in self._of(CascadeStep.BUSCAR_H1):
-            confirm = self._child(origin, CascadeStep.CONFIRMA_OB_H1)
-            touch = self._child(confirm, CascadeStep.TOQUE_OB_H1) if confirm else None
+            confirm = self._child(origin, CascadeStep.CONFIRMA_PUL_H1)
+            touch = self._child(confirm, CascadeStep.TOQUE_PUL_H1) if confirm else None
 
             base = self._touch_point(origin, G_H4)
             if base is not None:
@@ -425,7 +425,7 @@ class _Study:
         return point
 
     def _first_hourly_close(self, origin: CascadeMark) -> SignalPoint | None:
-        """Primer cierre de H1 a favor dentro del OB de H4, dentro de la ventana.
+        """Primer cierre de H1 a favor dentro del PUL de H4, dentro de la ventana.
 
         La confirmación tonta: una vela y su color, sin estructura ninguna. Está
         para saber cuánto de lo que se ve en H1 lo daría cualquier cosa.
@@ -477,7 +477,7 @@ class _Study:
             and confirm.low <= origin.high
             and origin.low <= confirm.high
         )
-        tags.add("OB de H1 solapa el de H4" if overlap else "OB de H1 fuera del de H4")
+        tags.add("PUL de H1 solapa el de H4" if overlap else "PUL de H1 fuera del de H4")
         waited = self._hourly_distance(origin.timestamp, touch.timestamp)
         tags.add(
             f"señal en ≤{FAST_BARS} velas H1"

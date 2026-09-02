@@ -3,7 +3,7 @@
 Un guardarraíl que nunca se ha visto saltar no es un guardarraíl: los tres
 primeros tests provocan `LookaheadError` a propósito por las tres vías que pide
 el enunciado, y el cuarto cubre la que salió de implementarlo —preguntar por un
-OB que nunca llegó a existir—.
+PUL que no existe porque el ID no tiene ninguno detrás—.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from chronos.domain.structure.zones import (
     ZoneBook,
     ZoneKind,
     last_zone,
-    order_block_zone,
+    penultimate_zone,
 )
 from tests.domain.structure.conftest import make_series, run_zones
 
@@ -55,30 +55,33 @@ def test_el_libro_de_zonas_tambien_lo_impide() -> None:
     assert libro.of(1, ZoneKind.LAST, at=series.at(3)).inner == pytest.approx(2010.00)
 
 
-# --- 2. Un OB antes de su confirmación ---------------------------------------
+# --- 2. Un PUL antes de que nazca su ID --------------------------------------
 
 
-def test_pedir_un_ob_antes_de_confirmarse_lanza_lookahead() -> None:
-    """El ID#4 nace en b13 y su OB no se confirma hasta b15: entre medias no existe."""
+def test_pedir_un_pul_antes_de_que_nazca_su_id_lanza_lookahead() -> None:
+    """La vela del PUL del ID#2 es b2, pero el ID no nace hasta b6."""
     series, items = run_zones(SYNTHETIC_ZONES_UP)
-    zona = items[3].order_block
+    zona = items[1].penultimate
 
     assert zona is not None
-    assert zona.ts_confirmation == series.at(15)
-    for barra in (13, 14):
+    assert zona.index_defining == 2
+    assert zona.ts_birth == series.at(6)
+    for barra in (2, 3, 5):
         with pytest.raises(LookaheadError, match="no existe"):
             zona.borders_at(series.at(barra))
-    assert zona.borders_at(series.at(15))[0] == pytest.approx(2045.00)
+    assert zona.borders_at(series.at(6)) == (pytest.approx(2010.00), pytest.approx(2005.00))
 
 
-def test_un_ob_que_nunca_se_confirma_no_se_puede_consultar() -> None:
-    """El ID#5 muere sin OB. Preguntarlo tiene que doler, no devolver `None`."""
+def test_un_id_sin_pul_no_se_puede_consultar() -> None:
+    """El ID#1 es el primero del histórico. Preguntarlo tiene que doler."""
     series, items = run_zones(SYNTHETIC_ZONES_UP)
-    libro = ZoneBook("H4", tuple(items[4].zones_tuple()))
-    libro.record_missing_order_block(5)
+    assert items[0].penultimate is None
 
-    with pytest.raises(LookaheadError, match="no tiene OB"):
-        libro.of(5, ZoneKind.ORDER_BLOCK, at=series.at(19))
+    libro = ZoneBook("H4", tuple(items[0].zones_tuple()))
+    libro.record_missing_penultimate(1)
+
+    with pytest.raises(LookaheadError, match="no tiene PUL"):
+        libro.of(1, ZoneKind.PENULTIMATE, at=series.at(19))
 
 
 # --- 3. La extensión del UL antes de que cierre su vela ---------------------
@@ -152,7 +155,7 @@ def test_el_ul_bajista_va_del_cuerpo_a_la_mecha_hacia_abajo() -> None:
 
 
 def test_la_zona_ul_nunca_cubre_el_cuerpo() -> None:
-    """Es la diferencia con el OB, y hay que poder verla escrita."""
+    """Es la diferencia con el PUL, y hay que poder verla escrita."""
     series = make_series([(100.0, 110.0, 95.0, 105.0), (105.0, 106.0, 100.0, 101.0)])
     zona = last_zone(
         series,
@@ -168,94 +171,116 @@ def test_la_zona_ul_nunca_cubre_el_cuerpo() -> None:
     assert zona.contains(110.0)
 
 
-def test_el_ob_no_se_confirma_con_un_doji_que_supera_el_nivel() -> None:
-    """§2.2 declara al doji neutro en todo el módulo: no confirma nada."""
+def test_el_pul_alcista_es_el_cuerpo_de_la_vela_del_minimo_anterior() -> None:
+    """Vela roja: el precio baja y encuentra primero el borde alto del cuerpo."""
     series = make_series(
         [
-            (100.0, 105.0, 95.0, 98.0),  # ancla roja, mecha en 105
-            (98.0, 106.0, 97.0, 98.0),  # DOJI que supera 105: no confirma
-            (98.0, 104.0, 97.0, 103.0),  # verde pero no llega a 105
+            (100.0, 102.0, 90.0, 92.0),  # roja: cuerpo [92, 100], mechas fuera
+            (92.0, 99.0, 91.0, 98.0),
         ]
     )
-    zona = order_block_zone(
+    zona = penultimate_zone(
+        series,
+        id_num=2,
+        timeframe="H4",
+        direction=ImpulseDirection.ALCISTA,
+        index_previous_extreme=0,
+        ts_constitution=series.at(1),
+    )
+
+    assert zona is not None
+    assert zona.inner == pytest.approx(100.0)  # max(open, close)
+    assert zona.outer == pytest.approx(92.0)  # min(open, close)
+    assert zona.height == pytest.approx(8.0)
+
+
+def test_el_pul_bajista_es_el_cuerpo_de_la_vela_del_maximo_anterior() -> None:
+    """Vela verde: el precio sube y encuentra primero el borde bajo del cuerpo."""
+    series = make_series(
+        [
+            (92.0, 102.0, 90.0, 100.0),  # verde: cuerpo [92, 100]
+            (100.0, 101.0, 93.0, 94.0),
+        ]
+    )
+    zona = penultimate_zone(
+        series,
+        id_num=2,
+        timeframe="H4",
+        direction=ImpulseDirection.BAJISTA,
+        index_previous_extreme=0,
+        ts_constitution=series.at(1),
+    )
+
+    assert zona is not None
+    assert zona.inner == pytest.approx(92.0)
+    assert zona.outer == pytest.approx(100.0)
+
+
+def test_el_pul_no_cubre_ninguna_mecha() -> None:
+    """El UL toma la punta y el PUL la base: juntos, del `open` a la mecha."""
+    series = make_series([(100.0, 102.0, 90.0, 92.0), (92.0, 99.0, 91.0, 98.0)])
+    zona = penultimate_zone(
+        series,
+        id_num=2,
+        timeframe="H4",
+        direction=ImpulseDirection.ALCISTA,
+        index_previous_extreme=0,
+        ts_constitution=series.at(1),
+    )
+
+    assert zona is not None
+    assert zona.contains(96.0)  # el cuerpo SÍ entra, al revés que en el UL
+    assert not zona.contains(101.0)  # la mecha de arriba, no
+    assert not zona.contains(91.0)  # la de abajo, tampoco
+
+
+def test_sin_id_anterior_no_hay_pul() -> None:
+    """El primero del histórico: no es un fallo, es que no hay de dónde sacarlo."""
+    series = make_series([(100.0, 102.0, 90.0, 92.0)])
+    zona = penultimate_zone(
         series,
         id_num=1,
         timeframe="H4",
         direction=ImpulseDirection.ALCISTA,
-        index_anchor=0,
-        ts_constitution=series.at(2),
-        index_end=None,
+        index_previous_extreme=None,
+        ts_constitution=series.at(0),
     )
 
     assert zona is None
 
 
-def test_el_ob_toma_la_primera_vela_que_confirma() -> None:
-    """Varias candidatas: manda la primera cronológicamente."""
-    series = make_series(
-        [
-            (100.0, 105.0, 95.0, 98.0),  # ancla
-            (98.0, 106.0, 97.0, 104.0),  # verde y supera 105 -> confirma aquí
-            (104.0, 120.0, 103.0, 119.0),  # también supera, pero llega tarde
-        ]
-    )
-    zona = order_block_zone(
+def test_un_pul_de_altura_cero_se_conserva_como_zona_degenerada() -> None:
+    """La vela abrió y cerró en el mismo precio: la zona existe y mide cero."""
+    series = make_series([(100.0, 105.0, 95.0, 100.0), (100.0, 104.0, 99.0, 103.0)])
+    zona = penultimate_zone(
         series,
-        id_num=1,
+        id_num=2,
         timeframe="H4",
         direction=ImpulseDirection.ALCISTA,
-        index_anchor=0,
-        ts_constitution=series.at(2),
-        index_end=None,
+        index_previous_extreme=0,
+        ts_constitution=series.at(1),
     )
 
     assert zona is not None
-    assert zona.index_confirmation == 1
+    assert zona.is_flat
+    assert zona.height == pytest.approx(0.0)
 
 
-def test_la_confirmacion_no_se_busca_mas_alla_de_la_muerte_del_id() -> None:
-    """Una vela que supera el nivel con el ID ya roto no confirma nada suyo."""
-    series = make_series(
-        [
-            (100.0, 105.0, 95.0, 98.0),  # ancla
-            (98.0, 104.0, 97.0, 103.0),  # verde, no llega a 105
-            (103.0, 120.0, 102.0, 119.0),  # supera, pero el ID murió en la anterior
-        ]
-    )
-    zona = order_block_zone(
+def test_el_pul_no_espera_a_ninguna_confirmacion() -> None:
+    """Su vela cerró antes de que el ID naciera: nace con él y ahí se queda."""
+    series = make_series([(100.0, 102.0, 90.0, 92.0), (92.0, 99.0, 91.0, 98.0)])
+    zona = penultimate_zone(
         series,
-        id_num=1,
+        id_num=2,
         timeframe="H4",
         direction=ImpulseDirection.ALCISTA,
-        index_anchor=0,
+        index_previous_extreme=0,
         ts_constitution=series.at(1),
-        index_end=1,
-    )
-
-    assert zona is None
-
-
-def test_el_ob_cubre_la_vela_entera_incluidas_las_mechas() -> None:
-    series = make_series(
-        [
-            (100.0, 105.0, 95.0, 98.0),  # ancla roja
-            (98.0, 106.0, 97.0, 104.0),  # confirma
-        ]
-    )
-    zona = order_block_zone(
-        series,
-        id_num=1,
-        timeframe="H4",
-        direction=ImpulseDirection.ALCISTA,
-        index_anchor=0,
-        ts_constitution=series.at(1),
-        index_end=None,
     )
 
     assert zona is not None
-    assert zona.low == pytest.approx(95.0)
-    assert zona.high == pytest.approx(105.0)
-    assert zona.contains(99.0)  # el cuerpo SÍ entra, al revés que en el UL
+    assert zona.ts_birth == series.at(1)
+    assert zona.ts_outer_known == series.at(0)
 
 
 def test_el_ultimo_extremo_de_la_serie_no_tiene_vela_de_margen() -> None:
@@ -283,11 +308,11 @@ def test_el_libro_devuelve_lo_que_ya_habia_nacido() -> None:
     libro = ZoneBook("H4", todas)
 
     vivas = libro.alive_at(series.at(6))
+    # El ID#1 no tiene PUL: es el primero del histórico.
     assert {(zona.id_num, zona.kind) for zona in vivas} == {
         (1, ZoneKind.LAST),
-        (1, ZoneKind.ORDER_BLOCK),
         (2, ZoneKind.LAST),
-        (2, ZoneKind.ORDER_BLOCK),
+        (2, ZoneKind.PENULTIMATE),
     }
 
 

@@ -141,14 +141,14 @@ def test_toda_rotura_a_favor_es_por_zona(zoned: ImpulseRun) -> None:
         )
 
 
-def test_romper_por_linea_solo_ocurre_sin_ob_confirmado(zoned: ImpulseRun) -> None:
+def test_romper_por_linea_solo_ocurre_sin_pul(zoned: ImpulseRun) -> None:
     """§6.7 — la única forma de morir por línea con la regla nueva."""
     zones = detect_zones(zoned)
     for timeframe, analysis in zoned.analyses.items():
         measured = {item.id_num for item in zones.per_timeframe[timeframe].items}
         without_ob = {
             item.id_num
-            for item in zones.per_timeframe[timeframe].without_order_block
+            for item in zones.per_timeframe[timeframe].without_penultimate
         }
         for event in analysis.events:
             if event.level_source is not BreakLevelSource.LINE:
@@ -163,7 +163,7 @@ def test_romper_por_linea_solo_ocurre_sin_ob_confirmado(zoned: ImpulseRun) -> No
 
 
 def test_el_ancla_nunca_se_mueve_y_el_extremo_solo_mejora(zoned: ImpulseRun) -> None:
-    """§3.2 — el OB lo fija la vela del ancla y esa vela no cambia."""
+    """§3.2 — el ancla la fija la vela del arranque de la pierna y no se mueve."""
     for analysis in zoned.analyses.values():
         for impulse in analysis.impulses:
             if impulse.extreme_extensions == 0:
@@ -187,12 +187,31 @@ def test_cada_extension_tiene_su_rotura_evitada(zoned: ImpulseRun) -> None:
         assert extended == analysis.diagnostics["roturas_evitadas_a_favor"]
 
 
-def test_la_rotura_evitada_queda_dentro_de_su_zona(zoned: ImpulseRun) -> None:
-    """Cerró más allá de la línea y sin llegar al borde exterior. Las dos cosas."""
+def test_la_rotura_evitada_cruzo_la_linea_y_no_el_borde_exterior(
+    zoned: ImpulseRun,
+) -> None:
+    """Las dos cosas a la vez: es exactamente lo que la fase 2.1 salva.
+
+    El cierre no tiene por qué caer *dentro* de la zona. En el lado a favor el
+    borde interior del UL es la propia línea, así que sí; en el lado en contra el
+    PUL vive en otra vela y puede quedar entero por detrás del ancla: entonces el
+    precio se queda en el hueco entre la línea y el borde interior, que tampoco
+    rompe nada.
+    """
     for analysis in zoned.analyses.values():
         for item in analysis.avoided:
-            low, high = sorted((item.zone_inner, item.zone_outer))
-            assert low <= item.close <= high
+            hacia = (
+                item.direction
+                if item.kind is BreakKind.A_FAVOR
+                else item.direction.opposite()
+            )
+            mas_alla = (
+                (lambda price, level: price > level)
+                if hacia.value == "alcista"
+                else (lambda price, level: price < level)
+            )
+            assert mas_alla(item.close, item.line)
+            assert not mas_alla(item.close, item.zone_outer)
             assert item.line != item.zone_outer  # una zona plana no salva a nadie
 
 

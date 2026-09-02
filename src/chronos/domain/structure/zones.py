@@ -1,4 +1,4 @@
-"""Zonas UL y OB de un impulso dominante (fase 2.0). **Sólo detección.**
+"""Zonas UL y PUL de un impulso dominante (fase 2.0). **Sólo detección.**
 
 El módulo 1 traza la estructura por **cuerpos**: `max(open, close)` y
 `min(open, close)`. Estas dos zonas son lo contrario, un asunto de **mechas**, y
@@ -19,18 +19,21 @@ línea del extremo del ID. Si la vela inmediatamente posterior tiene la mecha m�
 extrema en la misma dirección, la zona se estira hasta ella: **una vela de
 margen, no más**.
 
-**OB (order block)** — la vela donde arranca la pierna, la que fija
-`precio_ancla`. Va de `low` a `high`: a diferencia del UL, **sí** cubre el
-cuerpo. No existe hasta que una vela posterior **del color del impulso** la
-supera incluyendo mecha; antes de eso el ID no tiene OB, que es un estado
-legítimo y se registra.
+**PUL (penúltimo)** — el extremo del ID **anterior**, sobre la misma vela que
+fijaba su UL: cuando un ID muere y nace el siguiente, el UL viejo se convierte
+en el PUL del nuevo. A diferencia del UL, que es el tramo de mecha, el PUL es el
+**cuerpo** de esa vela: va de un borde del cuerpo al otro y no cubre ninguna
+mecha. Las dos zonas son complementarias sobre la misma vela —el UL toma la
+punta, el PUL toma la base— y juntas van del `open` a la punta de la mecha.
+El primer ID del histórico no tiene ID anterior y por tanto no tiene PUL, que es
+un estado legítimo y se registra.
 
 `interior` y `exterior` significan lo mismo en las dos: el borde **interior** es
 el que un precio que sale del rango encuentra primero, y el **exterior** el que
 tiene que cruzar para dejar la zona atrás. En un ID alcista el UL se recorre
-hacia arriba (cuerpo -> mecha) y el OB hacia abajo (`high` -> `low`), porque la
-rotura a favor sube y la rotura en contra baja. Es la lectura que necesita la
-fase 2.1 y aquí sólo se calcula.
+hacia arriba (cuerpo -> mecha) y el PUL hacia abajo (borde alto del cuerpo ->
+borde bajo), porque la rotura a favor sube y la rotura en contra baja. Es la
+lectura que necesita la fase 2.1 y aquí sólo se calcula.
 """
 
 from __future__ import annotations
@@ -51,8 +54,8 @@ class ZoneKind(StrEnum):
 
     #: Extremo del ID: el tramo de mecha que va del cuerpo a la punta.
     LAST = "UL"
-    #: Vela donde arranca la pierna, entera y con mechas.
-    ORDER_BLOCK = "OB"
+    #: Extremo del ID anterior: el cuerpo de la vela que fijaba su UL.
+    PENULTIMATE = "PUL"
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,12 +134,13 @@ class Zone:
     id_num: int
     timeframe: str
     direction: ImpulseDirection
-    #: Vela que define la zona: la del extremo en el UL, la del ancla en el OB.
+    #: Vela que define la zona: la del extremo del ID en el UL, la del extremo
+    #: del ID anterior en el PUL.
     index_defining: int
     ts_defining: datetime
     #: Color del cuerpo de esa vela. Va aquí y no se re-deriva más tarde por la
     #: misma razón que en la fase 1: quien audite no tiene que volver al OHLC, y
-    #: es lo que permite contar los OB sobre doji sin buscar la vela otra vez.
+    #: es lo que permite contar los PUL sobre doji sin buscar la vela otra vez.
     defining_body: BodyDirection
     #: Borde que un precio saliente encuentra primero.
     inner: float
@@ -150,9 +154,6 @@ class Zone:
     ts_birth: datetime
     #: UL: la vela siguiente tenía la mecha más extrema y la zona se estiró.
     extended: bool = False
-    #: OB: la vela del color del impulso que lo confirmó. Sin ella no hay OB.
-    index_confirmation: int | None = None
-    ts_confirmation: datetime | None = None
 
     @property
     def low(self) -> float:
@@ -270,73 +271,54 @@ def last_zone(
     )
 
 
-def order_block_zone(
+def penultimate_zone(
     series: CandleSeries,
     *,
     id_num: int,
     timeframe: str,
     direction: ImpulseDirection,
-    index_anchor: int,
+    index_previous_extreme: int | None,
     ts_constitution: datetime,
-    index_end: int | None,
 ) -> Zone | None:
-    """Zona OB del ID, o `None` si nunca llegó a confirmarse.
+    """Zona PUL del ID, o `None` si no hay ID anterior del que salga.
 
-    Devolver `None` no es un fallo: un ID sin OB confirmado es un estado legítimo
-    y en la fase 2.1 esos impulsos se romperán por línea. Por eso no se sustituye
-    por una zona vacía ni por la vela sin confirmar, que son cosas distintas.
+    La vela es la misma que fijó el extremo del ID anterior —la de su UL—, y de
+    ella se toma el **cuerpo**: el borde que el precio encuentra primero al
+    volver en contra es el interior, y el que hay que cruzar para dejar la zona
+    atrás es el otro. En un ID bajista, cuyo PUL es la vela verde del máximo
+    anterior, la rotura en contra sube: el interior es el borde bajo del cuerpo
+    y el exterior el alto.
 
-    La confirmación es la primera vela **posterior** a la del OB que cumple dos
-    cosas a la vez: su cuerpo es del color del impulso y su mecha supera la de la
-    vela del OB. El doji no confirma —§2.2 lo declara neutro en todo el módulo— y
-    la búsqueda termina donde muere el ID: una vela que superase el nivel con el
-    ID ya roto no confirma nada suyo.
+    Devolver `None` sólo le pasa al primer ID del histórico, que no tiene ID
+    anterior. No es un fallo: ese impulso se rompe por línea en el lado en
+    contra, y no hay ninguna zona detrás que lo sustituya.
+
+    El PUL no espera a nada: su vela cerró antes de que naciera el ID, así que
+    la zona existe desde la constitución.
     """
-    last = index_end if index_end is not None else len(series) - 1
-    confirmation = _first_confirmation(series, direction, index_anchor, last)
-    if confirmation is None:
+    if index_previous_extreme is None:
         return None
 
-    ts_confirmation = series.at(confirmation)
-    # `high` y `low` de la vela entera. Cuál es interior y cuál exterior lo decide
-    # el sentido en que se recorre: la rotura en contra de un ID alcista baja, así
-    # que encuentra primero el `high` y tiene que cruzar el `low`.
-    inner = series.wick_tip_towards(index_anchor, direction)
-    outer = series.wick_tip_towards(index_anchor, direction.opposite())
+    # El cuerpo entero de la vela, sin mechas. Cuál de los dos bordes es interior
+    # lo decide el sentido en que se recorre: la rotura en contra de un ID
+    # alcista baja, así que encuentra primero el borde alto del cuerpo y tiene
+    # que cruzar el bajo.
+    inner = series.body_edge_towards(index_previous_extreme, direction)
+    outer = series.body_edge_towards(index_previous_extreme, direction.opposite())
 
     return Zone(
-        kind=ZoneKind.ORDER_BLOCK,
+        kind=ZoneKind.PENULTIMATE,
         id_num=id_num,
         timeframe=timeframe,
         direction=direction,
-        index_defining=index_anchor,
-        ts_defining=series.at(index_anchor),
-        defining_body=series.direction_of(index_anchor),
+        index_defining=index_previous_extreme,
+        ts_defining=series.at(index_previous_extreme),
+        defining_body=series.direction_of(index_previous_extreme),
         inner=inner,
         outer=outer,
-        ts_outer_known=series.at(index_anchor),
-        # Las dos condiciones a la vez: el ID constituido y el OB confirmado. La
-        # confirmación suele caer dentro de la pierna, antes de la constitución.
-        ts_birth=max(ts_constitution, ts_confirmation),
-        index_confirmation=confirmation,
-        ts_confirmation=ts_confirmation,
+        ts_outer_known=series.at(index_previous_extreme),
+        ts_birth=ts_constitution,
     )
-
-
-def _first_confirmation(
-    series: CandleSeries, direction: ImpulseDirection, index_anchor: int, last: int
-) -> int | None:
-    """Primera vela cronológica que confirma el OB. Con varias candidatas, la primera."""
-    colour = (
-        BodyDirection.BULLISH if direction is ImpulseDirection.ALCISTA else BodyDirection.BEARISH
-    )
-    level = series.wick_tip_towards(index_anchor, direction)
-    for index in range(index_anchor + 1, min(last, len(series) - 1) + 1):
-        if series.direction_of(index) is not colour:
-            continue
-        if _is_beyond(series.wick_tip_towards(index, direction), level, direction):
-            return index
-    return None
 
 
 def _is_beyond(price: float, level: float, direction: ImpulseDirection) -> bool:
@@ -351,8 +333,8 @@ class ZoneBook:
     """Las zonas de una temporalidad, consultables sin poder mirar al futuro.
 
     Es la única puerta por la que la fase 2.1 leerá zonas, y por eso la garantía
-    va aquí y no en quien pregunte: pedir una zona antes de que nazca —o un OB
-    antes de que se confirme— lanza `LookaheadError` en vez de devolver algo.
+    va aquí y no en quien pregunte: pedir una zona antes de que nazca lanza
+    `LookaheadError` en vez de devolver algo.
     """
 
     def __init__(self, timeframe: str, zones: tuple[Zone, ...] = ()) -> None:
@@ -361,10 +343,10 @@ class ZoneBook:
         self._by_key: dict[tuple[int, ZoneKind], Zone] = {
             (zone.id_num, zone.kind): zone for zone in self._zones
         }
-        #: ID cuyo OB se buscó y no llegó a confirmarse. Se guardan para poder
-        #: distinguir "no lo he calculado" de "no existe", que en la fase 2.1 son
-        #: dos cosas muy distintas: el segundo se rompe por línea.
-        self._without_order_block: set[int] = set()
+        #: ID sin PUL: no había ID anterior del que sacarlo. Se guardan para
+        #: poder distinguir "no lo he calculado" de "no existe", que en la fase
+        #: 2.1 son dos cosas muy distintas: el segundo se rompe por línea.
+        self._without_penultimate: set[int] = set()
 
     @property
     def timeframe(self) -> str:
@@ -374,22 +356,22 @@ class ZoneBook:
     def zones(self) -> tuple[Zone, ...]:
         return self._zones
 
-    def record_missing_order_block(self, id_num: int) -> None:
-        self._without_order_block.add(id_num)
+    def record_missing_penultimate(self, id_num: int) -> None:
+        self._without_penultimate.add(id_num)
 
     @property
-    def without_order_block(self) -> frozenset[int]:
-        return frozenset(self._without_order_block)
+    def without_penultimate(self) -> frozenset[int]:
+        return frozenset(self._without_penultimate)
 
     def of(self, id_num: int, kind: ZoneKind, *, at: datetime) -> Zone:
         """La zona de un ID, si a esa hora existía."""
         _require_aware(at)
         zone = self._by_key.get((id_num, kind))
         if zone is None:
-            if kind is ZoneKind.ORDER_BLOCK and id_num in self._without_order_block:
+            if kind is ZoneKind.PENULTIMATE and id_num in self._without_penultimate:
                 raise LookaheadError(
-                    f"[{self._timeframe}] El ID {id_num} no tiene OB: ninguna vela del color "
-                    "del impulso llegó a superar la vela del ancla mientras estuvo vigente"
+                    f"[{self._timeframe}] El ID {id_num} no tiene PUL: no hay ID anterior "
+                    "del que salga la vela del extremo penúltimo"
                 )
             raise StructureError(
                 f"[{self._timeframe}] No hay zona {kind.value} para el ID {id_num}"
@@ -409,5 +391,5 @@ __all__ = [
     "ZoneBook",
     "ZoneKind",
     "last_zone",
-    "order_block_zone",
+    "penultimate_zone",
 ]

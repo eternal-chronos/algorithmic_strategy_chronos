@@ -129,6 +129,11 @@ def with_hourly_structure(charts: ChartsConfig) -> ChartsConfig:
     El ID de H1 se dibuja como **principal** de su gráfico —suyos son el limbo y
     los marcadores— y el de H4 se queda detrás como contexto, que es el orden en
     el que se lee: la zona la manda H4 y el giro se ve en H1.
+
+    Y el **gráfico fino** pasa a llevar el ID de H1 en vez del de H4: en M15 lo
+    que se mira es el ID en el que se fecha el toque que dispara la señal, y el
+    de H4 a esa escala es una línea que no se mueve en cuatro velas. Es el mismo
+    criterio con el que ahí se elegía el PUL de H1.
     """
     overlays = charts.layout.get(H1)
     if overlays is None:
@@ -138,7 +143,10 @@ def with_hourly_structure(charts: ChartsConfig) -> ChartsConfig:
         )
     if H1 in overlays:
         return charts
-    return ChartsConfig({**charts.layout, H1: (H1, *overlays)})
+    layout = {**charts.layout, H1: (H1, *overlays)}
+    if M15 in layout:
+        layout[M15] = (H1,)
+    return ChartsConfig(layout)
 
 
 @dataclass(frozen=True, slots=True)
@@ -290,7 +298,7 @@ class ImpulseRulesConfig:
     #: siga siendo reproducible mientras el propietario compara los tres modos.
     leg_start_mode: LegStartMode = LegStartMode.L1_CURRENT
     #: FASE 2.1. `False` = la rotura es por línea, que es la línea base de la
-    #: fase 1. `True` = manda la zona: el UL en el lado a favor y el OB en el
+    #: fase 1. `True` = manda la zona: el UL en el lado a favor y el PUL en el
     #: lado en contra, y romper es atravesar la zona entera. Es el primer cambio
     #: de comportamiento del proyecto, así que va apagado por defecto y su
     #: apagado reproduce el hash y los recuentos archivados.
@@ -312,7 +320,7 @@ class ImpulseRulesConfig:
 
 @dataclass(frozen=True, slots=True)
 class ZonesConfig:
-    """Zonas UL y OB de la fase 2.0. **Sólo detección y dibujo.**
+    """Zonas UL y PUL de la fase 2.0. **Sólo detección y dibujo.**
 
     Con `enabled: False` el sistema no emite ni una zona y todo lo demás sale
     byte a byte como en la fase 1. Con `True` se calculan y se publican, pero

@@ -73,7 +73,7 @@ def render_signal_stats(study: SignalStudy) -> str:
         lines.append(section("El embudo"))
         rows = pd.DataFrame(
             [
-                {"paso": "toques del OB de H4", "marcas": funnel.touches, "de las anteriores": ""},
+                {"paso": "toques del PUL de H4", "marcas": funnel.touches, "de las anteriores": ""},
                 {
                     "paso": "vetados por el Diario",
                     "marcas": funnel.vetoed,
@@ -85,12 +85,12 @@ def render_signal_stats(study: SignalStudy) -> str:
                     "de las anteriores": _pct(funnel.searched, funnel.touches),
                 },
                 {
-                    "paso": "con OB de H1 confirmado",
+                    "paso": "con PUL de H1 confirmado",
                     "marcas": funnel.confirmed,
                     "de las anteriores": _pct(funnel.confirmed, funnel.searched),
                 },
                 {
-                    "paso": "SEÑAL: toque de ese OB de H1",
+                    "paso": "SEÑAL: toque de ese PUL de H1",
                     "marcas": funnel.signalled,
                     "de las anteriores": _pct(funnel.signalled, funnel.confirmed),
                 },

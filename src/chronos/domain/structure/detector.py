@@ -44,7 +44,7 @@ describen uno a uno en `_open_leg`, `_extend_leg` y `_on_bar_in_limbo`.
 **Fase 2.1 · `break_by_zone`.** El único cambio de comportamiento del módulo
 desde que se fijó la línea base. Con el interruptor apagado todo lo anterior se
 lee tal cual. Con él encendido, la línea deja de ser el nivel de rotura cuando
-existe una zona que la sustituya: el UL manda el lado a favor y el OB el lado en
+existe una zona que la sustituya: el UL manda el lado a favor y el PUL el lado en
 contra, y romper es cerrar más allá del borde **exterior**, atravesando la zona
 entera. Tres consecuencias, todas dentro de esta máquina y ninguna en un filtro
 posterior:
@@ -56,8 +56,9 @@ posterior:
   su cuerpo (§3.2). Las zonas no se van con él: el UL lo fija la vela del extremo
   de la constitución y no se remarca, así que el borde exterior que juzga al ID
   es el mismo toda su vida. El ancla ni siquiera se estira —la fija la vela del
-  arranque de la pierna— y por eso el OB no se mueve nunca.
-- Con las dos zonas solapadas en precio una misma vela puede cumplir las dos
+  arranque de la pierna— y el PUL tampoco: su vela ya estaba cerrada cuando el ID
+  nació, así que no se mueve nunca.
+- Con los dos niveles invertidos una misma vela puede cumplir las dos
   condiciones a la vez. `OverlapPriority` decide el orden de evaluación; el motor
   no elige por su cuenta y el informe cuenta cuántas veces decide.
 """
@@ -228,7 +229,7 @@ class DominantImpulseDetector:
             # apagado, que es como se comprueba que no se ha colado nada.
             #: Roturas según de dónde salió el nivel que las produjo. Con la
             #: regla nueva "por línea" sólo puede ocurrir en el lado en contra y
-            #: sólo cuando el OB del ID nunca llegó a confirmarse.
+            #: sólo en el primer ID del histórico, el único que no tiene PUL.
             "roturas_a_favor_por_zona": 0,
             "roturas_a_favor_por_linea": 0,
             "roturas_en_contra_por_zona": 0,
@@ -575,9 +576,8 @@ class DominantImpulseDetector:
         """Nivel de rotura en contra del ID que cerraría esta pierna.
 
         Es el mismo que juzgará al ID desde su barra siguiente: el ancla, o el
-        borde exterior del OB cuando la fase 2.1 lo pone a mandar. `through` es la
-        última vela cerrada antes de la que se está juzgando, así que un OB que se
-        confirme en esta misma vela todavía no cuenta.
+        borde exterior del PUL cuando la fase 2.1 lo pone a mandar. `through` es
+        la última vela cerrada antes de la que se está juzgando.
         """
         if self._zones is None:
             return SideLevel(
@@ -586,12 +586,22 @@ class DominantImpulseDetector:
                 inner=anchor.price,
                 source=BreakLevelSource.LINE,
             )
-        return self._zones.order_block_level(
+        return self._zones.penultimate_level(
             direction=leg.direction,
             anchor=anchor.price,
-            index_anchor=anchor.index,
+            index_penultimate=self._penultimate_index(),
             through=through,
         )
+
+    def _penultimate_index(self) -> int | None:
+        """Vela del extremo del último ID: la del UL viejo, que pasa a ser PUL.
+
+        `None` mientras no haya muerto ningún ID —el primero del histórico—, y
+        entonces el lado en contra se juzga por la línea del ancla.
+        """
+        if not self._impulses:
+            return None
+        return self._impulses[-1].index_extreme_at_constitution
 
     def _abort_constitution(
         self, index: int, bar: BodyBar, leg: _Leg, side: SideLevel
@@ -644,6 +654,10 @@ class DominantImpulseDetector:
 
         break_bar = self._bars[leg.break_index] if leg.break_index is not None else None
         anchor_index = anchor.index
+        # El UL del ID que acaba de morir es el PUL del que nace: la misma vela
+        # del extremo con la que aquél se constituyó, que no se remarca aunque su
+        # extremo se estirase después.
+        penultimate_index = self._penultimate_index()
         extreme_index = leg.extreme_index
         assert extreme_index is not None  # el extremo y su barra se fijan juntos
         impulse = DominantImpulse(
@@ -664,6 +678,10 @@ class DominantImpulseDetector:
             index_extreme=extreme_index,
             ts_extreme=self._bars[extreme_index].timestamp,
             extreme_bar_direction=self._bars[extreme_index].direction,
+            index_penultimate=penultimate_index,
+            ts_penultimate=(
+                None if penultimate_index is None else self._bars[penultimate_index].timestamp
+            ),
             limbo_bars=index - leg.limbo_start_index,
             constituting_body_size=bar.body_size,
             publishable=publishable,
@@ -694,14 +712,15 @@ class DominantImpulseDetector:
             # constitución y ahí se queda, aunque el extremo siga estirándose.
             index_extreme=impulse.index_extreme_at_constitution,
             anchor=impulse.anchor,
-            index_anchor=impulse.index_anchor,
+            index_penultimate=impulse.index_penultimate,
             through=through,
         )
 
     def _first_hit(self, beyond_extreme: bool, beyond_anchor: bool) -> BreakKind | None:
         """Cuál de las dos roturas se aplica cuando se cumplen las dos a la vez.
 
-        Con zonas solapadas —el rango del ID cabe dentro de la vela del ancla— un
+        Con zonas solapadas —el rango del ID cabe dentro del cuerpo del extremo
+        anterior— un
         mismo cierre puede quedar más allá de los dos bordes exteriores. Elegir es
         obligatorio y determinista; **elegir bien no es cosa del motor**, así que
         el orden es un parámetro y aquí sólo se aplica y se cuenta.
@@ -729,7 +748,7 @@ class DominantImpulseDetector:
         de la zona es exactamente la rotura que la fase 2.1 evita. Sólo puede
         pasar si ese lado tiene zona y la zona no es degenerada: con un UL de
         altura cero los dos bordes están en la línea y no hay nada que salvar
-        (§1.3), y sin OB confirmado el ancla manda sola y ya habría roto.
+        (§1.3), y sin PUL el ancla manda sola y ya habría roto.
         """
         if not self._break_by_zone:
             return
@@ -737,8 +756,8 @@ class DominantImpulseDetector:
         if self._is_beyond(
             bar.close, levels.against.line, impulse.direction.opposite()
         ):
-            # El OB aguanta. El ancla no se mueve: la fija la vela del arranque de
-            # la pierna, y esa vela no cambia.
+            # El PUL aguanta. El ancla no se mueve: la fija la vela del arranque
+            # de la pierna, y esa vela no cambia.
             self._diagnostics["roturas_evitadas_en_contra"] += 1
             self._record_avoided(
                 BreakKind.EN_CONTRA, impulse, index, bar, levels.against, extended=False
@@ -781,7 +800,7 @@ class DominantImpulseDetector:
                 direction=impulse.direction,
                 close=bar.close,
                 line=side.line,
-                zone=ZoneKind.LAST if kind is BreakKind.A_FAVOR else ZoneKind.ORDER_BLOCK,
+                zone=ZoneKind.LAST if kind is BreakKind.A_FAVOR else ZoneKind.PENULTIMATE,
                 zone_inner=side.inner,
                 zone_outer=side.price,
                 extended_extreme=extended,

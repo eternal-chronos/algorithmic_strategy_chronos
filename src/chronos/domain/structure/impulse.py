@@ -76,6 +76,14 @@ class DominantImpulse:
     #: un impulso alcista es verde y en uno bajista, rojo.
     extreme_bar_direction: BodyDirection
 
+    #: Vela del extremo del ID **anterior**: la que llevaba su UL y que al morir
+    #: ese ID pasa a llevar el PUL de éste. `None` sólo en el primer impulso del
+    #: histórico, que no tiene ID anterior. Se guarda por lo mismo que las otras
+    #: dos velas: quien dibuje o audite no tiene que reconstruirla, y la fase 2.1
+    #: la lee barra a barra sin volver a la lista de impulsos.
+    index_penultimate: int | None
+    ts_penultimate: datetime | None
+
     #: Barras cerradas en LIMBO entre la rotura anterior y esta constitución.
     limbo_bars: int
     #: Tamaño del cuerpo de la vela contraria que lo constituyó. Alimenta el
@@ -87,7 +95,7 @@ class DominantImpulse:
     ts_end: datetime | None = field(default=None, init=False)
     index_end: int | None = field(default=None, init=False)
     exit_break_kind: BreakKind | None = field(default=None, init=False)
-    #: Fase 2.1. De dónde salió el nivel que lo mató: la línea, el UL o el OB.
+    #: Fase 2.1. De dónde salió el nivel que lo mató: la línea, el UL o el PUL.
     #: Con `BREAK_BY_ZONE = false` es siempre la línea.
     exit_level_source: BreakLevelSource | None = field(default=None, init=False)
 
@@ -342,7 +350,7 @@ class AbortedConstitution:
     new_leg_direction: ImpulseDirection
     close: float
     #: Nivel de rotura en contra que el cierre ya había dejado atrás: el ancla, o
-    #: el borde exterior del OB cuando la fase 2.1 lo pone a mandar.
+    #: el borde exterior del PUL cuando la fase 2.1 lo pone a mandar.
     level: float
     #: La línea del ancla, mande o no, por la misma razón que en `BreakEvent`.
     line: float

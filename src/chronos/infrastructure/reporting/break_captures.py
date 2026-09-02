@@ -5,7 +5,7 @@ Cinco lotes, en el orden en que el propietario los va a mirar:
   1. diez ID de H4 que sobreviven a roturas que antes los habrían matado;
   2. los cinco ID de mayor duración bajo la regla nueva, con todas sus roturas
      evitadas marcadas;
-  3. cinco roturas por LÍNEA por falta de OB confirmado;
+  3. cinco roturas por LÍNEA por no haber PUL en ese lado;
   4. los conflictos de evaluación simultánea —todos si son pocos, diez si son
      muchos— y, si no hay ninguno, se dice en el `LEEME` en vez de callarlo;
   5. el mismo tramo bajo las dos reglas, lado a lado, en Diario y H4.
@@ -169,7 +169,7 @@ def _longest(zoned: ImpulseRun) -> list[Pick]:
 
 
 def _broken_by_line(zoned: ImpulseRun) -> list[Pick]:
-    """§7.3 — cinco ID que murieron por línea porque su OB no llegó a confirmarse.
+    """§7.3 — cinco ID que murieron por línea porque no tenían PUL.
 
     Se buscan primero en H4 y se completan con las otras temporalidades: son
     pocos, y el `LEEME` dice de cuál es cada uno.
@@ -271,7 +271,7 @@ def _figure(
 
     zoned = _zones_of(zones, analysis.timeframe, impulse.id_num)
     if zoned is not None:
-        draw_zones(figure, analysis, zoned, first, last, labels)
+        draw_zones(figure, zoned, first, last, labels)
     _draw_avoided(figure, avoided, first, last, labels)
     reason = _draw_break(figure, analysis, impulse, first, last, labels)
     return figure, reason
@@ -399,7 +399,7 @@ def _draw_break(
     by_zone = source is not BreakLevelSource.LINE
     reason = (
         f"{impulse.exit_break_kind.value} por {'zona ' + source.value if by_zone else 'LÍNEA'}"
-        + ("" if by_zone else " (sin OB confirmado)")
+        + ("" if by_zone else " (sin PUL en ese lado)")
     )
     if not first <= index <= last:
         return reason
@@ -615,16 +615,16 @@ def _write_readme(
         "                    pero sin atravesar la zona entera. El segmento vertical va",
         "                    del cierre a la línea que cruzó. Es el mismo símbolo que la",
         "                    capa «Roturas evitadas» del explorador.",
-        "  rombo relleno     el ID murió atravesando una zona (UL u OB).",
+        "  rombo relleno     el ID murió atravesando una zona (UL o PUL).",
         "  cuadrado hueco    el ID murió por LÍNEA, porque en ese lado no había zona:",
-        "                    su OB nunca llegó a confirmarse.",
-        "  bandas de color   las zonas UL y OB, con el mismo trazo de la fase 2.0.",
+        "                    ese lado no tenía PUL.",
+        "  bandas de color   las zonas UL y PUL, con el mismo trazo de la fase 2.0.",
         "",
         "Los lotes son los cinco del §7:",
         "  sobrevive         diez ID de H4 que sobreviven a roturas que antes los",
         "                    habrían matado, con ±25 barras de contexto",
         "  mas_larga         los cinco ID de mayor duración bajo la regla nueva",
-        "  rotura_por_linea  cinco ID muertos por línea por falta de OB confirmado",
+        "  rotura_por_linea  cinco ID muertos por línea por no tener PUL",
         "  conflicto_solape  velas que cumplían las DOS condiciones de rotura a la vez",
         "  lado_a_lado       el mismo tramo bajo las dos reglas, en Diario y H4, con la",
         "                    misma escala vertical",
@@ -639,7 +639,7 @@ def _write_readme(
             "bordes exteriores INVERTIDOS, y eso es lo contrario de que las zonas se",
             "solapen: en un ID alcista se cumple siempre",
             "",
-            "    borde exterior del UL >= extremo > ancla >= borde exterior del OB",
+            "    borde exterior del UL >= extremo > ancla >= borde exterior del PUL",
             "",
             "mientras el rango del ID sea positivo. Con la regla nueva no queda ningún",
             "impulso de rango no positivo, así que no queda ningún conflicto posible.",

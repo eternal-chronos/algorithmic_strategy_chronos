@@ -4,8 +4,9 @@ Las series del módulo 1 se escriben como pares (open, close) porque sólo mira 
 cuerpo. Las mechas no intervienen y añadirlas al fixture sólo escondería el
 punto que cada test quiere fijar.
 
-Las de la **fase 2.0** son al revés: las zonas UL y OB viven en las mechas, así
-que sus series traen las cuatro cifras y su propio apoyo, al final del fichero.
+Las de la **fase 2.0** son al revés: el UL vive en la mecha y el PUL en el cuerpo
+de una vela concreta, así que sus series traen las cuatro cifras y su propio
+apoyo, al final del fichero.
 """
 
 from __future__ import annotations
@@ -38,7 +39,7 @@ from chronos.domain.structure.zones import (
     CandleSeries,
     Zone,
     last_zone,
-    order_block_zone,
+    penultimate_zone,
 )
 
 H4 = timedelta(hours=4)
@@ -126,10 +127,10 @@ class ZonedImpulse:
 
     impulse: DominantImpulse
     last: Zone
-    order_block: Zone | None
+    penultimate: Zone | None
 
     def zones_tuple(self) -> tuple[Zone, ...]:
-        return (self.last,) if self.order_block is None else (self.last, self.order_block)
+        return (self.last,) if self.penultimate is None else (self.last, self.penultimate)
 
 
 def run_zones(
@@ -172,14 +173,13 @@ def run_zones(
                 index_extreme=impulse.index_extreme,
                 ts_constitution=impulse.ts_constitution,
             ),
-            order_block=order_block_zone(
+            penultimate=penultimate_zone(
                 series,
                 id_num=impulse.id_num,
                 timeframe="H4",
                 direction=impulse.direction,
-                index_anchor=impulse.index_anchor,
+                index_previous_extreme=impulse.index_penultimate,
                 ts_constitution=impulse.ts_constitution,
-                index_end=impulse.index_end,
             ),
         )
         for impulse in detector.impulses

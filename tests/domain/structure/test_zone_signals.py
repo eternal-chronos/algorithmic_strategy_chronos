@@ -1,6 +1,6 @@
 """Las tres señales de zona, con casos escritos a mano (números redondos).
 
-Toque del OB, rechazo del UL y rotura del UL. Nada de esto entra en la detección
+Toque del PUL, rechazo del UL y rotura del UL. Nada de esto entra en la detección
 ni en la regla de rotura: son marcas para el dibujo, y el test de capas comprueba
 aparte que ningún módulo del motor las importa.
 """
@@ -55,28 +55,28 @@ def classify(bars: list[tuple[float, float, float]], target: Zone, *, first: int
 
 #: UL de un ID alcista: del techo del cuerpo (100) a la punta de la mecha (102).
 UL_UP = zone(ZoneKind.LAST, inner=100.0, outer=102.0)
-#: OB de un ID alcista: la vela del ancla entera, de 92 (exterior) a 95 (interior).
-OB_UP = zone(ZoneKind.ORDER_BLOCK, inner=95.0, outer=92.0)
+#: PUL de un ID alcista: el cuerpo del extremo anterior, de 92 (exterior) a 95 (interior).
+PUL_UP = zone(ZoneKind.PENULTIMATE, inner=95.0, outer=92.0)
 
 #: Vela que ni roza el UL alcista y cierra por debajo: deja al precio **fuera**,
 #: que es lo que arma el rechazo de la vela siguiente.
 FUERA_UP = (99.0, 97.0, 98.0)
 #: La misma idea en un ID bajista: por encima del UL y sin tocarlo.
 FUERA_DOWN = (102.0, 101.0, 101.5)
-#: El OB se busca por el lado contrario: en un ID alcista, desde arriba.
-FUERA_OB_UP = (99.0, 96.0, 98.0)
+#: El PUL se busca por el lado contrario: en un ID alcista, desde arriba.
+FUERA_PUL_UP = (99.0, 96.0, 98.0)
 #: Y en un ID bajista, desde abajo.
-FUERA_OB_DOWN = (104.0, 101.0, 102.0)
+FUERA_PUL_DOWN = (104.0, 101.0, 102.0)
 
 
-# --- Toque del OB -----------------------------------------------------------
+# --- Toque del PUL -----------------------------------------------------------
 
 
 def test_la_mecha_que_entra_en_el_ob_desde_fuera_es_un_toque() -> None:
-    señales = classify([FUERA_OB_UP, (98.0, 94.0, 97.0)], OB_UP)
+    señales = classify([FUERA_PUL_UP, (98.0, 94.0, 97.0)], PUL_UP)
 
-    assert [item.kind for item in señales] == [ZoneSignalKind.TOQUE_OB]
-    assert señales[0].zone is ZoneKind.ORDER_BLOCK
+    assert [item.kind for item in señales] == [ZoneSignalKind.TOQUE_PUL]
+    assert señales[0].zone is ZoneKind.PENULTIMATE
     assert señales[0].reach == pytest.approx(94.0)
     assert señales[0].touch == pytest.approx(94.0)
     assert señales[0].inside is False
@@ -86,55 +86,55 @@ def test_la_mecha_que_entra_en_el_ob_desde_fuera_es_un_toque() -> None:
 def test_rozar_el_borde_del_ob_ya_es_tocarlo() -> None:
     """Bordes incluidos, como `Zone.contains`: llegar al borde es llegar."""
     assert (
-        classify([FUERA_OB_UP, (99.0, 95.0, 98.0)], OB_UP)[0].kind is ZoneSignalKind.TOQUE_OB
+        classify([FUERA_PUL_UP, (99.0, 95.0, 98.0)], PUL_UP)[0].kind is ZoneSignalKind.TOQUE_PUL
     )
-    assert classify([FUERA_OB_UP, (99.0, 95.01, 98.0)], OB_UP) == ()
+    assert classify([FUERA_PUL_UP, (99.0, 95.01, 98.0)], PUL_UP) == ()
 
 
 def test_atravesar_el_ob_entero_sigue_siendo_un_toque() -> None:
-    """No se inventa una rotura del OB: ésa es la rotura en contra que ya se marca."""
-    señal = classify([FUERA_OB_UP, (98.0, 90.0, 91.0)], OB_UP)[0]
+    """No se inventa una rotura del PUL: ésa es la rotura en contra que ya se marca."""
+    señal = classify([FUERA_PUL_UP, (98.0, 90.0, 91.0)], PUL_UP)[0]
 
-    assert señal.kind is ZoneSignalKind.TOQUE_OB
+    assert señal.kind is ZoneSignalKind.TOQUE_PUL
     assert señal.reach == pytest.approx(90.0)
     # El marcador se planta en la zona, no colgando por debajo de ella.
     assert señal.touch == pytest.approx(92.0)
 
 
 def test_los_toques_se_numeran_dentro_del_id() -> None:
-    bars = [FUERA_OB_UP, (98.0, 94.0, 97.0), (99.0, 97.0, 98.0), (98.0, 93.0, 96.0)]
+    bars = [FUERA_PUL_UP, (98.0, 94.0, 97.0), (99.0, 97.0, 98.0), (98.0, 93.0, 96.0)]
 
-    señales = classify(bars, OB_UP)
+    señales = classify(bars, PUL_UP)
 
     assert [item.ordinal for item in señales] == [1, 2]
     assert [item.index for item in señales] == [1, 3]
 
 
-# --- El toque del OB también se cobra desde fuera ----------------------------
+# --- El toque del PUL también se cobra desde fuera ----------------------------
 
 
 def test_la_vela_que_abre_dentro_del_ob_no_lo_toca() -> None:
     """El caso del propietario: la anterior cerró dentro, ésta ya estaba ahí."""
     dentro = (96.0, 90.0, 93.0)
 
-    assert classify([dentro, (97.0, 93.0, 96.0)], OB_UP, first=1) == ()
+    assert classify([dentro, (97.0, 93.0, 96.0)], PUL_UP, first=1) == ()
 
 
 def test_salir_del_ob_vuelve_a_armar_el_toque() -> None:
-    bars = [(96.0, 90.0, 93.0), FUERA_OB_UP, (97.0, 93.0, 96.0)]
+    bars = [(96.0, 90.0, 93.0), FUERA_PUL_UP, (97.0, 93.0, 96.0)]
 
-    señales = classify(bars, OB_UP, first=1)
+    señales = classify(bars, PUL_UP, first=1)
 
-    assert [item.kind for item in señales] == [ZoneSignalKind.TOQUE_OB]
+    assert [item.kind for item in señales] == [ZoneSignalKind.TOQUE_PUL]
     assert señales[0].index == 2
 
 
 def test_en_un_id_bajista_al_ob_se_llega_desde_abajo() -> None:
-    ob = zone(ZoneKind.ORDER_BLOCK, inner=105.0, outer=108.0, direction="bajista")
+    pul = zone(ZoneKind.PENULTIMATE, inner=105.0, outer=108.0, direction="bajista")
     dentro = (107.0, 104.0, 106.0)
 
-    assert classify([dentro, (106.0, 104.0, 105.5)], ob, first=1) == ()
-    assert classify([FUERA_OB_DOWN, (106.0, 104.0, 105.5)], ob)[0].index == 1
+    assert classify([dentro, (106.0, 104.0, 105.5)], pul, first=1) == ()
+    assert classify([FUERA_PUL_DOWN, (106.0, 104.0, 105.5)], pul)[0].index == 1
 
 
 # --- Rechazo y rotura del UL ------------------------------------------------
@@ -256,13 +256,13 @@ def test_el_ul_de_altura_cero_se_comporta_como_la_linea() -> None:
 
 def test_en_un_id_bajista_todo_va_al_reves() -> None:
     ul = zone(ZoneKind.LAST, inner=100.0, outer=98.0, direction="bajista")
-    ob = zone(ZoneKind.ORDER_BLOCK, inner=105.0, outer=108.0, direction="bajista")
+    pul = zone(ZoneKind.PENULTIMATE, inner=105.0, outer=108.0, direction="bajista")
 
     assert classify([FUERA_DOWN, (101.0, 99.0, 99.5)], ul)[0].kind is ZoneSignalKind.RECHAZO_UL
     assert classify([(101.0, 97.0, 97.5)], ul)[0].kind is ZoneSignalKind.ROTURA_UL
-    toque = classify([FUERA_OB_DOWN, (106.0, 102.0, 103.0)], ob)[0]
-    assert toque.kind is ZoneSignalKind.TOQUE_OB
-    assert toque.reach == pytest.approx(106.0), "el OB de un ID bajista se busca hacia arriba"
+    toque = classify([FUERA_PUL_DOWN, (106.0, 102.0, 103.0)], pul)[0]
+    assert toque.kind is ZoneSignalKind.TOQUE_PUL
+    assert toque.reach == pytest.approx(106.0), "el PUL de un ID bajista se busca hacia arriba"
 
 
 # --- Tramo y validación ------------------------------------------------------
@@ -324,11 +324,11 @@ def finas(bars: list[tuple[float, float, float]], target, señal, *, first=0):
 
 
 def test_el_toque_se_refecha_en_la_primera_vela_fina_que_entra() -> None:
-    grande = classify([FUERA_OB_UP, (98.0, 93.0, 96.0)], OB_UP)[0]
+    grande = classify([FUERA_PUL_UP, (98.0, 93.0, 96.0)], PUL_UP)[0]
     # Las cuatro velas finas de esa vela grande: la tercera es la que entra.
     dentro = finas(
         [(98.0, 96.0, 97.0), (97.5, 95.5, 96.0), (96.5, 94.0, 95.5), (96.0, 93.0, 94.0)],
-        OB_UP,
+        PUL_UP,
         grande,
     )
 
@@ -347,14 +347,14 @@ def test_el_toque_se_refecha_en_la_primera_vela_fina_que_entra() -> None:
 def test_sin_ninguna_vela_fina_dentro_de_la_zona_no_hay_minuto() -> None:
     """No debería pasar —las dos series salen de los mismos minutos— y si pasa,
     quien llama se queda con la vela grande en vez de inventarse un minuto."""
-    grande = classify([FUERA_OB_UP, (98.0, 93.0, 96.0)], OB_UP)[0]
+    grande = classify([FUERA_PUL_UP, (98.0, 93.0, 96.0)], PUL_UP)[0]
 
-    assert finas([(99.0, 96.0, 98.0), (98.0, 96.5, 97.0)], OB_UP, grande) is None
+    assert finas([(99.0, 96.0, 98.0), (98.0, 96.5, 97.0)], PUL_UP, grande) is None
 
 
 def test_el_minuto_del_toque_se_queda_dentro_del_tramo_que_se_le_da() -> None:
-    grande = classify([FUERA_OB_UP, (98.0, 93.0, 96.0)], OB_UP)[0]
+    grande = classify([FUERA_PUL_UP, (98.0, 93.0, 96.0)], PUL_UP)[0]
     bars = [(96.0, 93.0, 94.0), (96.0, 93.5, 95.0)]
 
-    assert finas(bars, OB_UP, grande, first=1).index == 1
-    assert finas(bars, OB_UP, grande, first=2) is None
+    assert finas(bars, PUL_UP, grande, first=1).index == 1
+    assert finas(bars, PUL_UP, grande, first=2) is None

@@ -11,10 +11,11 @@ diario, sobre H1 el de H1 y el de H4, y sobre M15 sólo el de H1. El impulso
 principal de cada gráfico lleva línea continua, sombreado de limbo y marcadores;
 el de contexto va en trazo discontinuo y sin marcadores, para que no compitan.
 
-Las **zonas** llevan su propio reparto, que no es el de los impulsos: sobre M15
-se dibujan las de H1 y sólo ésas —ahí se fecha el toque que dispara la señal, y
-la caja de H4 a esa escala sólo tapa—, y sobre H1 las de H1 y las de H4. Cada
-temporalidad tiene su color, con el relleno al 25-30 %.
+Las cajas de UL y PUL **ya no se dibujan**: tapaban el precio y decían de la zona
+lo que no decían del ID. En su lugar cada ID lleva su **marco** —las dos
+verticales son la vela que lo constituye y la que lo mata, las dos horizontales
+su ancla y su extremo—, con el color de su temporalidad. Las zonas siguen en el
+payload porque de ellas cuelgan las señales y la cascada.
 
 Del payload sale todo lo que se puede derivar en el navegador: las etiquetas de
 los puntos se componen en JavaScript y las marcas de tiempo viajan como minutos
@@ -36,7 +37,7 @@ import pandas as pd
 import plotly.offline as pyo
 
 from chronos.application.entries.cascade import CascadeMark, CascadeRun
-from chronos.application.structure.config import DAILY, H1, H4, M15, ChartsConfig
+from chronos.application.structure.config import DAILY, H1, H4
 from chronos.application.structure.detect_impulses import ImpulseRun, TimeframeAnalysis
 from chronos.application.structure.lateralization import (
     LateralizationStudy,
@@ -63,20 +64,20 @@ BULLISH = theme.SERIES[2]
 BEARISH = theme.NEGATIVE
 LIMBO_FILL = theme.INK_MUTED
 
-#: Las ZONAS, en cambio, van por TEMPORALIDAD y no por dirección: en el mismo
-#: gráfico puede haber cajas de dos —el OB de H4 sobre el gráfico de H1— y el
-#: color es lo que dice de quién es cada una. La dirección sigue leyéndose en la
-#: línea del ID y en el globo de la zona.
-ZONE_COLORS: dict[str, str] = {
+#: El MARCO de cada ID va por TEMPORALIDAD y no por dirección: en el mismo
+#: gráfico hay marcos de dos —el de H4 sobre el gráfico de H1, el de H1 sobre
+#: M15— y el color es lo que dice de quién es cada uno. La dirección sigue
+#: leyéndose en la línea del ID y en el globo.
+TIMEFRAME_COLORS: dict[str, str] = {
     DAILY: theme.VIOLET,
     H4: theme.SERIES[1],
     H1: theme.SERIES[0],
 }
 
-#: Cuánto se aclara el tono de la temporalidad para el relleno del OB. El OB es
-#: la caja grande —la vela del ancla entera— y el UL el tramo de mecha: con el
-#: mismo tono y la misma fuerza, el OB se come el gráfico.
-_OB_LIGHTEN = 0.45
+#: El recuadro que dibuja el propietario para marcar un OB (I.3). No es una zona
+#: del motor —las de la fase 2.0 se calculan y viajan en `impulses`—: es una
+#: marca a mano, y por eso lleva un color que no usa ninguna capa calculada.
+OB_MARK = theme.MAGENTA
 
 DECIMALS = 4
 
@@ -175,7 +176,6 @@ def build_payload(
     # para construir M15, su pestaña no puede quedarse ahí esperando a que
     # alguien la pulse.
     available = tuple(chart for chart in charts.charts if chart in bars)
-    zone_layout, zone_context = _zone_layout(charts, available, zoned)
     return {
         "meta": {
             "symbol": run.config.symbol,
@@ -203,9 +203,13 @@ def build_payload(
             "grid": theme.GRIDLINE,
             "surface": theme.SURFACE,
             "font": theme.FONT_FAMILY,
-            #: Un tono por temporalidad para las zonas, con el relleno del OB
-            #: aclarado: `line` es el borde de las dos, `UL` y `OB` los rellenos.
-            "zones": _zone_palette(),
+            #: Un tono por temporalidad para el marco del ID: el de H4 sobre H1
+            #: y el de H1 sobre M15 tienen que distinguirse de un vistazo.
+            "timeframes": dict(TIMEFRAME_COLORS),
+            #: El recuadro que el propietario planta a mano para marcar un OB.
+            #: Ninguna capa del motor usa este tono: en magenta sólo se dibuja lo
+            #: que ha puesto una mano.
+            "ob": OB_MARK,
         },
         "charts": list(available),
         "layout": {chart: list(charts.overlays(chart)) for chart in available},
@@ -221,22 +225,14 @@ def build_payload(
             )
             for timeframe, analysis in run.analyses.items()
         },
-        #: `False` cuando la corrida no llevaba zonas: el explorador esconde sus
-        #: casillas en vez de ofrecer capas que no pueden dibujar nada.
+        #: `False` cuando la corrida no llevaba zonas. Las cajas de UL y PUL ya no
+        #: se dibujan, pero de las zonas cuelgan las señales y la cascada: sin
+        #: ellas esas dos capas no tienen nada que enseñar.
         "hasZones": bool(zoned),
-        #: Qué zonas dibuja cada gráfico. **No es el reparto de impulsos**: en el
-        #: gráfico fino se dibujan las de H1 —el OB que la cascada lee, y donde
-        #: el toque se fecha— y NO las de H4, que a esa escala es una caja de
-        #: cuatro velas que sólo tapa; y en H1 se dibujan las suyas y las de H4,
-        #: para ver si el precio está dentro de la zona grande.
-        "zoneLayout": zone_layout,
-        #: De las anteriores, las que apaga la casilla «Zonas del contexto»: las
-        #: del DIARIO sobre otro gráfico, que son las que ocupan la pantalla.
-        "zoneContext": zone_context,
         #: Lo mismo para la capa de roturas evitadas de la fase 2.1: con la regla
         #: apagada no hay ni una y la casilla no se enseña.
         "hasAvoided": any(analysis.avoided for analysis in run.analyses.values()),
-        #: Capa de señales de zona: toques del OB y rechazos/roturas del UL. Sólo
+        #: Capa de señales de zona: toques del PUL y rechazos/roturas del UL. Sólo
         #: dibujo, y sólo donde hay zonas. Sin una sola señal la casilla no se
         #: enseña, igual que las demás capas que no pueden pintar nada.
         "hasSignals": any(measurement.items for measurement in signals.values()),
@@ -248,6 +244,10 @@ def build_payload(
         #: dónde viene aunque su padre se dibuje en otro gráfico.
         "cascadeChain": _cascade_chain(cascade),
         "hasCascade": cascade is not None and not cascade.empty,
+        #: La franja de operativa con la que se calculó la cascada. Sin ella un
+        #: gráfico sin marcas de madrugada se leería como que la regla no
+        #: encontró nada, cuando lo que pasa es que ahí no se mira.
+        "tradingWindow": _trading_window(cascade),
         #: Y para la escalera del extremo (§3.2): sin una sola extensión, todas
         #: las líneas son rectas y no hay ningún salto que marcar.
         "hasSteps": any(
@@ -266,54 +266,6 @@ def build_payload(
             if variant.mode != run.config.rules.leg_start_mode.value
         },
     }
-
-
-def _zone_palette() -> dict[str, dict[str, str]]:
-    """El borde y los dos rellenos de cada temporalidad."""
-    return {
-        timeframe: {"line": colour, "UL": colour, "OB": _lighten(colour, _OB_LIGHTEN)}
-        for timeframe, colour in ZONE_COLORS.items()
-    }
-
-
-def _lighten(colour: str, amount: float) -> str:
-    """El mismo tono mezclado con blanco, para no inventar hexadecimales."""
-    value = colour.lstrip("#")
-    mixed = (
-        round(int(value[index : index + 2], 16) * (1 - amount) + 255 * amount)
-        for index in (0, 2, 4)
-    )
-    return "#" + "".join(f"{channel:02x}" for channel in mixed)
-
-
-def _zone_layout(
-    charts: ChartsConfig,
-    available: Sequence[str],
-    zoned: dict[str, TimeframeZones],
-) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
-    """Qué zonas dibuja cada gráfico, y cuáles de ellas son opcionales.
-
-    Por defecto son las de los impulsos que ese gráfico ya dibuja. El **gráfico
-    fino** es la excepción y es a propósito: en M15 lo que se mira es si el
-    precio está dentro del OB de H1 —ahí se fecha el toque que dispara la señal—
-    y la caja de H4, cuatro veces más alta, sólo tapa. Cuando H1 lleva zonas
-    (fase 3.0), M15 dibuja las suyas y sólo las suyas.
-
-    Las opcionales son las del **Diario sobre otro gráfico**: su OB ocupa la
-    pantalla entera y por eso la casilla «Zonas del contexto» las apaga. Las
-    demás no cuelgan de ninguna casilla porque son justo lo que se quiere ver.
-    """
-    layout: dict[str, list[str]] = {}
-    optional: dict[str, list[str]] = {}
-    for chart in available:
-        drawn = [timeframe for timeframe in charts.overlays(chart) if timeframe in zoned]
-        if chart == M15 and H1 in zoned:
-            drawn = [H1]
-        layout[chart] = drawn
-        optional[chart] = [
-            timeframe for timeframe in drawn if timeframe == DAILY and chart != DAILY
-        ]
-    return layout, optional
 
 
 def _mode_impulses(variant: ModeVariant) -> dict[str, Any]:
@@ -436,10 +388,7 @@ def _impulse_payload(
         "limbo": _limbo_regions(analysis),
         "contacts": _contacts(measurement),
         "zones": _zones(zones, analysis, last),
-        #: Velas de ancla de los ID que murieron sin OB. La zona no existe, pero
-        #: el propietario necesita ver dónde estaba la candidata (§8).
-        "obCandidates": _candidates(zones, analysis, last),
-        #: Toques del OB y rechazos/roturas del UL. Vacío sin zonas.
+        #: Toques del PUL y rechazos/roturas del UL. Vacío sin zonas.
         "signals": _zone_signals(signals),
     }
 
@@ -447,7 +396,7 @@ def _impulse_payload(
 def _zones(
     zones: TimeframeZones | None, analysis: TimeframeAnalysis, last: pd.Timestamp
 ) -> list[dict[str, Any]]:
-    """Capas "Zonas UL" y "OB" (§8). Puramente visual: no interviene en nada.
+    """Capas "Zonas UL" y "PUL" (§8). Puramente visual: no interviene en nada.
 
     Cada zona viaja con dos tramos horizontales distintos, igual que las líneas
     del ID en B.1: el rectángulo lleno va del **nacimiento** al fin del ID —que
@@ -459,6 +408,9 @@ def _zones(
     la constitución y no se mueve aunque el extremo se estire después (fase 2.1,
     §3.2). Por eso su rectángulo va entero de la constitución al fin del ID,
     mientras la línea del extremo puede seguir subiendo en escalera por encima.
+
+    El PUL cuelga de una vela **anterior** al ID —la del extremo del ID previo,
+    la que llevaba su UL—, así que su `xd` queda siempre por detrás de `x0`.
     """
     if zones is None:
         return []
@@ -467,8 +419,8 @@ def _zones(
     for zoned in zones.items:
         # Un UL por ID y sólo uno: no se remarca aunque el extremo se estire.
         records.append(_zone_record(zoned, zoned.last, ends[zoned.id_num]))
-        if zoned.order_block is not None:
-            records.append(_zone_record(zoned, zoned.order_block, ends[zoned.id_num]))
+        if zoned.penultimate is not None:
+            records.append(_zone_record(zoned, zoned.penultimate, ends[zoned.id_num]))
     return records
 
 
@@ -490,47 +442,7 @@ def _zone_record(
         "o": round(zone.outer, DECIMALS),
         "ext": zone.extended,
         "flat": zone.is_flat,
-        "xc": (
-            None
-            if zone.ts_confirmation is None
-            else _minute(pd.Timestamp(zone.ts_confirmation))
-        ),
     }
-
-
-def _candidates(
-    zones: TimeframeZones | None, analysis: TimeframeAnalysis, last: pd.Timestamp
-) -> list[dict[str, Any]]:
-    """La vela del ancla de los ID sin OB confirmado, para dibujarla punteada."""
-    if zones is None:
-        return []
-    ends = _impulse_ends(analysis, last)
-    anchors = {impulse.id_num: impulse for impulse in analysis.impulses}
-    bars = analysis.bars
-    positions = {stamp: position for position, stamp in enumerate(pd.DatetimeIndex(bars.index))}
-    high = bars["high"].to_numpy(dtype=float)
-    low = bars["low"].to_numpy(dtype=float)
-
-    payload: list[dict[str, Any]] = []
-    for zoned in zones.without_order_block:
-        impulse = anchors.get(zoned.id_num)
-        if impulse is None:
-            continue
-        position = positions.get(pd.Timestamp(impulse.ts_anchor))
-        if position is None:
-            continue
-        payload.append(
-            {
-                "id": zoned.id_num,
-                "d": zoned.direction.value,
-                "xd": _minute(pd.Timestamp(impulse.ts_anchor)),
-                "x0": _minute(pd.Timestamp(zoned.ts_constitution)),
-                "x1": _minute(ends[zoned.id_num]),
-                "lo": round(float(low[position]), DECIMALS),
-                "hi": round(float(high[position]), DECIMALS),
-            }
-        )
-    return payload
 
 
 def _impulse_ends(analysis: TimeframeAnalysis, last: pd.Timestamp) -> dict[int, pd.Timestamp]:
@@ -555,7 +467,7 @@ def _zone_signals(signals: TimeframeSignals | None) -> list[dict[str, Any]]:
     fuera. La cuenta la hace el motor; aquí sólo se elige el campo.
 
     `src` es la temporalidad de la vela en la que se midió: la del ID salvo en el
-    toque del OB, que se mide en la serie fina y por eso cae **dentro** de la
+    toque del PUL, que se mide en la serie fina y por eso cae **dentro** de la
     vela grande. El replay lo necesita para saber cuándo se supo cada señal: el
     toque, al cerrar su vela de M15; el rechazo, al cerrar la de H4.
     """
@@ -589,7 +501,7 @@ def _cascade(cascade: CascadeRun | None) -> dict[str, list[dict[str, Any]]]:
     """Capa "Cascada de entrada". Puramente visual: no abre ni cierra nada.
 
     Cada marca va en el gráfico en el que se mira ese paso —el toque diario en el
-    Diario, el de H4 en H4, el OB del ID de H1 en H1— porque es donde el
+    Diario, el de H4 en H4, el PUL del ID de H1 en H1— porque es donde el
     propietario la busca. Van juntas en una lista por gráfico y el explorador las
     separa por `k`, igual que las señales de zona.
 
@@ -627,13 +539,29 @@ def _cascade_mark(mark: CascadeMark) -> dict[str, Any]:
         record["end"] = _minute(pd.Timestamp(mark.window_end))
     if mark.window_reason is not None:
         # Por qué se cerró la ventana. Es la regla que el propietario audita:
-        # sin esto, «hasta aquí» no dice si fue el OB, el UL o el ID.
+        # sin esto, «hasta aquí» no dice si fue el PUL, el UL o el ID.
         record["why"] = mark.window_reason.value
     if mark.zone_start is not None:
-        # La zona del OB de H1 se dibuja sobre la vela del ancla de su ID, que
+        # La zona del PUL de H1 se dibuja sobre la vela del extremo anterior, que
         # queda detrás de la marca: sin este extremo no hay rectángulo.
         record["x0"] = _minute(pd.Timestamp(mark.zone_start))
     return record
+
+
+def _trading_window(cascade: CascadeRun | None) -> dict[str, str]:
+    """La franja en la que se opera, tal cual la usó la cascada.
+
+    Va como dato y no como texto ya montado, igual que el resto del payload: el
+    explorador la escribe donde toca.
+    """
+    if cascade is None:
+        return {}
+    window = cascade.window
+    return {
+        "tz": window.timezone,
+        "from": f"{window.start.hour:02d}:{window.start.minute:02d}",
+        "to": f"{window.end.hour:02d}:{window.end.minute:02d}",
+    }
 
 
 def _cascade_chain(cascade: CascadeRun | None) -> dict[str, list[Any]]:
@@ -721,6 +649,11 @@ def _impulse_list(impulses: list[Any], last: pd.Timestamp) -> list[dict[str, Any
             #: dominio al constituir; aquí sólo se transporta para poder marcarlo.
             "ec": impulse.extreme_bar_direction.value,
             "w": impulse.extreme_on_counter_bar,
+            #: Si el ID sigue VIVO al final del histórico. `x1` es entonces la
+            #: última vela y no la de su muerte: el marco llega al presente y
+            #: tiene que poder decir por qué en vez de fechar una muerte que no
+            #: ha ocurrido.
+            "v": impulse.ts_end is None,
             **_extreme_steps(impulse),
         }
         for impulse in impulses

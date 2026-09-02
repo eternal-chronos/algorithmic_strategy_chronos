@@ -1,4 +1,4 @@
-"""Señales de zona de una corrida: toques del OB y rechazos/roturas del UL.
+"""Señales de zona de una corrida: toques del PUL y rechazos/roturas del UL.
 
 Capa fina sobre `domain/structure/zone_signals.py`: recorre los impulsos que la
 fase 2.0 ya zonificó, le da a cada zona el tramo de barras en el que estuvo viva
@@ -13,14 +13,14 @@ resultado ya cerrado.
 Sólo existen donde existen las zonas: Diario y H4, las dos temporalidades con
 detector. En H1 y M15 no hay ID propio y por tanto tampoco señales propias.
 
-**El toque del OB no espera al cierre de la vela grande.** Tocar es un asunto de
+**El toque del PUL no espera al cierre de la vela grande.** Tocar es un asunto de
 mechas: en cuanto el precio entra en la zona ya está tocada, y esperar cuatro
 horas a que cierre la vela de H4 sería fechar la señal tarde. Pero **la vela del
 ID sigue mandando**: es la que dice si el precio había salido de la zona y, por
 tanto, si esto es una visita nueva o la misma de antes. Las dos cosas a la vez:
 
 1. se clasifica en la temporalidad del ID, una señal por vela y sólo si el cierre
-   anterior estaba fuera —si la vela grande cerró dentro del OB, la siguiente
+   anterior estaba fuera —si la vela grande cerró dentro del PUL, la siguiente
    *empieza dentro* y no toca nada—;
 2. y esa señal se **re-fecha** en la vela de la serie más corta de la corrida
    —M15 en el reparto por defecto— en la que el precio entró en la zona, con los
@@ -61,7 +61,7 @@ class ImpulseSignal:
     timestamp: datetime
     signal: ZoneSignal
     #: Temporalidad de la vela en la que se midió. Es la del ID salvo en el toque
-    #: del OB, que se mide en la serie fina para no esperar al cierre de la vela
+    #: del PUL, que se mide en la serie fina para no esperar al cierre de la vela
     #: grande. El explorador la necesita para saber cuándo se supo la señal.
     source: str = ""
 
@@ -116,7 +116,7 @@ def detect_zone_signals(run: ImpulseRun, zones: ZonesRun | None) -> ZoneSignalsR
 
 
 def _finest_chart(run: ImpulseRun) -> tuple[str, CandleSeries] | None:
-    """La serie de vela más corta de la corrida: donde se fecha el toque del OB.
+    """La serie de vela más corta de la corrida: donde se fecha el toque del PUL.
 
     Es uno de los gráficos que la corrida ya construyó —M15 en el reparto por
     defecto—, no un histórico aparte. Si el reparto no llevara ninguno más fino
@@ -136,7 +136,7 @@ def _signals_of(
     fine: tuple[str, CandleSeries] | None,
 ) -> TimeframeSignals:
     own = CandleSeries.of(analysis.bars)
-    # El toque del OB se fecha en la vela fina; si no hay ninguna más corta que
+    # El toque del PUL se fecha en la vela fina; si no hay ninguna más corta que
     # la del ID, se queda en la suya y todo funciona igual.
     touching_name, touching = (
         fine if fine is not None and len(fine[1]) > len(own) else (analysis.timeframe, own)
@@ -148,7 +148,7 @@ def _signals_of(
         # Un ID vivo sigue produciendo señales hasta la última vela del histórico.
         end = zoned.index_end if zoned.index_end is not None else last_bar
         for zone in zoned.zones():
-            first = _first_bar(zoned, zone)
+            first = _first_bar(zoned)
             if first > end:
                 continue
             for signal in classify_zone_signals(
@@ -161,7 +161,7 @@ def _signals_of(
             ):
                 moment = (
                     _at_the_moment(signal, zone, own, touching)
-                    if zone.kind is ZoneKind.ORDER_BLOCK
+                    if zone.kind is ZoneKind.PENULTIMATE
                     else None
                 )
                 series, measured = (
@@ -178,7 +178,7 @@ def _signals_of(
                     )
                 )
 
-    # Por marca de tiempo y no por índice: el toque del OB viene de otra serie y
+    # Por marca de tiempo y no por índice: el toque del PUL viene de otra serie y
     # sus posiciones no son comparables con las de la temporalidad del ID.
     found.sort(key=lambda item: (item.timestamp, item.kind.value, item.id_num))
     return TimeframeSignals(timeframe=analysis.timeframe, items=tuple(found))
@@ -228,15 +228,13 @@ def _same_span(
     return (int(start), stop - 1) if start < stop else None
 
 
-def _first_bar(zoned: ImpulseZones, zone: Zone) -> int:
+def _first_bar(zoned: ImpulseZones) -> int:
     """Primera barra que puede llevar señal: la siguiente al nacimiento de la zona.
 
-    El UL nace al constituirse el ID; el OB, cuando además se ha confirmado, que
-    puede ser antes (dentro de la pierna) o después. Se toma el índice que la
-    fase 2.0 ya registró en vez de volver a buscar la vela por su marca de
-    tiempo: buscarla sería tener una segunda opinión sobre cuándo nació.
+    Las dos nacen a la vez, al constituirse el ID: el UL sobre la vela del
+    extremo y el PUL sobre la del extremo anterior, que ya estaba cerrada. Se
+    toma el índice que la fase 2.0 ya registró en vez de volver a buscar la vela
+    por su marca de tiempo: buscarla sería tener una segunda opinión sobre
+    cuándo nació.
     """
-    birth = zoned.index_constitution
-    if zone.kind is ZoneKind.ORDER_BLOCK and zone.index_confirmation is not None:
-        birth = max(birth, zone.index_confirmation)
-    return birth + 1
+    return zoned.index_constitution + 1

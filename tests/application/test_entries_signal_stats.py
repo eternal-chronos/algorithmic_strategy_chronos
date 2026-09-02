@@ -35,7 +35,7 @@ from tests.conftest import make_m1_history
 
 PARES = (
     ("ID de H1 nace después del toque", "ID de H1 ya venía alineado"),
-    ("OB de H1 solapa el de H4", "OB de H1 fuera del de H4"),
+    ("PUL de H1 solapa el de H4", "PUL de H1 fuera del de H4"),
     (f"señal en ≤{FAST_BARS} velas H1", f"señal en >{FAST_BARS} velas H1"),
     ("a favor del ID diario", "sin ID diario a favor"),
     ("alcista", "bajista"),
@@ -101,8 +101,8 @@ def test_el_embudo_dice_lo_que_la_cascada_ya_habia_marcado(
     assert embudo is not None
     assert embudo.searched == counts[CascadeStep.BUSCAR_H1.value]
     assert embudo.vetoed == counts[CascadeStep.H4_DESCARTADO.value]
-    assert embudo.confirmed == counts[CascadeStep.CONFIRMA_OB_H1.value]
-    assert embudo.signalled == counts[CascadeStep.TOQUE_OB_H1.value]
+    assert embudo.confirmed == counts[CascadeStep.CONFIRMA_PUL_H1.value]
+    assert embudo.signalled == counts[CascadeStep.TOQUE_PUL_H1.value]
     assert embudo.touches == embudo.searched + embudo.vetoed
 
 

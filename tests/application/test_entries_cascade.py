@@ -2,14 +2,16 @@
 
 Lo que se comprueba aquí es sobre todo lo que la cascada **no** hace: no sale sin
 zonas ni sin el ID de H1, no pide permiso al Diario para empezar, no mira nada que
-vaya en contra de un OB diario vigente, no se sale de sus ventanas, no marca un OB
-de H1 antes de que exista, no señala un toque de ese OB antes de haberlo marcado
+vaya en contra de un PUL diario vigente, no se sale de sus ventanas, no marca un PUL
+de H1 antes de que exista, no señala un toque de ese PUL antes de haberlo marcado
 ni después de morir el ID que lo trajo, no espera al cierre de la vela de H1 para
 cobrar ese toque, no cuelga un paso de otro que no existe y no cambia ni un número
 de las fases 1, 2.0 y 2.1.
 """
 
 from __future__ import annotations
+
+from datetime import time
 
 import pandas as pd
 import pytest
@@ -20,6 +22,7 @@ from chronos.application.entries.cascade import (
     CascadeStep,
     detect_cascade,
 )
+from chronos.application.entries.trading_window import TRADING_WINDOW, TradingWindow
 from chronos.application.structure.config import (
     DAILY,
     H1,
@@ -36,6 +39,7 @@ from chronos.application.structure.config import (
 from chronos.application.structure.detect_impulses import DetectDominantImpulses, ImpulseRun
 from chronos.application.structure.zone_signals import detect_zone_signals
 from chronos.application.structure.zones import ZonesRun, detect_zones
+from chronos.domain.errors import DomainError
 from chronos.domain.structure.enums import ImpulseDirection
 from chronos.domain.structure.zone_signals import ZoneSignalKind
 from chronos.infrastructure.structure.aggregation import aggregate_all
@@ -103,8 +107,8 @@ def test_la_corrida_sintetica_recorre_los_dos_escalones(cascade: CascadeRun) -> 
     counts = cascade.counts()
 
     assert counts[CascadeStep.BUSCAR_H1.value] > 0
-    assert counts[CascadeStep.CONFIRMA_OB_H1.value] > 0
-    assert counts[CascadeStep.TOQUE_OB_H1.value] > 0
+    assert counts[CascadeStep.CONFIRMA_PUL_H1.value] > 0
+    assert counts[CascadeStep.TOQUE_PUL_H1.value] > 0
 
 
 def test_cada_paso_se_dibuja_en_su_grafico(cascade: CascadeRun) -> None:
@@ -112,8 +116,8 @@ def test_cada_paso_se_dibuja_en_su_grafico(cascade: CascadeRun) -> None:
         CascadeStep.ZONA_DIARIA: DAILY,
         CascadeStep.H4_DESCARTADO: H4,
         CascadeStep.BUSCAR_H1: H4,
-        CascadeStep.CONFIRMA_OB_H1: H1,
-        CascadeStep.TOQUE_OB_H1: H1,
+        CascadeStep.CONFIRMA_PUL_H1: H1,
+        CascadeStep.TOQUE_PUL_H1: H1,
     }
     for mark in cascade.marks:
         assert mark.chart == esperado[mark.step]
@@ -123,14 +127,14 @@ def _toques(run: ImpulseRun, zones: ZonesRun, timeframe: str) -> set:
     return {
         item.timestamp
         for item in detect_zone_signals(run, zones).per_timeframe[timeframe].items
-        if item.kind is ZoneSignalKind.TOQUE_OB
+        if item.kind is ZoneSignalKind.TOQUE_PUL
     }
 
 
 def test_la_cascada_empieza_en_un_toque_del_ob_de_h4(
     cascade: CascadeRun, run: ImpulseRun, zones: ZonesRun
 ) -> None:
-    """No se redefine el toque: es el `TOQUE_OB` que la fase 2.0 ya calculaba,
+    """No se redefine el toque: es el `TOQUE_PUL` que la fase 2.0 ya calculaba,
     y no cuelga de nada porque el Diario no es un escalón."""
     toques = _toques(run, zones, H4)
 
@@ -205,7 +209,7 @@ def test_ningun_paso_se_sabe_antes_que_su_padre(cascade: CascadeRun, run: Impuls
     vela puede ser la misma que contiene el toque de H4 —el toque cae en un
     minuto cualquiera de ella—: lo que no puede es haber cerrado antes del
     toque, porque entonces se habría sabido antes de que hubiera nada que
-    buscar. Un paso medido en la vela FINA —los dos toques del OB— se sabe en el
+    buscar. Un paso medido en la vela FINA —los dos toques del PUL— se sabe en el
     instante en que se fecha, así que le basta con no adelantarse a su padre.
     """
     padres = {mark.seq: mark for mark in cascade.marks}
@@ -263,7 +267,7 @@ def _fuera_por_el_exterior(cierres, mark: CascadeMark):
 def test_irse_del_ob_de_h4_a_favor_ya_no_cierra_la_busqueda(
     cascade: CascadeRun, run: ImpulseRun
 ) -> None:
-    """La ventana la cierran romper el OB o llegar al UL, no irse hacia arriba."""
+    """La ventana la cierran romper el PUL o llegar al UL, no irse hacia arriba."""
     bars = run.analyses[H4].bars
     sobrevividas = 0
 
@@ -278,7 +282,7 @@ def test_irse_del_ob_de_h4_a_favor_ya_no_cierra_la_busqueda(
             a_favor = cierres < mark.low
         if a_favor.any():
             sobrevividas += 1
-        # Ninguna vela rompió el OB dentro de la ventana salvo, como mucho, la
+        # Ninguna vela rompió el PUL dentro de la ventana salvo, como mucho, la
         # última: la que la cierra es justo la que lo atravesó.
         assert not _fuera_por_el_exterior(cierres, mark)[:-1].any()
 
@@ -311,9 +315,9 @@ def test_la_busqueda_se_cierra_al_llegar_al_ul(
 
 
 def test_una_confirmacion_por_busqueda_y_ni_una_mas(cascade: CascadeRun) -> None:
-    """La primera cierra la búsqueda: un OB de H1 por ventana y ni uno más."""
+    """La primera cierra la búsqueda: un PUL de H1 por ventana y ni uno más."""
     por_padre: dict[int, int] = {}
-    for mark in _of(cascade, CascadeStep.CONFIRMA_OB_H1):
+    for mark in _of(cascade, CascadeStep.CONFIRMA_PUL_H1):
         por_padre[mark.parent] = por_padre.get(mark.parent, 0) + 1
 
     assert por_padre
@@ -327,7 +331,7 @@ def test_las_confirmaciones_cuelgan_de_una_busqueda_y_hablan_del_id_de_h1(
     que hacen falta para remontarla, y cada una vive en un sitio."""
     padres = {mark.seq: mark for mark in cascade.marks}
 
-    for mark in _of(cascade, CascadeStep.CONFIRMA_OB_H1):
+    for mark in _of(cascade, CascadeStep.CONFIRMA_PUL_H1):
         padre = padres[mark.parent]
         assert padre.step is CascadeStep.BUSCAR_H1
         assert padre.timeframe == H4
@@ -337,15 +341,15 @@ def test_las_confirmaciones_cuelgan_de_una_busqueda_y_hablan_del_id_de_h1(
 def test_el_ob_marcado_es_el_del_id_de_h1_alineado(
     cascade: CascadeRun, zones: ZonesRun
 ) -> None:
-    """Lo que se marca no es un patrón de velas: es el OB del ID de H1, con sus
-    bordes y su vela del ancla, y el ID va en la dirección del de H4."""
+    """Lo que se marca no es un patrón de velas: es el PUL del ID de H1, con sus
+    bordes y su vela definitoria, y el ID va en la dirección del de H4."""
     por_id = {item.id_num: item for item in zones.per_timeframe[H1].items}
 
-    marcas = _of(cascade, CascadeStep.CONFIRMA_OB_H1)
+    marcas = _of(cascade, CascadeStep.CONFIRMA_PUL_H1)
     assert marcas
     for mark in marcas:
         zoned = por_id[mark.id_num]
-        block = zoned.order_block
+        block = zoned.penultimate
         assert block is not None
         assert zoned.direction is mark.direction
         assert (mark.low, mark.high, mark.level) == (block.low, block.high, block.inner)
@@ -357,14 +361,14 @@ def test_el_ob_de_h1_no_se_marca_antes_de_existir(
     cascade: CascadeRun, zones: ZonesRun, run: ImpulseRun
 ) -> None:
     """La zona nace con lo último que llegue: la constitución del ID de H1 o la
-    confirmación de su OB. Marcarla antes sería mirar al futuro."""
+    confirmación de su PUL. Marcarla antes sería mirar al futuro."""
     por_id = {item.id_num: item for item in zones.per_timeframe[H1].items}
     hourly = run.analyses[H1].bars.index
 
-    for mark in _of(cascade, CascadeStep.CONFIRMA_OB_H1):
+    for mark in _of(cascade, CascadeStep.CONFIRMA_PUL_H1):
         zoned = por_id[mark.id_num]
         assert mark.timestamp >= zoned.ts_constitution
-        assert mark.timestamp >= zoned.order_block.ts_birth
+        assert mark.timestamp >= zoned.penultimate.ts_birth
         # Y el ID seguía vivo: la marca cae en su tramo, no después de morir.
         assert zoned.ts_end is None or mark.timestamp <= zoned.ts_end
         assert pd.Timestamp(mark.timestamp) in hourly
@@ -373,16 +377,16 @@ def test_el_ob_de_h1_no_se_marca_antes_de_existir(
 def test_la_senal_es_el_toque_del_ob_de_h1_y_cuelga_de_su_confirmacion(
     cascade: CascadeRun, run: ImpulseRun, zones: ZonesRun
 ) -> None:
-    """El paso que cierra la cascada no redefine nada: es el `TOQUE_OB` que la
-    fase 2.0 ya calcula, leído sobre el OB del ID de H1 que se marcó."""
+    """El paso que cierra la cascada no redefine nada: es el `TOQUE_PUL` que la
+    fase 2.0 ya calcula, leído sobre el PUL del ID de H1 que se marcó."""
     toques = _toques(run, zones, H1)
     padres = {mark.seq: mark for mark in cascade.marks}
 
-    marcas = _of(cascade, CascadeStep.TOQUE_OB_H1)
+    marcas = _of(cascade, CascadeStep.TOQUE_PUL_H1)
     assert marcas
     for mark in marcas:
         padre = padres[mark.parent]
-        assert padre.step is CascadeStep.CONFIRMA_OB_H1
+        assert padre.step is CascadeStep.CONFIRMA_PUL_H1
         assert mark.timeframe == H1
         assert mark.id_num == padre.id_num
         assert mark.direction is padre.direction
@@ -398,7 +402,7 @@ def test_el_toque_del_ob_de_h1_no_espera_al_cierre_de_la_vela(
     hourly = run.chart_bars[H1].index
     fina = run.chart_bars[M15].index
 
-    marcas = _of(cascade, CascadeStep.TOQUE_OB_H1)
+    marcas = _of(cascade, CascadeStep.TOQUE_PUL_H1)
     assert marcas
     for mark in marcas:
         assert mark.source == M15
@@ -410,7 +414,7 @@ def test_el_toque_del_ob_de_h1_no_espera_al_cierre_de_la_vela(
 
 def test_un_toque_por_confirmacion_y_ni_uno_mas(cascade: CascadeRun) -> None:
     por_padre: dict[int, int] = {}
-    for mark in _of(cascade, CascadeStep.TOQUE_OB_H1):
+    for mark in _of(cascade, CascadeStep.TOQUE_PUL_H1):
         por_padre[mark.parent] = por_padre.get(mark.parent, 0) + 1
 
     assert por_padre
@@ -422,15 +426,15 @@ def test_el_toque_muere_con_la_ventana_de_h4(
 ) -> None:
     """Cerrada la búsqueda no hay señal, aunque el ID de H1 siga vivo.
 
-    Lo atan las dos cosas y manda la que llegue antes: por abajo, que el OB de
+    Lo atan las dos cosas y manda la que llegue antes: por abajo, que el PUL de
     H1 exista; por arriba, la ventana que mandó bajar a buscarlo.
     """
     por_id = {item.id_num: item for item in zones.per_timeframe[H1].items}
     padres = {mark.seq: mark for mark in cascade.marks}
 
-    for mark in _of(cascade, CascadeStep.TOQUE_OB_H1):
+    for mark in _of(cascade, CascadeStep.TOQUE_PUL_H1):
         zoned = por_id[mark.id_num]
-        assert mark.timestamp >= zoned.order_block.ts_birth
+        assert mark.timestamp >= zoned.penultimate.ts_birth
         assert zoned.ts_end is None or mark.timestamp <= zoned.ts_end
         busqueda = padres[padres[mark.parent].parent]
         assert busqueda.window_end is None or mark.timestamp < busqueda.window_end
@@ -442,7 +446,7 @@ def test_el_toque_no_se_marca_antes_de_que_se_marcara_el_ob(
     """La señal es tocar una zona ya marcada: antes de eso no hay nada que tocar."""
     padres = {mark.seq: mark for mark in cascade.marks}
 
-    for mark in _of(cascade, CascadeStep.TOQUE_OB_H1):
+    for mark in _of(cascade, CascadeStep.TOQUE_PUL_H1):
         confirmacion = padres[mark.parent]
         assert mark.timestamp >= confirmacion.timestamp
         assert mark.timestamp >= padres[confirmacion.parent].timestamp
@@ -460,3 +464,89 @@ def test_la_cascada_no_mueve_ni_un_impulso(run: ImpulseRun, zones: ZonesRun) -> 
     detect_cascade(run, zones)
 
     pd.testing.assert_frame_equal(run.table(), antes)
+
+
+# --- La franja de operativa: 03:00 a 12:00 de Nueva York ---------------------
+
+
+def _hora_ny(mark: CascadeMark) -> time:
+    return pd.Timestamp(mark.timestamp).tz_convert(TRADING_WINDOW.timezone).time()
+
+
+def test_la_franja_es_la_hora_de_nueva_york_con_dst_real() -> None:
+    """Un desfase fijo en UTC no sirve: la franja se mueve dos veces al año.
+
+    Las 07:30 UTC son las 03:30 de Nueva York en verano —dentro— y las 02:30 en
+    invierno —fuera—, y es exactamente la diferencia que separa operar de no
+    operar en la primera media hora de Londres.
+    """
+    assert TRADING_WINDOW.contains(pd.Timestamp("2024-07-01 07:30", tz="UTC"))
+    assert not TRADING_WINDOW.contains(pd.Timestamp("2024-01-08 07:30", tz="UTC"))
+    # Semiabierta: se opera a las 03:00 en punto y ya no a las 12:00.
+    assert TRADING_WINDOW.contains(pd.Timestamp("2024-07-01 07:00", tz="UTC"))
+    assert not TRADING_WINDOW.contains(pd.Timestamp("2024-07-01 16:00", tz="UTC"))
+
+
+def test_fuera_de_la_franja_no_se_busca_ni_se_senala(cascade: CascadeRun) -> None:
+    """Los cuatro pasos que miran el mercado caen dentro de la franja.
+
+    El descarte por el veto diario también: si el toque de H4 llega fuera de
+    hora no se mira, y lo que no se mira no deja marca de ninguna clase.
+    """
+    operativos = (
+        CascadeStep.BUSCAR_H1,
+        CascadeStep.H4_DESCARTADO,
+        CascadeStep.CONFIRMA_PUL_H1,
+        CascadeStep.TOQUE_PUL_H1,
+    )
+    marcas = [mark for mark in cascade.marks if mark.step in operativos]
+
+    assert marcas
+    for mark in marcas:
+        assert TRADING_WINDOW.start <= _hora_ny(mark) < TRADING_WINDOW.end, mark
+
+
+def test_el_veto_del_diario_corre_a_todas_horas(cascade: CascadeRun) -> None:
+    """Prohibir no es operar: el tramo diario se levanta con su vela, sea la hora
+    que sea. Recortarlo a la franja permitiría mirar en contra del Diario."""
+    tramos = _of(cascade, CascadeStep.ZONA_DIARIA)
+
+    assert tramos
+    assert any(
+        not (TRADING_WINDOW.start <= _hora_ny(mark) < TRADING_WINDOW.end)
+        for mark in tramos
+    )
+
+
+def test_la_franja_recorta_lo_que_la_maquina_veria_sin_ella(
+    run: ImpulseRun, zones: ZonesRun, cascade: CascadeRun
+) -> None:
+    """Con el día entero abierto salen más señales: la franja quita, no adorna."""
+    entera = detect_cascade(
+        run, zones, TradingWindow(start=time(0, 0), end=time(23, 45))
+    )
+    con_franja = cascade.counts()
+    sin_franja = entera.counts()
+
+    assert sin_franja[CascadeStep.BUSCAR_H1.value] > con_franja[CascadeStep.BUSCAR_H1.value]
+    assert (
+        sin_franja[CascadeStep.TOQUE_PUL_H1.value]
+        > con_franja[CascadeStep.TOQUE_PUL_H1.value]
+    )
+    # El veto no depende de la hora: los mismos tramos con una franja y con otra.
+    assert (
+        sin_franja[CascadeStep.ZONA_DIARIA.value]
+        == con_franja[CascadeStep.ZONA_DIARIA.value]
+    )
+
+
+def test_una_franja_que_no_empieza_antes_de_acabar_no_es_una_franja() -> None:
+    with pytest.raises(DomainError):
+        TradingWindow(start=time(12, 0), end=time(3, 0))
+
+
+def test_la_corrida_dice_con_que_franja_se_calculo(cascade: CascadeRun) -> None:
+    """Un recuento sin la franja al lado no se puede leer: un tramo sin marcas
+    puede ser que no hubiera nada o que a esa hora no se opere."""
+    assert cascade.window == TRADING_WINDOW
+    assert cascade.window.label == "03:00 a 12:00 de America/New_York"

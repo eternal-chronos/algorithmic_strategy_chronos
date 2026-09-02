@@ -33,12 +33,11 @@ from chronos.application.structure.evidence import (
 from chronos.application.structure.zones import detect_zones
 from chronos.domain.structure.body import BodyBar
 from chronos.domain.structure.detector import DominantImpulseDetector
-from chronos.domain.structure.enums import AnchorMode, BodyDirection, SeedMode
+from chronos.domain.structure.enums import AnchorMode, SeedMode
 from chronos.domain.structure.errors import LookaheadError
 from chronos.domain.structure.impulse import DominantImpulse
 from chronos.domain.structure.synthetic_zones import (
     MIRROR_CENTRE,
-    SYNTHETIC_DOJI_OB,
     SYNTHETIC_ZONES_DOWN,
     SYNTHETIC_ZONES_START,
     SYNTHETIC_ZONES_UP,
@@ -50,7 +49,7 @@ from chronos.domain.structure.zones import (
     ZoneBook,
     ZoneKind,
     last_zone,
-    order_block_zone,
+    penultimate_zone,
 )
 
 STEP = pd.Timedelta(hours=4)
@@ -62,7 +61,6 @@ def collect(config: ImpulseConfig, series: Mapping[str, pd.DataFrame]) -> Eviden
         groups=(
             _synthetic_up(),
             _synthetic_down(),
-            _synthetic_doji(),
             _lookahead(),
             _zones_off(config, series),
             _regression(config, series),
@@ -73,7 +71,7 @@ def collect(config: ImpulseConfig, series: Mapping[str, pd.DataFrame]) -> Eviden
 # --- El día sintético del §6 -------------------------------------------------
 
 
-#: Un impulso con sus dos zonas. El OB puede no existir.
+#: Un impulso con sus dos zonas. El PUL puede no existir.
 Zoned = tuple[DominantImpulse, Zone, Zone | None]
 
 
@@ -112,14 +110,13 @@ def _zoned(
                 index_extreme=impulse.index_extreme_at_constitution,
                 ts_constitution=impulse.ts_constitution,
             ),
-            order_block_zone(
+            penultimate_zone(
                 series,
                 id_num=impulse.id_num,
                 timeframe="H4",
                 direction=impulse.direction,
-                index_anchor=impulse.index_anchor,
+                index_previous_extreme=impulse.index_penultimate,
                 ts_constitution=impulse.ts_constitution,
-                index_end=impulse.index_end,
             ),
         )
         for impulse in detector.impulses
@@ -142,7 +139,7 @@ def _synthetic_up() -> CheckGroup:
     """Los casos construibles del §6, con el esperado escrito antes de correr."""
     _, items = _zoned(SYNTHETIC_ZONES_UP, anchor_mode=AnchorMode.A1_LAST_COUNTER_BODY)
     uls = [zone for _, zone, _ in items]
-    obs = [block for _, _, block in items]
+    puls = [zone for _, _, zone in items]
 
     checks = [
         Check(
@@ -178,31 +175,42 @@ def _synthetic_up() -> CheckGroup:
             f"altura {uls[2].height:.2f}, plana {uls[2].is_flat}",
         ),
         Check(
-            "5. OB confirmado 2 barras tras constituir (ID#4)",
-            "constituye en b13, confirma en b15, nace al confirmarse",
-            f"constituye en b{items[3][0].index_constitution}, "
-            f"confirma en b{obs[3].index_confirmation}, "  # type: ignore[union-attr]
-            f"nace {'al confirmarse' if obs[3].ts_birth == obs[3].ts_confirmation else 'al constituirse'}",  # type: ignore[union-attr]
+            "5. PUL = el cuerpo de la vela del UL anterior (ID#2, vela b2)",
+            "vela b2, interior 2010.00, exterior 2005.00, altura 5.00",
+            f"vela b{puls[1].index_defining}, interior {puls[1].inner:.2f}, "  # type: ignore[union-attr]
+            f"exterior {puls[1].outer:.2f}, altura {puls[1].height:.2f}",  # type: ignore[union-attr]
         ),
         Check(
-            "6. OB que nunca se confirma (ID#5)",
-            "sin OB, pero con UL de altura 1.00",
-            f"{'sin OB' if obs[4] is None else 'con OB'}, "
-            f"pero con UL de altura {uls[4].height:.2f}",
+            "5b. el PUL nace con el ID, sin esperar a nada (ID#4)",
+            "nace al constituirse",
+            "nace al constituirse"
+            if puls[3].ts_birth == items[3][0].ts_constitution  # type: ignore[union-attr]
+            else "nace más tarde",
         ),
         Check(
-            "7. la vela que constituye confirma el OB",
-            "IMPOSIBLE: 0 casos (la constituyente es del color contrario)",
-            f"IMPOSIBLE: {sum(1 for impulse, _, block in items if block is not None and block.index_confirmation == impulse.index_constitution)} casos "
-            f"(la constituyente es del color contrario)",
+            "6. el primer ID del histórico no tiene PUL (ID#1)",
+            "sin PUL, pero con UL de altura 2.00",
+            f"{'sin PUL' if puls[0] is None else 'con PUL'}, "
+            f"pero con UL de altura {uls[0].height:.2f}",
         ),
         Check(
-            "el OB cubre el cuerpo y el UL no (ID#4)",
-            "OB [2023.00, 2045.00] contiene 2030.00; UL [2034.00, 2035.00] no",
-            f"OB [{obs[3].low:.2f}, {obs[3].high:.2f}] "  # type: ignore[union-attr]
-            f"{'contiene' if obs[3].contains(2030.00) else 'no contiene'} 2030.00; "  # type: ignore[union-attr]
-            f"UL [{uls[3].low:.2f}, {uls[3].high:.2f}] "
-            f"{'contiene' if uls[3].contains(2030.00) else 'no'}",
+            "6b. y es el único que se queda sin PUL",
+            "1 de 5",
+            f"{sum(1 for zone in puls if zone is None)} de {len(puls)}",
+        ),
+        Check(
+            "7. UL y PUL se reparten la vela b2 sin solaparse",
+            "UL#1 [2010.00, 2012.00] y PUL#2 [2005.00, 2010.00]",
+            f"UL#1 [{uls[0].low:.2f}, {uls[0].high:.2f}] y "
+            f"PUL#2 [{puls[1].low:.2f}, {puls[1].high:.2f}]",  # type: ignore[union-attr]
+        ),
+        Check(
+            "el PUL cubre el cuerpo y el UL no (ID#5, vela b12)",
+            "PUL [2030.00, 2034.00] contiene 2032.00; UL [2039.00, 2040.00] no",
+            f"PUL [{puls[4].low:.2f}, {puls[4].high:.2f}] "  # type: ignore[union-attr]
+            f"{'contiene' if puls[4].contains(2032.00) else 'no contiene'} 2032.00; "  # type: ignore[union-attr]
+            f"UL [{uls[4].low:.2f}, {uls[4].high:.2f}] "
+            f"{'contiene' if uls[4].contains(2032.00) else 'no'}",
         ),
     ]
     return CheckGroup(
@@ -224,14 +232,22 @@ def _synthetic_down() -> CheckGroup:
         return 2 * MIRROR_CENTRE - price
 
     mismatches = []
-    for (up_imp, up_ul, up_ob), (down_imp, down_ul, down_ob) in zip(arriba, abajo, strict=True):
+    for (up_imp, up_ul, up_pul), (down_imp, down_ul, down_pul) in zip(arriba, abajo, strict=True):
         same = (
             down_imp.index_constitution == up_imp.index_constitution
             and abs(down_ul.inner - reflect(up_ul.inner)) < 1e-9
             and abs(down_ul.outer - reflect(up_ul.outer)) < 1e-9
             and down_ul.extended == up_ul.extended
             and down_ul.is_flat == up_ul.is_flat
-            and (down_ob is None) == (up_ob is None)
+            and (down_pul is None) == (up_pul is None)
+            and (
+                up_pul is None
+                or (
+                    down_pul is not None
+                    and abs(down_pul.inner - reflect(up_pul.inner)) < 1e-9
+                    and abs(down_pul.outer - reflect(up_pul.outer)) < 1e-9
+                )
+            )
         )
         if not same:
             mismatches.append(up_imp.id_num)
@@ -251,62 +267,21 @@ def _synthetic_down() -> CheckGroup:
     )
 
 
-def _synthetic_doji() -> CheckGroup:
-    """§6.8 — el doji en posición de OB, en las dos lecturas del ancla."""
-    series_a2, con_a2 = _zoned(SYNTHETIC_DOJI_OB, anchor_mode=AnchorMode.A2_FIRST_LEG_BAR)
-    series_a1, con_a1 = _zoned(SYNTHETIC_DOJI_OB, anchor_mode=AnchorMode.A1_LAST_COUNTER_BODY)
-    a2_anchor = con_a2[1][0].index_anchor
-    a1_anchor = con_a1[1][0].index_anchor
-
-    return CheckGroup(
-        title="Z.3 Doji en posición de OB (§6.8)",
-        note=(
-            "Sólo existe con ANCHOR_MODE = A2. Con el A1 del proyecto el ancla sale de la "
-            "última vela CONTRARIA previa a la pierna, y un doji no es contrario a nada: "
-            "por eso el recuento del histórico sale en cero. Las mismas ocho velas leídas "
-            "de las dos formas."
-        ),
-        checks=(
-            Check(
-                "A2: la vela del ancla",
-                "b4, doji",
-                f"b{a2_anchor}, {series_a2.direction_of(a2_anchor).value}",
-            ),
-            Check(
-                "A2: el OB del doji existe igual",
-                "altura 1.00, confirma en b5",
-                f"altura {con_a2[1][2].height:.2f}, "  # type: ignore[union-attr]
-                f"confirma en b{con_a2[1][2].index_confirmation}",  # type: ignore[union-attr]
-            ),
-            Check(
-                "A1: la vela del ancla sobre las MISMAS velas",
-                "b3, bearish",
-                f"b{a1_anchor}, {series_a1.direction_of(a1_anchor).value}",
-            ),
-            Check(
-                "A1: el OB nunca es un doji",
-                "True",
-                str(series_a1.direction_of(a1_anchor) is not BodyDirection.DOJI),
-            ),
-        ),
-    )
-
-
 # --- La garantía anti-lookahead ---------------------------------------------
 
 
 def _lookahead() -> CheckGroup:
-    """§5 — las tres vías por las que la garantía tiene que saltar."""
+    """§5 — las cuatro vías por las que la garantía tiene que saltar."""
     series, items = _zoned(SYNTHETIC_ZONES_UP, anchor_mode=AnchorMode.A1_LAST_COUNTER_BODY)
     ul_extendido = items[1][1]
-    ob_tardio = items[3][2]
-    assert ob_tardio is not None  # el ID#4 lo confirma en b15, por diseño
+    pul_del_id2 = items[1][2]
+    assert pul_del_id2 is not None  # sale de la vela b2, por diseño
 
-    libro = ZoneBook("H4", (items[4][1],))
-    libro.record_missing_order_block(5)
+    libro = ZoneBook("H4", (items[0][1],))
+    libro.record_missing_penultimate(1)
 
     return CheckGroup(
-        title="Z.4 La garantía anti-lookahead salta de verdad",
+        title="Z.3 La garantía anti-lookahead salta de verdad",
         note="Un guardarraíl que nunca se ha visto saltar no es un guardarraíl.",
         checks=(
             Check(
@@ -315,9 +290,9 @@ def _lookahead() -> CheckGroup:
                 _catch(lambda: items[0][1].borders_at(series.at(2))),
             ),
             Check(
-                "2. OB antes de su confirmación (ID#4 en b14)",
+                "2. PUL antes de que nazca su ID (ID#2 en b5)",
                 "LookaheadError",
-                _catch(lambda: ob_tardio.borders_at(series.at(14))),
+                _catch(lambda: pul_del_id2.borders_at(series.at(5))),
             ),
             Check(
                 "3. extensión del UL antes de cerrar su vela (ID#2 en b5)",
@@ -325,9 +300,9 @@ def _lookahead() -> CheckGroup:
                 _catch(lambda: ul_extendido.outer_at(series.at(5))),
             ),
             Check(
-                "4. OB de un ID que nunca lo tuvo (ID#5)",
+                "4. PUL de un ID que no lo tiene (ID#1)",
                 "LookaheadError",
-                _catch(lambda: libro.of(5, ZoneKind.ORDER_BLOCK, at=series.at(19))),
+                _catch(lambda: libro.of(1, ZoneKind.PENULTIMATE, at=series.at(19))),
             ),
             Check(
                 "y en cuanto se puede, se lee",
@@ -365,7 +340,7 @@ def _zones_off(config: ImpulseConfig, series: Mapping[str, pd.DataFrame]) -> Che
         for timeframe, analysis in con.analyses.items()
     )
     return CheckGroup(
-        title="Z.5 Con las zonas apagadas no se emite nada, y encenderlas no mueve nada",
+        title="Z.4 Con las zonas apagadas no se emite nada, y encenderlas no mueve nada",
         note=(
             "`zones.enabled: false`: ni una zona, ni una fila, ni un fichero. Y con `true`, "
             "los impulsos, los eventos y el estado por barra son los mismos objetos."
@@ -400,7 +375,7 @@ def _regression(config: ImpulseConfig, series: Mapping[str, pd.DataFrame]) -> Ch
     zones = detect_zones(run)
 
     return CheckGroup(
-        title="Z.6 Regresión de la línea base de la fase 1 con las zonas encendidas",
+        title="Z.5 Regresión de la línea base de la fase 1 con las zonas encendidas",
         note=(
             f"{format_counts(PHASE1_BASELINE)} y hash {BASELINE_HASH}. Las zonas no entran en el "
             "hash porque no mueven ni una vela ni un impulso, y esto es lo que lo comprueba."

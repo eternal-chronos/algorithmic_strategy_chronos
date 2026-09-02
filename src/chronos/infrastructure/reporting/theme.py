@@ -29,6 +29,12 @@ SERIES = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100")
 # zonas del módulo de estructura llevan un color por temporalidad.
 VIOLET = "#6f4bd8"
 
+# El tono de lo que dibuja el PROPIETARIO a mano encima del gráfico y no ha
+# pintado el motor: el recuadro con el que marca un OB. Queda fuera de la serie
+# categórica y del violeta de las temporalidades a propósito, para que no se
+# confunda con ninguna capa calculada.
+MAGENTA = "#c0359a"
+
 # Polaridad (ganancia / pérdida): pareja divergente azul ↔ rojo con gris neutro.
 POSITIVE = "#2a78d6"
 NEGATIVE = "#d03b3b"

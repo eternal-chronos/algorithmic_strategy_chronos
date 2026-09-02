@@ -72,10 +72,10 @@ def test_los_cinco_lotes_del_enunciado(zones: ZonesRun) -> None:
         "bien_formados_alcista",
         "bien_formados_bajista",
         "ul_extendido",
-        "sin_ob",
+        "sin_pul",
         "ul_altura_cero",
-        "ob_mas_alto",
-        "ob_mas_bajo",
+        "pul_mas_alto",
+        "pul_mas_bajo",
     ]
 
 
@@ -86,7 +86,7 @@ def test_los_bien_formados_son_de_h4_y_tienen_las_dos_zonas(zones: ZonesRun) -> 
         assert picks, lot
         assert len(picks) <= WELL_FORMED
         assert all(timeframe == H4 for timeframe, _ in picks)
-        assert all(zoned.has_order_block for _, zoned in picks)
+        assert all(zoned.has_penultimate for _, zoned in picks)
         assert all(not zoned.last.is_flat for _, zoned in picks)
     assert all(
         zoned.direction.value == "alcista" for _, zoned in lots["bien_formados_alcista"]
@@ -99,7 +99,7 @@ def test_los_bien_formados_son_de_h4_y_tienen_las_dos_zonas(zones: ZonesRun) -> 
 def test_cada_lote_selecciona_lo_que_promete(zones: ZonesRun) -> None:
     lots = dict(_lots(zones))
     assert all(zoned.last.extended for _, zoned in lots["ul_extendido"])
-    assert all(not zoned.has_order_block for _, zoned in lots["sin_ob"])
+    assert all(not zoned.has_penultimate for _, zoned in lots["sin_pul"])
     assert all(zoned.last.is_flat for _, zoned in lots["ul_altura_cero"])
 
 
@@ -111,11 +111,11 @@ def test_los_ul_extendidos_se_ordenan_en_atr(zones: ZonesRun) -> None:
     assert alturas == sorted(alturas, reverse=True)
 
 
-def test_los_ob_extremos_estan_ordenados_por_altura_en_atr(zones: ZonesRun) -> None:
+def test_los_pul_extremos_estan_ordenados_por_altura_en_atr(zones: ZonesRun) -> None:
     """En ATR y no en dólares: el oro no vale lo mismo en 2018 que en 2025."""
     lots = dict(_lots(zones))
-    alto = [z.order_block.height / z.atr for _, z in lots["ob_mas_alto"]]  # type: ignore[union-attr]
-    bajo = [z.order_block.height / z.atr for _, z in lots["ob_mas_bajo"]]  # type: ignore[union-attr]
+    alto = [z.penultimate.height / z.atr for _, z in lots["pul_mas_alto"]]  # type: ignore[union-attr]
+    bajo = [z.penultimate.height / z.atr for _, z in lots["pul_mas_bajo"]]  # type: ignore[union-attr]
 
     assert len(alto) == len(bajo) == EXTREME_ORDER_BLOCKS
     assert alto == sorted(alto, reverse=True)
@@ -135,16 +135,14 @@ def test_con_las_zonas_apagadas_no_se_escribe_nada(
 
 
 def test_el_relleno_empieza_donde_nace_la_zona(zones: ZonesRun) -> None:
-    """El UL nace al constituirse el ID; el OB, cuando además se confirma."""
+    """Las dos nacen al constituirse el ID, y sus velas quedan por detrás."""
     for item in zones.per_timeframe.values():
         for zoned in item.items:
-            assert _birth_index(zoned, zoned.last) == zoned.index_constitution
-            block = zoned.order_block
-            if block is None or block.index_confirmation is None:
+            assert _birth_index(zoned) == zoned.index_constitution
+            block = zoned.penultimate
+            if block is None:
                 continue
-            assert _birth_index(zoned, block) == max(
-                zoned.index_constitution, block.index_confirmation
-            )
+            assert block.index_defining < zoned.index_constitution
 
 
 def test_la_zona_se_dibuja_en_dos_tramos(run: ImpulseRun, zones: ZonesRun) -> None:
@@ -153,7 +151,7 @@ def test_la_zona_se_dibuja_en_dos_tramos(run: ImpulseRun, zones: ZonesRun) -> No
     zoned = next(
         z
         for z in item.items
-        if z.has_order_block and z.last.index_defining < z.index_constitution
+        if z.has_penultimate and z.last.index_defining < z.index_constitution
     )
     figure, _ = _figure(run.analyses[H4], zoned, "UTC")
     rectangulos = [shape for shape in figure.layout.shapes if shape.type == "rect"]
@@ -183,41 +181,36 @@ def test_la_ventana_incluye_las_velas_que_definen_las_zonas(
 def test_el_subtitulo_lleva_las_dos_alturas_y_las_dos_horas(
     run: ImpulseRun, zones: ZonesRun
 ) -> None:
-    zoned = zones.per_timeframe[H4].with_order_block[0]
+    zoned = zones.per_timeframe[H4].with_penultimate[0]
     figure, _ = _figure(run.analyses[H4], zoned, "Europe/Athens")
     texto = figure.layout.title.text
 
     assert "UL " in texto and "ATR" in texto
-    assert "OB " in texto
+    assert "PUL " in texto
     assert "UTC" in texto and "Europe/Athens" in texto
 
 
-def test_un_id_sin_ob_lo_dice_en_la_nota(run: ImpulseRun, zones: ZonesRun) -> None:
-    sin_ob = zones.per_timeframe[H4].without_order_block
-    if not sin_ob:
-        pytest.skip("esta fixture no produjo ningún ID sin OB")
-    _, nota = _figure(run.analyses[H4], sin_ob[0], "UTC")
-    assert "sin OB confirmado" in nota
+def test_un_id_sin_pul_lo_dice_en_la_nota(run: ImpulseRun, zones: ZonesRun) -> None:
+    sin_pul = zones.per_timeframe[H4].without_penultimate
+    if not sin_pul:
+        pytest.skip("esta fixture no produjo ningún ID sin PUL")
+    _, nota = _figure(run.analyses[H4], sin_pul[0], "UTC")
+    assert "no tiene PUL" in nota
 
 
-def test_un_id_sin_ob_ensena_su_vela_candidata(run: ImpulseRun, zones: ZonesRun) -> None:
-    """Es el sentido del lote de §8.3: la zona no existe, la vela sí, y hay que verla."""
+def test_un_id_sin_pul_dibuja_solo_su_ul(run: ImpulseRun, zones: ZonesRun) -> None:
+    """Sin ID anterior no hay zona que dibujar, y no se inventa una candidata."""
     analysis = run.analyses[H4]
-    anclas = {impulse.id_num: impulse.index_anchor for impulse in analysis.impulses}
-    sin_ob = zones.per_timeframe[H4].without_order_block
-    if not sin_ob:
-        pytest.skip("esta fixture no produjo ningún ID sin OB")
+    sin_pul = zones.per_timeframe[H4].without_penultimate
+    if not sin_pul:
+        pytest.skip("esta fixture no produjo ningún ID sin PUL")
 
-    for zoned in sin_ob[:10]:
-        figure, _ = _figure(analysis, zoned, "UTC")
-        etiqueta = analysis.bars.index[anclas[zoned.id_num]].strftime("%Y-%m-%d %H:%M")
-        assert etiqueta in set(figure.data[0].x), zoned.id_num
-        punteados = [
-            shape
-            for shape in figure.layout.shapes
-            if shape.type == "rect" and shape.line.dash == "dot"
-        ]
-        assert punteados, f"ID {zoned.id_num}: falta el rectángulo de la candidata"
+    for zoned in sin_pul[:10]:
+        figure, nota = _figure(analysis, zoned, "UTC")
+        assert "no tiene PUL" in nota
+        rectangulos = [shape for shape in figure.layout.shapes if shape.type == "rect"]
+        # Sólo los del UL: el tramo atenuado y el relleno.
+        assert len(rectangulos) <= 2
 
 
 # --- Escritura real ---------------------------------------------------------

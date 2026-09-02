@@ -72,19 +72,19 @@
     clean: {
       visible: "current",
       limbo: false, marks: true, contacts: false, mid: false, wrong: false,
-      zonesUl: true, zonesOb: true, zonesContext: false,
+      frame: true,
       signals: true, cascade: true, avoided: false, steps: false
     },
     normal: {
       visible: "pair",
       limbo: true, marks: true, contacts: false, mid: false, wrong: true,
-      zonesUl: true, zonesOb: true, zonesContext: true,
+      frame: true,
       signals: true, cascade: true, avoided: true, steps: true
     },
     all: {
       visible: "all",
       limbo: true, marks: true, contacts: true, mid: true, wrong: true,
-      zonesUl: true, zonesOb: true, zonesContext: true,
+      frame: true,
       signals: true, cascade: true, avoided: true, steps: true
     }
   };
@@ -118,16 +118,12 @@
     marks: true,
     contacts: false,   // capa de contactos: apagada por defecto (F.2)
     mid: false,        // nivel del 50 % de cada ID (F.3)
-    /* Fase 2.0. Encendidas de salida cuando la corrida trae zonas: auditarlas es
-     * justo para lo que se abre este fichero. Si no las trae, las casillas ni
-     * siquiera se enseñan. */
-    zonesUl: true,
-    zonesOb: true,
-    /* Las zonas de la temporalidad de CONTEXTO. Son dos rectángulos del tamaño
-     * de la pantalla —el diario sobre H4— y no deciden nada de lo que se está
-     * auditando en este gráfico: en el nivel «Limpio» se van. */
-    zonesContext: true,
-    /* Señales de zona: toque del OB, rechazo del UL y rotura del UL. Nace
+    /* El marco de cada ID: el recuadro que va de la vela que lo constituye a la
+     * que lo mata, y de su ancla a su extremo, con el color de su temporalidad.
+     * Nace encendido en los tres niveles de ruido: es dónde empieza y dónde
+     * acaba el ID, que es lo primero que hay que ver. */
+    frame: true,
+    /* Señales de zona: toque del PUL, rechazo del UL y rotura del UL. Nace
      * encendida en los tres niveles de ruido —es lo que el propietario ha pedido
      * ver— y sólo existe donde existen las zonas: Diario y H4. */
     signals: true,
@@ -182,7 +178,26 @@
     arming: null,
     /* El R:R con el que se planta y al que vuelve el objetivo cuando se mueve el
      * stop. `null` es «a mano»: lo dejó ahí un arrastre del objetivo. */
-    ratio: 2
+    ratio: 2,
+    /* Recuadros de OB marcados a mano (I.3). Cada uno es un rectángulo
+     * —`from`, `to`, `low`, `high`— que planta el PROPIETARIO para señalar
+     * dónde ve un order block. No sale del explorador y el motor no lo ve: en
+     * el proyecto no hay todavía ninguna regla de OB. `arming === "ob"` es el
+     * botón esperando el clic que planta el siguiente. */
+    obs: [],
+    /* Cuenta simulada (I.2). El capital de partida, cómo se mide el riesgo de
+     * cada operación y las que se llevan apuntadas. De cada una se guarda su
+     * MÚLTIPLO DE RIESGO, no los euros: el dinero se recalcula entero en cada
+     * dibujo, así que cambiar el capital o el riesgo reescala la curva en vez de
+     * dejar cifras de una configuración que ya no está puesta. Lo apunta el
+     * propietario a mano: el motor no ve ninguna de estas operaciones. */
+    account: {
+      initial: 50,
+      mode: "percent",   // percent | cash
+      risk: 2,
+      trades: [],
+      copied: null       // resultado del último «Copiar», para poder decirlo
+    }
   };
 
   var timer = null;    // temporizador de la reproducción automática
@@ -370,14 +385,6 @@
     for (var j = 0; j < count && last - j >= 0; j++) { keep[list[last - j].id] = true; }
     return keep;
   }
-
-  /* Las zonas van SIEMPRE con el ID actual y sólo con él, mande lo que mande el
-   * selector B.2. En cuanto se constituye un ID nuevo, el UL y el OB del
-   * anterior desaparecen del gráfico: son las zonas vivas —las que el motor
-   * mira para la rotura de la fase 2.1— y arrastrar las de los ID muertos
-   * llenaba la pantalla de rectángulos que ya no deciden nada. Los ID viejos
-   * siguen en el payload y en los CSV; aquí sólo se elige qué se pinta. */
-  function zoneIds(timeframe, edges) { return lastIds(timeframe, edges, 1); }
 
   function keeps(allowed, id) { return allowed === null || allowed[id] === true; }
 
@@ -842,22 +849,16 @@
     }];
   }
 
-  /* --- Fase 2.0: zonas UL y OB ---------------------------------------------
+  /* --- Las zonas: ya no se dibujan -----------------------------------------
    *
-   * DIBUJO Y NADA MÁS. Las zonas llegan calculadas desde Python y no intervienen
-   * en la detección de impulsos ni en la regla de rotura, que en esta fase sigue
-   * siendo por línea.
+   * UL y PUL llegan calculados desde Python y siguen en el payload —de ellos
+   * cuelgan las señales de zona y la cascada—, pero NO se pintan: dos cajas por
+   * ID tapaban el precio y contaban de la zona lo que no contaban del ID. Lo que
+   * se dibuja en su lugar es el MARCO del ID, más abajo.
    *
-   * Cada zona se pinta en dos tramos, con la misma convención que las líneas del
-   * ID en B.1: relleno sólido desde que la zona NACE hasta que muere el ID —que
-   * es exactamente cuando existe— y un contorno atenuado desde la vela que la
-   * define hasta ese nacimiento. Sin esa distinción el dibujo diría que la zona
-   * estaba ahí antes de tiempo, que es justo lo contrario de lo que ocurre: el
-   * UL no existe hasta la constitución y el OB, hasta que se confirma.
-   *
-   * Las zonas viajan sólo con el modo activo de R-36: se calcularon sobre sus
-   * impulsos y superponerlas a las de otro modo enseñaría zonas de impulsos que
-   * en ese modo no existen. Al cambiar de modo, las capas se quedan vacías.
+   * Lo que sí sigue mandando es de qué modo de R-36 son: se calcularon sobre los
+   * impulsos del modo activo, así que en otro modo las capas que cuelgan de
+   * ellas (señales y cascada) se quedan vacías.
    */
   function hasZones() { return DATA.hasZones === true; }
 
@@ -865,153 +866,102 @@
     return hasZones() && state.mode === DATA.meta.legStartMode;
   }
 
-  function zonesOf(timeframe) {
-    if (!zonesAvailable()) { return []; }
-    return impulsesOf(timeframe).zones || [];
-  }
-
-  function candidatesOf(timeframe) {
-    if (!zonesAvailable()) { return []; }
-    return impulsesOf(timeframe).obCandidates || [];
-  }
-
-  function wantsZone(kind) {
-    return kind === "UL" ? state.zonesUl : state.zonesOb;
-  }
-
-  /* Qué zonas dibuja ESTE gráfico. No es el reparto de impulsos y por eso viene
-   * aparte en el payload: sobre M15 se dibujan las de H1 —el OB en el que se
-   * fecha el toque— y no las de H4, que a esa escala es una caja de cuatro velas
-   * que sólo tapa; sobre H1 se dibujan las suyas y las de H4, que es lo que hay
-   * que ver para saber si el precio está dentro de la zona grande.
+  /* --- El marco del ID ------------------------------------------------------
    *
-   * `zoneContext` son las que la casilla «Zonas del contexto» apaga: las del
-   * Diario sobre otro gráfico, que ocupan la pantalla entera. Las demás no
-   * cuelgan de ninguna casilla porque son justo lo que se quiere mirar. */
-  function zoneTimeframes() {
-    var drawn = (DATA.zoneLayout || {})[state.chart] || [];
-    var optional = (DATA.zoneContext || {})[state.chart] || [];
-    return drawn.filter(function (timeframe) {
-      if (!isVisible(timeframe)) { return false; }
-      return state.zonesContext || optional.indexOf(timeframe) < 0;
-    });
+   * Dónde EMPIEZA y dónde ACABA cada ID, dibujado como un recuadro: las dos
+   * verticales son la vela que lo constituye y la que lo mata, y las dos
+   * horizontales su ancla y su extremo. Es lo que sustituye a las cajas de UL y
+   * de PUL.
+   *
+   * El color lo pone la TEMPORALIDAD y no la dirección: en el mismo gráfico hay
+   * marcos de dos —el de H4 sobre H1, el de H1 sobre M15— y lo primero que hay
+   * que poder decir es de quién es cada uno. La dirección sigue leyéndose en la
+   * línea del ID y en el globo.
+   *
+   * Y SE REMARCA mientras el ID vive: el lado derecho llega al presente y el
+   * lado del extremo sube o baja con la escalera (§3.2), así que el recuadro de
+   * un ID vigente crece con él. Los dos datos vienen ya calculados —`v` dice si
+   * el ID sigue vivo, `st` cuál era el extremo en cada tramo—: aquí no se
+   * decide ninguno, sólo se dibujan.
+   */
+  function timeframeColor(timeframe) {
+    return (COLORS.timeframes || {})[timeframe] || COLORS.muted;
   }
 
-  /* El color de una zona lo pone su TEMPORALIDAD, no su dirección: en el mismo
-   * gráfico hay cajas de dos y lo primero que hay que poder decir es de quién es
-   * cada una. La dirección sigue en la línea del ID y en el globo. Dentro del
-   * tono, el UL va fuerte y el OB aclarado: el OB es la caja grande. */
-  function zonePalette(timeframe) {
-    return (COLORS.zones || {})[timeframe] || null;
-  }
-
-  var ZONE_ALPHA = { UL: 0.30, OB: 0.25 };
-
-  /* Un polígono por zona dentro de una sola traza por (temporalidad, tipo,
-   * dirección): con `fill: toself` y separadores nulos, Plotly los dibuja todos
-   * sin multiplicar las trazas por cada ID de la ventana. */
-  function zoneTraces(range) {
-    if (blindfolded() || !zonesAvailable()) { return []; }
-    if (!state.zonesUl && !state.zonesOb) { return []; }
+  function frameTraces(range) {
+    if (blindfolded() || !state.frame) { return []; }
     var edges = window_(range);
     var traces = [];
 
-    zoneTimeframes().forEach(function (timeframe) {
-      pushZoneTraces(traces, timeframe, edges);
+    overlays().forEach(function (timeframe, position) {
+      if (!isVisible(timeframe)) { return; }
+      var own = position === 0;
+      var allowed = visibleIds(timeframe, edges);
+      var bucket = shape();
+
+      impulsesOf(timeframe).list.forEach(function (impulse) {
+        if (impulse.x1 < edges.lo || impulse.x0 > edges.hi) { return; }
+        // Igual que la línea del ID: no hay marco hasta que cierra la vela que
+        // lo constituye.
+        if (pending(impulse.x0, timeframe, edges)) { return; }
+        if (!keeps(allowed, impulse.id)) { return; }
+        pushFrame(bucket, impulse, timeframe, edges);
+      });
+
+      if (!bucket.x.length) { return; }
+      traces.push(frameTrace(timeframe, bucket, own));
     });
     return traces;
   }
 
-  /* Las zonas de una temporalidad sobre el gráfico actual. El filtro es el mismo
-   * para todas: sólo las del ID actual. */
-  function pushZoneTraces(traces, timeframe, edges) {
-    var allowed = zoneIds(timeframe, edges);
-    var buckets = {};
-
-    zonesOf(timeframe).forEach(function (zone) {
-      if (!wantsZone(zone.k)) { return; }
-      if (zone.x1 < edges.lo || zone.xd > edges.hi) { return; }
-      // La zona no existe hasta que cierra la vela que la hace nacer.
-      if (pending(zone.x0, timeframe, edges)) { return; }
-      if (!keeps(allowed, zone.id)) { return; }
-      var key = zone.k + ":" + zone.d;
-      if (!buckets[key]) { buckets[key] = { live: shape(), before: shape(), zone: zone }; }
-      pushZone(buckets[key].live, zone.x0, clip(zone.x1, edges), zone, timeframe, false);
-      if (zone.xd < zone.x0) {
-        pushZone(buckets[key].before, zone.xd, zone.x0, zone, timeframe, true);
-      }
-    });
-
-    Object.keys(buckets).forEach(function (key) {
-      var kind = key.split(":")[0];
-      var direction = key.split(":")[1];
-      var name = (kind === "UL" ? "Zona UL " : "Zona OB ") + label(timeframe) +
-        " " + direction + (timeframe === primary() ? "" : " (contexto)");
-      if (buckets[key].live.x.length) {
-        traces.push(zoneTrace(name, buckets[key].live, timeframe, kind, false));
-      }
-      if (buckets[key].before.x.length) {
-        traces.push(zoneTrace(
-          "Antes de existir · " + name, buckets[key].before, timeframe, kind, true
-        ));
-      }
-    });
-  }
-
-  function shape() { return { x: [], y: [], text: [] }; }
-
-  /* Un rectángulo cerrado, en el orden que espera `fill: toself`, más el nulo
-   * que lo separa del siguiente. */
-  function pushZone(bucket, from, to, zone, timeframe, before) {
-    var a = iso(from), b = iso(to);
-    var caption = zoneCaption(zone, timeframe, before);
-    // Una zona plana no tiene rectángulo: es una línea, y se dibuja como tal.
-    var lo = zone.lo, hi = zone.hi;
+  /* Un rectángulo cerrado por ID, más el nulo que lo separa del siguiente. El
+   * extremo es el del ÚLTIMO escalón conocido, no el del final: dibujar el del
+   * final desde la constitución enseñaría un precio al que el mercado todavía no
+   * había llegado. */
+  function pushFrame(bucket, impulse, timeframe, edges) {
+    var steps = extremeSteps(impulse, timeframe, edges);
+    var extreme = steps[steps.length - 1].value;
+    var end = clip(impulse.x1, edges);
+    var a = iso(impulse.x0), b = iso(end);
+    var caption = frameCaption(impulse, timeframe, extreme, end, edges);
     bucket.x.push(a, b, b, a, a, null);
-    bucket.y.push(lo, lo, hi, hi, lo, null);
+    bucket.y.push(impulse.a, impulse.a, extreme, extreme, impulse.a, null);
     bucket.text.push(caption, caption, caption, caption, caption, "");
   }
 
-  function zoneCaption(zone, timeframe, before) {
-    var head = before
-      ? "ANTES DE EXISTIR · la vela ya definía la zona, el ID no estaba constituido<br>"
-      : "";
-    var body = "Zona " + zone.k + " del ID " + timeframe + " nº " + zone.id +
-      " · " + zone.d +
-      "<br>interior " + price(zone.i) + " · exterior " + price(zone.o) +
-      "<br>altura " + price(zone.hi - zone.lo) +
-      "<br>la define la vela de " + stamp(zone.xd);
-    if (zone.k === "UL") {
-      body += zone.ext
-        ? "<br>extendida a la vela siguiente"
-        : "<br>sin extender";
-      if (zone.flat) { body += "<br>ALTURA CERO: la vela no dejó mecha"; }
-      // §3.2: el extremo se estira con cada rechazo, el UL NO. Se marca una vez,
-      // al constituirse el ID, y es el mismo hasta que el ID muere.
-      body += "<br>el UL no se remarca: es el de la constitución del ID";
-    } else if (zone.xc !== null && zone.xc !== undefined) {
-      body += "<br>confirmado por la vela de " + stamp(zone.xc);
-    }
-    body += "<br>la zona existe desde " + stamp(zone.x0);
-    return head + body;
+  function frameCaption(impulse, timeframe, extreme, end, edges) {
+    // En replay, un ID que muere después del reloj todavía está vivo a esta
+    // hora: fechar aquí su muerte sería enseñar el futuro.
+    var alive = impulse.v || pending(impulse.x1, timeframe, edges);
+    return "MARCO del ID " + timeframe + " nº " + impulse.id + " · " + impulse.d +
+      "<br>empieza en la vela de " + stamp(impulse.x0) +
+      (alive
+        ? "<br>SIGUE VIVO: el marco llega hasta " + stamp(end)
+        : "<br>termina en la vela de " + stamp(impulse.x1)) +
+      "<br>ancla " + price(impulse.a) + " · extremo " + price(extreme) +
+      (extreme !== impulse.e
+        ? "<br>el extremo del final es " + price(impulse.e) +
+          ": el marco enseña el que estaba puesto en este tramo (§3.2)"
+        : "");
   }
 
-  function zoneTrace(name, bucket, timeframe, kind, before) {
-    // Sin tono declarado para esa temporalidad, el color de la dirección: una
-    // zona sin pintar sería peor que una zona del color de antes.
-    var palette = zonePalette(timeframe);
-    var edge = palette ? palette.line : COLORS.ink;
-    var fill = palette ? palette[kind] : COLORS.muted;
+  function frameTrace(timeframe, bucket, own) {
     return {
-      type: "scatter", mode: "lines", name: name,
+      type: "scatter", mode: "lines",
+      name: "Marco ID " + label(timeframe) + (own ? "" : " (contexto)"),
       x: bucket.x, y: bucket.y, text: bucket.text,
       hoverinfo: "text", hoverlabel: { align: "left" }, connectgaps: false,
-      fill: before ? "none" : "toself",
-      fillcolor: before ? undefined : rgba(fill, ZONE_ALPHA[kind]),
-      opacity: before ? 0.35 : 1,
-      line: { color: edge, width: before ? 1 : 1.2, dash: before ? "dot" : "solid" }
+      fill: "none",
+      line: {
+        color: timeframeColor(timeframe),
+        width: own ? 1.4 : 1.1,
+        dash: own ? "solid" : "dot"
+      },
+      opacity: own ? 0.9 : 0.6
     };
   }
+
+  function shape() { return { x: [], y: [], text: [] }; }
 
   /* El color de la paleta llega como `#rrggbb`; el relleno necesita alfa. */
   function rgba(hex, alpha) {
@@ -1021,81 +971,6 @@
     var g = parseInt(value.slice(2, 4), 16);
     var b = parseInt(value.slice(4, 6), 16);
     return "rgba(" + r + "," + g + "," + b + "," + alpha + ")";
-  }
-
-  /* La vela del ancla de un ID que murió sin OB confirmado. La zona NO existe
-   * —por eso va sin relleno y con el borde punteado— pero el propietario tiene
-   * que ver dónde estaba la candidata para juzgar la regla (§8). */
-  function candidateTraces(range) {
-    if (blindfolded() || !state.zonesOb || !zonesAvailable()) { return []; }
-    var edges = window_(range);
-    var bucket = shape();
-
-    zoneTimeframes().forEach(function (timeframe) {
-      var allowed = zoneIds(timeframe, edges);
-      candidatesOf(timeframe).forEach(function (item) {
-        if (item.x1 < edges.lo || item.xd > edges.hi) { return; }
-        if (pending(item.x0, timeframe, edges)) { return; }
-        if (!keeps(allowed, item.id)) { return; }
-        var caption = "OB SIN CONFIRMAR · esta zona NO existe<br>ID " + timeframe +
-          " nº " + item.id + " · " + item.d +
-          "<br>vela del ancla " + stamp(item.xd) +
-          "<br>de " + price(item.lo) + " a " + price(item.hi) +
-          "<br>ninguna vela del color del impulso superó su mecha antes de morir el ID" +
-          "<br>en la fase 2.1 este ID se rompería por línea";
-        var a = iso(Math.max(item.xd, edges.lo)), b = iso(clip(item.x1, edges));
-        bucket.x.push(a, b, b, a, a, null);
-        bucket.y.push(item.lo, item.lo, item.hi, item.hi, item.lo, null);
-        bucket.text.push(caption, caption, caption, caption, caption, "");
-      });
-    });
-    if (!bucket.x.length) { return []; }
-    return [{
-      type: "scatter", mode: "lines", name: "OB sin confirmar",
-      x: bucket.x, y: bucket.y, text: bucket.text,
-      hoverinfo: "text", hoverlabel: { align: "left" }, connectgaps: false,
-      fill: "none", opacity: 0.8,
-      line: { color: COLORS.muted, width: 1.4, dash: "dot" }
-    }];
-  }
-
-  /* Marcador sobre la vela que confirma cada OB (§8). Va sobre esa vela y no
-   * sobre la del ancla: es la que hace nacer la zona. */
-  function confirmationTraces(range) {
-    if (blindfolded() || !state.zonesOb || !zonesAvailable()) { return []; }
-    var edges = window_(range);
-    var items = [];
-
-    zoneTimeframes().forEach(function (timeframe) {
-      var allowed = zoneIds(timeframe, edges);
-      zonesOf(timeframe).forEach(function (zone) {
-        if (zone.k !== "OB" || zone.xc === null || zone.xc === undefined) { return; }
-        if (zone.xc < edges.lo || zone.xc > edges.hi) { return; }
-        // Se sabe que esa vela confirmó, pero la zona no aparece hasta nacer.
-        if (pending(zone.x0, timeframe, edges)) { return; }
-        if (!keeps(allowed, zone.id)) { return; }
-        items.push({ tf: timeframe, zone: zone });
-      });
-    });
-    if (!items.length) { return []; }
-    return [{
-      type: "scatter", mode: "markers", name: "Confirmación del OB",
-      x: items.map(function (item) { return iso(item.zone.xc); }),
-      y: items.map(function (item) { return item.zone.i; }),
-      text: items.map(function (item) {
-        var zone = item.zone;
-        return "CONFIRMA EL OB del ID " + item.tf + " nº " + zone.id +
-          " (" + zone.d + ")<br>" + stamp(zone.xc) +
-          "<br>una vela " + (zone.d === "alcista" ? "verde" : "roja") +
-          " superó la mecha de la vela del ancla" +
-          "<br>la zona OB existe desde " + stamp(zone.x0);
-      }),
-      hoverinfo: "text", hoverlabel: { align: "left" },
-      marker: {
-        symbol: "star", size: 11, color: COLORS.ink,
-        line: { color: COLORS.surface, width: 1 }
-      }
-    }];
   }
 
   /* Capa "Contactos" (F.2): dónde tocó el precio los límites del ID sin salirse.
@@ -1222,7 +1097,7 @@
   }
 
   /* `source` separa las roturas por el nivel que las produjo: `linea` es la
-   * regla de la fase 1 y `zona` (UL u OB) la de la 2.1. Con `break_by_zone`
+   * regla de la fase 1 y `zona` (UL o PUL) la de la 2.1. Con `break_by_zone`
    * apagado todas caen en `linea` y las dos trazas nuevas salen vacías. */
   function breakTrace(breaks, kind, source, name, symbol, color) {
     var items = breaks.filter(function (item) {
@@ -1240,7 +1115,7 @@
       text: items.map(function (item) {
         var how = item.src === "linea"
           ? (DATA.meta.breakByZone
-            ? "<br>por LÍNEA: ese lado no tenía zona (el OB nunca se confirmó)"
+            ? "<br>por LÍNEA: ese lado no tenía zona (el primer ID no tiene PUL)"
             : "")
           : "<br>por ZONA " + item.src + ": la atravesó entera" +
             "<br>línea del ID en " + price(item.ln);
@@ -1321,7 +1196,7 @@
   /* --- Señales de zona (visual) ---------------------------------------------
    *
    * Las tres marcas que el propietario quiere ver sobre el Diario y H4 mientras
-   * audita el toque de una zona: el precio TOCA un OB, LLEGA a un UL DESDE FUERA
+   * audita el toque de una zona: el precio TOCA un PUL, LLEGA a un UL DESDE FUERA
    * y lo RECHAZA, o ROMPE un UL.
    *
    * DIBUJO Y NADA MÁS, como el resto del fichero. Vienen calculadas de Python
@@ -1350,18 +1225,18 @@
   /* Un símbolo por tipo, ninguno repetido de las capas que ya existían, y el
    * color del ID al que pertenece la señal. */
   var SIGNAL_STYLE = {
-    TOQUE_OB: { symbol: "pentagon", size: 12, title: "TOQUE DE OB" },
+    TOQUE_PUL: { symbol: "pentagon", size: 12, title: "TOQUE DE PUL" },
     RECHAZO_UL: { symbol: "hexagram", size: 12, title: "RECHAZO DEL UL" },
     ROTURA_UL: { symbol: "star-diamond", size: 13, title: "ROTURA DEL UL" }
   };
-  var SIGNAL_KINDS = ["TOQUE_OB", "RECHAZO_UL", "ROTURA_UL"];
+  var SIGNAL_KINDS = ["TOQUE_PUL", "RECHAZO_UL", "ROTURA_UL"];
 
   function visibleSignals(edges) {
     if (blindfolded() || !state.signals || !hasSignals()) { return []; }
     if (!zonesAvailable() || !isVisible(primary())) { return []; }
     var allowed = visibleIds(primary(), edges);
     return signalsOf(primary()).filter(function (item) {
-      // Cada señal se sabe cuando cierra LA VELA QUE LA MIDIÓ: el toque del OB
+      // Cada señal se sabe cuando cierra LA VELA QUE LA MIDIÓ: el toque del PUL
       // va en la vela fina y no espera las cuatro horas de H4.
       return item.x >= edges.lo && item.x <= edges.hi &&
         !pending(item.x, item.src || primary(), edges) && keeps(allowed, item.id);
@@ -1426,19 +1301,19 @@
    * detrás de ninguna de estas marcas: lo único que enseñan es dónde la máquina
    * ha bajado de temporalidad y qué ha visto al llegar.
    *
-   * La cascada son DOS escalones: el toque del OB de H4 y, en H1, el ID que se
-   * pone en la dirección del de H4 y trae el OB que se marca; y sobre ese OB de
+   * La cascada son DOS escalones: el toque del PUL de H4 y, en H1, el ID que se
+   * pone en la dirección del de H4 y trae el PUL que se marca; y sobre ese PUL de
    * H1, el toque que hace saltar la señal. El Diario no es un paso —no hay que
-   * tocar su OB para poder mirar H4—: lo que hace es prohibir, y su tramo se
+   * tocar su PUL para poder mirar H4—: lo que hace es prohibir, y su tramo se
    * dibuja en gris para que se vea de dónde viene cada descarte.
    *
-   * El toque del OB de H1 va fechado en la vela FINA en la que el precio entró
+   * El toque del PUL de H1 va fechado en la vela FINA en la que el precio entró
    * en la zona —igual que el de H4 y el del Diario—, así que se ve sin esperar a
    * que cierre la vela de H1: por eso su marca puede caer en mitad de una vela.
    *
    * Se dibujan por GRÁFICO y no por temporalidad de impulso, que es la
    * diferencia con todas las capas anteriores: el tramo diario se mira en el
-   * Diario, el toque de H4 en H4 y el OB del ID de H1 en H1. Por eso el payload
+   * Diario, el toque de H4 en H4 y el PUL del ID de H1 en H1. Por eso el payload
    * trae `cascade` indexado por gráfico y aquí se lee el del gráfico que se está
    * mirando, sin pasar por `impulsesOf`.
    *
@@ -1449,6 +1324,16 @@
    */
 
   function hasCascade() { return DATA.hasCascade === true; }
+
+  /* La franja de operativa con la que se calculó la cascada: de 03:00 a 12:00 de
+   * Nueva York, Londres y la media sesión de NY. FUERA DE ELLA NO SE MIRA NADA,
+   * así que un tramo del gráfico sin marcas puede ser que no hubiera nada o que
+   * ahí no se opere: sin decirlo, las dos cosas se leen igual. */
+  function tradingWindow() {
+    var window_ = DATA.tradingWindow || {};
+    if (!window_.from || !window_.to) { return ""; }
+    return "de " + window_.from + " a " + window_.to + " de " + (window_.tz || "?");
+  }
 
   /* Se calculó sobre las zonas del modo activo de R-36: en otro modo son pasos
    * de impulsos que no existen, igual que las zonas y las señales. */
@@ -1464,24 +1349,24 @@
   var CASCADE_STYLE = {
     ZONA_DIARIA: {
       symbol: "star", size: 13, muted: true,
-      title: "DENTRO DEL OB DIARIO -> nada en contra se mira"
+      title: "DENTRO DEL PUL DIARIO -> nada en contra se mira"
     },
-    BUSCAR_H1: { symbol: "star-square", size: 13, title: "TOCA EL OB DE H4 -> buscar en H1" },
-    CONFIRMA_OB_H1: {
+    BUSCAR_H1: { symbol: "star-square", size: 13, title: "TOCA EL PUL DE H4 -> buscar en H1" },
+    CONFIRMA_PUL_H1: {
       symbol: "bowtie", size: 14,
-      title: "EL ID DE H1 YA VA COMO EL DE H4 -> su OB"
+      title: "EL ID DE H1 YA VA COMO EL DE H4 -> su PUL"
     },
-    TOQUE_OB_H1: {
+    TOQUE_PUL_H1: {
       symbol: "octagon", size: 15,
-      title: "TOCA EL OB DE H1 -> SEÑAL"
+      title: "TOCA EL PUL DE H1 -> SEÑAL"
     },
     H4_DESCARTADO: { symbol: "x-thin", size: 11, muted: true, title: "H4 EN CONTRA: desechado" }
   };
   var CASCADE_KINDS = [
-    "ZONA_DIARIA", "BUSCAR_H1", "CONFIRMA_OB_H1", "TOQUE_OB_H1", "H4_DESCARTADO"
+    "ZONA_DIARIA", "BUSCAR_H1", "CONFIRMA_PUL_H1", "TOQUE_PUL_H1", "H4_DESCARTADO"
   ];
   /* El único paso con zona propia: se dibuja además como caja. */
-  var CASCADE_BOXES = ["CONFIRMA_OB_H1"];
+  var CASCADE_BOXES = ["CONFIRMA_PUL_H1"];
 
   function visibleCascade(edges) {
     if (blindfolded() || !state.cascade || !hasCascade()) { return []; }
@@ -1508,10 +1393,10 @@
     return [boxes, windows].filter(Boolean).concat(traces);
   }
 
-  /* El OB de H1 es el OB de su ID —la vela del ancla entera, igual que en el
-   * Diario y en H4— y como zona se dibuja: rectángulo de `lo` a `hi` desde esa
-   * vela del ANCLA, que queda detrás de la marca, hasta la vela en la que se
-   * marcó. El marcador dice cuándo se supo; la caja, sobre qué. Es DIBUJO: el
+  /* El PUL de H1 es el PUL de su ID —el cuerpo de la vela que fijó el extremo
+   * del ID anterior, igual que en el Diario y en H4— y como zona se dibuja:
+   * rectángulo de `lo` a `hi` desde esa vela, que queda detrás de la marca,
+   * hasta la vela en la que se marcó. El marcador dice cuándo se supo; la caja, sobre qué. Es DIBUJO: el
    * rectángulo no decide nada, viene ya calculado del motor.
    *
    * La misma zona vuelve a salir, sin recortar y con su color, en la capa de
@@ -1530,7 +1415,7 @@
     });
     if (!bucket.x.length) { return null; }
     return {
-      type: "scatter", mode: "lines", name: "OB de H1",
+      type: "scatter", mode: "lines", name: "PUL de H1",
       x: bucket.x, y: bucket.y, text: bucket.text,
       hoverinfo: "text", hoverlabel: { align: "left" }, connectgaps: false,
       fill: "toself", fillcolor: rgba(COLORS.muted, 0.14), opacity: 0.9,
@@ -1563,14 +1448,14 @@
   /* Por qué se cerró una ventana. Es la regla que se audita, así que la marca lo
    * dice en vez de dejar que se deduzca mirando las velas. */
   var WINDOW_END = {
-    ROTURA_OB: "una vela de H4 cerró más allá del borde exterior del OB: lo atravesó entero",
+    ROTURA_PUL: "una vela de H4 cerró más allá del borde exterior del PUL: lo atravesó entero",
     TOQUE_UL: "el precio llegó al UL de ese mismo ID de H4, que es el sitio al que iba",
     MUERTE_ID: "se acabó el ID",
     SALIDA_ZONA: "una vela DIARIA cerró fuera de la zona"
   };
 
   /* El tramo en el que la búsqueda estuvo ARMADA, del toque a lo que la cerró:
-   * romper el OB, llegar al UL o morirse el ID. Sin él la marca dice que se
+   * romper el PUL, llegar al UL o morirse el ID. Sin él la marca dice que se
    * empezó a buscar pero no hasta cuándo, que es justo la regla que hay que
    * auditar. Una sola traza con huecos: una por marca serían cientos de trazas
    * para dibujar rayas. */
@@ -1603,16 +1488,16 @@
         label(parent[2]) + " · " + iso(parent[0]).slice(0, 16) + " UTC";
     }
     if (item.k === "ZONA_DIARIA" || item.k === "BUSCAR_H1" ||
-        item.k === "H4_DESCARTADO" || item.k === "TOQUE_OB_H1") {
-      text += "<br>zona OB [" + price(item.lo) + ", " + price(item.hi) +
+        item.k === "H4_DESCARTADO" || item.k === "TOQUE_PUL_H1") {
+      text += "<br>zona PUL [" + price(item.lo) + ", " + price(item.hi) +
         "] · borde interior " + price(item.lvl) +
         "<br>la mecha llegó a " + price(item.r) + " · cierre " + price(item.c);
     }
     if (item.k === "H4_DESCARTADO") {
-      text += "<br>va EN CONTRA del OB diario vigente: mientras el precio no salga " +
+      text += "<br>va EN CONTRA del PUL diario vigente: mientras el precio no salga " +
         "de esa zona no se mira ninguna confirmación contraria";
     } else if (item.k === "ZONA_DIARIA") {
-      text += "<br>el precio está DENTRO del OB diario: no abre ninguna búsqueda, " +
+      text += "<br>el precio está DENTRO del PUL diario: no abre ninguna búsqueda, " +
         "sólo prohíbe lo contrario a esta dirección" +
         "<br>vigente hasta " +
         (item.end === undefined
@@ -1623,17 +1508,17 @@
         (item.end === undefined
           ? "el final del histórico: no llegó a cerrarse"
           : iso(item.end).slice(0, 16) + " UTC · " + (WINDOW_END[item.why] || "")) +
-        "<br>salir del OB a favor NO la cierra: se busca hasta romperlo o hasta " +
+        "<br>salir del PUL a favor NO la cierra: se busca hasta romperlo o hasta " +
         "llegar al UL";
-    } else if (item.k === "CONFIRMA_OB_H1") {
-      text += "<br>el ID de H1 va ya en la misma dirección que el de H4: se marca SU OB" +
-        "<br>OB de H1 [" + price(item.lo) + ", " + price(item.hi) +
+    } else if (item.k === "CONFIRMA_PUL_H1") {
+      text += "<br>el ID de H1 va ya en la misma dirección que el de H4: se marca SU PUL" +
+        "<br>PUL de H1 [" + price(item.lo) + ", " + price(item.hi) +
         "] · borde interior " + price(item.lvl) +
-        " · la vela del ancla es la de " + stamp(item.x0) +
-        "<br>se sabe en esta vela: es la de la constitución del ID de H1 o la que " +
-        "confirmó su OB, la que llegó más tarde";
-    } else if (item.k === "TOQUE_OB_H1") {
-      text += "<br>el precio ENTRA en el OB de ese ID de H1 viniendo de fuera: " +
+        " · la vela del extremo anterior es la de " + stamp(item.x0) +
+        "<br>se sabe en esta vela: la de la constitución del ID de H1, porque el " +
+        "PUL nace con él";
+    } else if (item.k === "TOQUE_PUL_H1") {
+      text += "<br>el precio ENTRA en el PUL de ese ID de H1 viniendo de fuera: " +
         "aquí salta la señal" +
         "<br>medido en la vela de " + label(item.src || "M15") +
         ", NO se espera al cierre de la vela de H1" +
@@ -1905,12 +1790,16 @@
     if (!sim) { return []; }
     var long_ = sim.side === "long";
     var x0 = iso(sim.from), x1 = iso(sim.to);
+    // Cada rectángulo dice también lo que se juega con el capital puesto (I.2):
+    // el dinero es la razón de dibujar la caja y tenerlo que buscar arriba, en
+    // la barra, mientras se arrastra abajo es no verlo.
+    var stake = simStake();
     return [
       simBox("sim-objetivo", x0, x1, sim.entry, sim.target, COLORS.bullish,
-        "objetivo " + pips(simReward()) + " pips",
+        "objetivo " + pips(simReward()) + " pips · " + signedMoney(stake.reward),
         long_ ? "top left" : "bottom left"),
       simBox("sim-riesgo", x0, x1, sim.entry, sim.stop, COLORS.bearish,
-        "riesgo " + pips(simRisk()) + " pips",
+        "riesgo " + pips(simRisk()) + " pips · " + signedMoney(-stake.risk),
         long_ ? "bottom left" : "top left"),
       {
         type: "line", name: "sim-entrada", xref: "x", yref: "y",
@@ -1929,9 +1818,15 @@
     draw();
   }
 
+  /* El botón que está armado, cuando es de los del simulador: `arming` lo
+   * comparten la caja simulada y el recuadro del OB (I.3) —no se puede estar
+   * esperando dos clics a la vez— y los controles de cada uno sólo pueden
+   * hablar del suyo. */
+  function simArming() { return state.arming === "ob" ? null : state.arming; }
+
   function clearSim() {
     state.sim = null;
-    state.arming = null;
+    if (simArming()) { state.arming = null; }
     draw();
   }
 
@@ -1979,6 +1874,9 @@
    * infinito. */
   function normalizeSim() {
     var sim = state.sim;
+    // Sin caja no hay nada que enderezar: el ratio se puede fijar antes de
+    // plantar —y así se planta la siguiente—, y eso no puede romper el dibujo.
+    if (!sim) { return; }
     var dir = sim.side === "long" ? 1 : -1;
     if (dir * (sim.entry - sim.stop) < PIP) {
       sim.stop = round_(sim.entry - dir * PIP);
@@ -2075,6 +1973,7 @@
     if (!point) { return; }
     if (event.preventDefault) { event.preventDefault(); }
     if (event.stopPropagation) { event.stopPropagation(); }
+    if (state.arming === "ob") { plantOb(point); return; }
     plantSim(state.arming, point);
   }
 
@@ -2192,17 +2091,20 @@
    * translúcido no dice por sí solo que sea un tirador. */
   function hoverSim(event) {
     var chart = document.getElementById("chart");
-    if (!chart || !chart.style || !state.sim || state.arming) { return; }
+    if (!chart || !chart.style || state.arming) { return; }
+    if (!state.sim && !state.obs.length) { return; }
     var box = chartBox();
-    var part = box ? simHandleAt(box, event.clientX, event.clientY) : null;
-    chart.style.cursor = SIM_CURSORS[part] || "";
+    var part = box && state.sim ? simHandleAt(box, event.clientX, event.clientY) : null;
+    if (part) { chart.style.cursor = SIM_CURSORS[part] || ""; return; }
+    var hit = box && state.obs.length ? obHandleAt(box, event.clientX, event.clientY) : null;
+    chart.style.cursor = hit ? (OB_CURSORS[hit.part] || "") : "";
   }
 
   /* Qué caja hay puesta. Un rectángulo de colores sobre el precio se lee como
    * una operación: el estado tiene que decir que no lo es. */
   function simCaption() {
-    if (state.arming) {
-      return "SIMULADOR ARMADO (" + sideLabel(state.arming).toLowerCase() +
+    if (simArming()) {
+      return "SIMULADOR ARMADO (" + sideLabel(simArming()).toLowerCase() +
         "): pulsa sobre el gráfico para plantar la entrada, o Escape para dejarlo";
     }
     if (!state.sim) { return null; }
@@ -2254,6 +2156,644 @@
     chart.addEventListener("mousedown", startSimDrag, true);
     document.addEventListener("mousemove", moveSimDrag);
     document.addEventListener("mouseup", endSimDrag);
+  }
+
+  /* --- El recuadro del OB (I.3) ----------------------------------------------
+   *
+   * Un rectángulo que planta el PROPIETARIO a mano encima del gráfico para
+   * decir DÓNDE VE UN OB. No es una zona del motor: las de la fase 2.0 se
+   * calculan, viajan en el payload y de ellas cuelgan las señales; ésta no la
+   * ve nadie más que quien la dibuja. Existe para poder mandar una captura
+   * señalando lo que todavía no hay regla que detecte.
+   *
+   * Por eso va en MAGENTA y con el borde punteado: ninguna capa calculada usa
+   * ese tono, así que lo que se vea en magenta lo ha puesto una mano.
+   *
+   * Se marcan VARIOS: en un mismo gráfico hay el OB de H4 y el de H1, y
+   * enseñarlos de uno en uno no dice lo que hay que decir. El gesto es el mismo
+   * que el de la caja simulada —el botón ARMA, el clic PLANTA y después se
+   * arrastra por los bordes o por dentro—, y por eso comparten `arming`: no se
+   * puede estar esperando dos clics a la vez.
+   */
+  var OB_CURSORS = {
+    high: "ns-resize", low: "ns-resize",
+    from: "ew-resize", to: "ew-resize", body: "move"
+  };
+
+  /* Dónde empiezan los recuadros dentro de `layout.shapes`, igual que la caja
+   * simulada: es lo que permite mover sólo el que se arrastra en vez de rehacer
+   * la figura entera en cada píxel del gesto. */
+  var obIndex = null;
+
+  var obDrag = null;
+
+  function obShapes() {
+    return state.obs.map(function (ob, position) {
+      return {
+        type: "rect", name: "ob-" + position, xref: "x", yref: "y",
+        x0: iso(ob.from), x1: iso(ob.to), y0: ob.low, y1: ob.high,
+        fillcolor: rgba(COLORS.ob, 0.14),
+        line: { color: COLORS.ob, width: 1.4, dash: "dot" },
+        layer: "above",
+        label: {
+          text: "OB " + (position + 1) + " (a mano)",
+          textposition: "top left",
+          font: { size: 11, color: COLORS.ob }
+        }
+      };
+    });
+  }
+
+  function armOb() {
+    state.arming = state.arming === "ob" ? null : "ob";
+    draw();
+  }
+
+  /* El recuadro de salida: alto un 4 % de lo que se ve y ancho un octavo de la
+   * ventana, centrado en el precio del clic. Es un punto de partida para
+   * arrastrar, no una propuesta: el motor no ha dicho nada de este precio. */
+  function plantOb(point) {
+    var y = viewRange("y"), x = viewRange("x");
+    if (!y || !x) { return; }
+    var half = (y[1] - y[0]) * 0.02;
+    var width = Math.max(span(state.chart), Math.round((x[1] - x[0]) * 0.125));
+    state.obs.push({
+      from: point.minute,
+      to: point.minute + width,
+      low: round_(point.price - half),
+      high: round_(point.price + half)
+    });
+    state.arming = null;
+    draw();
+  }
+
+  function undoOb() {
+    if (!state.obs.length) { return; }
+    state.obs.pop();
+    draw();
+  }
+
+  function clearObs() {
+    state.obs = [];
+    if (state.arming === "ob") { state.arming = null; }
+    draw();
+  }
+
+  /* Un recuadro no puede darse la vuelta: el arrastre que cruza el borde
+   * contrario se queda a un pip —o a una vela, en horizontal—, que es lo que
+   * impide un rectángulo de altura cero o del revés. */
+  function normalizeOb(ob) {
+    if (ob.high - ob.low < PIP) {
+      if (obDrag && obDrag.part === "low") { ob.low = round_(ob.high - PIP); }
+      else { ob.high = round_(ob.low + PIP); }
+    }
+    if (ob.to <= ob.from) {
+      if (obDrag && obDrag.part === "from") { ob.from = ob.to - span(state.chart); }
+      else { ob.to = ob.from + span(state.chart); }
+    }
+  }
+
+  /* Qué parte de un recuadro hay bajo el ratón. Los bordes ganan al interior:
+   * con el recuadro estrecho, todo él cae dentro de la tolerancia y lo que se
+   * quiere agarrar entonces es el borde más cercano. */
+  function obPartAt(box, ob, cx, cy) {
+    var corner = pixelAt(box, ob.from, ob.high);
+    var opposite = pixelAt(box, ob.to, ob.low);
+    if (!corner || !opposite) { return null; }
+    if (cx < corner.x - GRAB || cx > opposite.x + GRAB) { return null; }
+    if (cy < corner.y - GRAB || cy > opposite.y + GRAB) { return null; }
+    if (Math.abs(cy - corner.y) <= GRAB) { return "high"; }
+    if (Math.abs(cy - opposite.y) <= GRAB) { return "low"; }
+    if (Math.abs(cx - corner.x) <= GRAB) { return "from"; }
+    if (Math.abs(cx - opposite.x) <= GRAB) { return "to"; }
+    return "body";
+  }
+
+  /* El último plantado es el que está encima, así que se busca del final al
+   * principio: con dos recuadros solapados se agarra el que se ve. */
+  function obHandleAt(box, cx, cy) {
+    for (var index = state.obs.length - 1; index >= 0; index -= 1) {
+      var part = obPartAt(box, state.obs[index], cx, cy);
+      if (part) { return { index: index, part: part }; }
+    }
+    return null;
+  }
+
+  function startObDrag(event) {
+    // La caja simulada se registra antes y tiene preferencia: si ella ha
+    // agarrado el gesto, aquí no hay nada que hacer.
+    if (simDrag || axisDrag || state.arming || !state.obs.length) { return; }
+    var box = chartBox();
+    if (!box) { return; }
+    var hit = obHandleAt(box, event.clientX, event.clientY);
+    if (!hit) { return; }
+    var origin = dataAt(box, event.clientX, event.clientY, true);
+    if (!origin) { return; }
+    var ob = state.obs[hit.index];
+    obDrag = {
+      index: hit.index, part: hit.part, origin: origin,
+      base: { from: ob.from, to: ob.to, low: ob.low, high: ob.high }
+    };
+    if (event.preventDefault) { event.preventDefault(); }
+    if (event.stopPropagation) { event.stopPropagation(); }
+  }
+
+  function moveObDrag(event) {
+    if (simDrag || !obDrag) { return; }
+    var box = chartBox();
+    var point = box && dataAt(box, event.clientX, event.clientY, true);
+    if (!point) { return; }
+    applyObDrag(point);
+    if (event.preventDefault) { event.preventDefault(); }
+  }
+
+  function applyObDrag(point) {
+    var ob = state.obs[obDrag.index], base = obDrag.base, part = obDrag.part;
+    if (part === "high") {
+      ob.high = round_(point.price);
+    } else if (part === "low") {
+      ob.low = round_(point.price);
+    } else if (part === "from") {
+      ob.from = point.minute;
+    } else if (part === "to") {
+      ob.to = point.minute;
+    } else {
+      // Por dentro se mueve el recuadro ENTERO: su tamaño es lo que se acaba de
+      // decidir y recolocarlo no puede cambiarlo por su cuenta.
+      var dy = point.price - obDrag.origin.price;
+      var dx = point.minute - obDrag.origin.minute;
+      ob.low = round_(base.low + dy);
+      ob.high = round_(base.high + dy);
+      ob.from = base.from + dx;
+      ob.to = base.to + dx;
+    }
+    normalizeOb(ob);
+    redrawObs();
+  }
+
+  /* Igual que la caja simulada: durante el arrastre se mueven sólo las formas
+   * de los recuadros, no la figura entera. */
+  function redrawObs() {
+    var chart = document.getElementById("chart");
+    if (obIndex === null || !chart || typeof Plotly === "undefined" || !Plotly.relayout) {
+      draw();
+      return;
+    }
+    var update = {};
+    obShapes().forEach(function (shape, position) {
+      var key = "shapes[" + (obIndex + position) + "]";
+      update[key + ".x0"] = shape.x0;
+      update[key + ".x1"] = shape.x1;
+      update[key + ".y0"] = shape.y0;
+      update[key + ".y1"] = shape.y1;
+    });
+    Plotly.relayout(chart, update);
+  }
+
+  function endObDrag() {
+    if (!obDrag) { return; }
+    obDrag = null;
+    draw();
+  }
+
+  /* Qué recuadros hay puestos. Un rectángulo encima del precio se lee como algo
+   * que el motor ha encontrado: el estado tiene que decir que lo ha puesto una
+   * mano y que detrás no hay ninguna regla. */
+  function obCaption() {
+    if (state.arming === "ob") {
+      return "RECUADRO DE OB ARMADO: pulsa sobre el gráfico para plantarlo, o " +
+        "Escape para dejarlo";
+    }
+    if (!state.obs.length) { return null; }
+    return "OB marcados a mano: " + state.obs.length +
+      (state.obs.length === 1 ? " recuadro" : " recuadros") +
+      " · los dibuja el propietario para señalar dónde ve un order block: NO los " +
+      "ha detectado el motor, no hay regla de OB en el proyecto y no salen de la " +
+      "pantalla";
+  }
+
+  function bindOb() {
+    var chart = document.getElementById("chart");
+    document.getElementById("ob-mark").addEventListener("click", armOb);
+    document.getElementById("ob-undo").addEventListener("click", undoOb);
+    document.getElementById("ob-clear").addEventListener("click", clearObs);
+    if (!chart || !chart.addEventListener || !document.addEventListener) { return; }
+    chart.addEventListener("mousedown", startObDrag, true);
+    document.addEventListener("mousemove", moveObDrag);
+    document.addEventListener("mouseup", endObDrag);
+  }
+
+  /* --- Cuenta simulada (I.2) -------------------------------------------------
+   *
+   * Un capital de partida, un riesgo por operación y tres botones: la caja que
+   * hay dibujada se apunta como GANADA, PERDIDA o en BREAK-EVEN y el saldo se
+   * mueve. Lo que se cobra es el R:R de esa caja: ganar suma el riesgo por el
+   * ratio, perder resta el riesgo entero y el break-even no mueve nada.
+   *
+   * SIGUE SIENDO DIBUJO. Nadie mira las velas: quien decide si esa entrada ganó
+   * o perdió es el propietario, mirando el gráfico. El motor no ve estas
+   * operaciones, no hay orden, no hay ejecución y esto no es dinero.
+   *
+   * Del histórico se guarda el MÚLTIPLO DE RIESGO de cada operación (+ratio,
+   * -1, 0), no los euros: el dinero se recalcula entero desde el capital de
+   * partida cada vez que se dibuja. Así, cambiar el capital o el riesgo reescala
+   * la curva completa en vez de dejar apuntadas cifras de una configuración que
+   * ya no está puesta.
+   *
+   * El riesgo NO compone: el porcentaje es del capital escrito en la casilla y
+   * la apuesta es la misma en todas las operaciones. Es lo que se quiere para
+   * juzgar una racha —si el tamaño crece con el saldo, una buena seguida tapa lo
+   * que venga detrás—, y para subirla se sube el capital a mano.
+   */
+  var ACCOUNT_RESULTS = [
+    {
+      id: "win", label: "Ganada",
+      title: "Apunta la caja dibujada como GANADA: suma el riesgo por el R:R de\n" +
+        "la caja. Quita la caja del gráfico; «Deshacer» la devuelve."
+    },
+    {
+      id: "loss", label: "Perdida",
+      title: "Apunta la caja dibujada como PERDIDA: resta el riesgo entero.\n" +
+        "Quita la caja del gráfico; «Deshacer» la devuelve."
+    },
+    {
+      id: "be", label: "BE",
+      title: "Break-even: la operación se apunta y no mueve el saldo. Cuenta en el\n" +
+        "número de operaciones, pero no en el porcentaje de acierto."
+    }
+  ];
+
+  var RESULT_NAMES = { win: "GANADA", loss: "PERDIDA", be: "BREAK-EVEN" };
+
+  /* Cómo se mide el riesgo de la siguiente operación: un porcentaje del saldo
+   * —que sube y baja con él, que es lo que compone— o una cantidad fija. */
+  var RISK_MODES = [
+    { id: "percent", label: "% del capital" },
+    { id: "cash", label: "$ fijos" }
+  ];
+
+  function round2(value) { return Math.round(value * 100) / 100; }
+
+  function money(value) {
+    return round2(value).toLocaleString(
+      "es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 }
+    ) + " $";
+  }
+
+  function signedMoney(value) {
+    return (value > 0 ? "+" : value < 0 ? "-" : "") + money(Math.abs(round2(value)));
+  }
+
+  function pct(value) {
+    return value.toLocaleString(
+      "es-ES", { minimumFractionDigits: 1, maximumFractionDigits: 1 }
+    ) + " %";
+  }
+
+  function signedPct(value) {
+    return (value > 0 ? "+" : value < 0 ? "-" : "") + pct(Math.abs(value));
+  }
+
+  function signedR(value) {
+    return (value > 0 ? "+" : value < 0 ? "-" : "") + decimal(Math.abs(value)) + " R";
+  }
+
+  function plural(count, one, many) {
+    return count.toLocaleString("es-ES") + " " + (count === 1 ? one : many);
+  }
+
+  /* Lo que se arriesga en cada operación. El porcentaje es SIEMPRE del capital
+   * de partida —el que hay escrito en la casilla—, no del saldo vivo: el
+   * propietario pone 50 $ y el 19 % son 9,50 $ en la primera operación y en la
+   * número treinta. Para que la apuesta suba con la cuenta hay que subir el
+   * capital a mano, y entonces la curva se vuelve a contar entera con él. */
+  function riskFor() {
+    var account = state.account;
+    if (account.mode === "cash") { return round2(account.risk); }
+    return round2(account.initial * account.risk / 100);
+  }
+
+  /* La curva, recalculada desde el capital de partida. Cada fila lleva lo que se
+   * arriesgaba en ese momento, lo que movió y el saldo con el que se quedó. */
+  function accountRows() {
+    var balance = state.account.initial;
+    return state.account.trades.map(function (trade) {
+      var risk = riskFor();
+      var delta = round2(risk * trade.r);
+      balance = round2(balance + delta);
+      return { trade: trade, risk: risk, delta: delta, balance: balance };
+    });
+  }
+
+  function accountStats() {
+    var rows = accountRows();
+    var initial = state.account.initial;
+    var balance = rows.length ? rows[rows.length - 1].balance : initial;
+    var counts = { win: 0, loss: 0, be: 0 };
+    var r = 0;
+    var peak = initial;
+    var drawdown = 0;
+    var drawdownPct = 0;
+    rows.forEach(function (row) {
+      counts[row.trade.result] += 1;
+      r += row.trade.r;
+      if (row.balance > peak) { peak = row.balance; }
+      var fall = peak - row.balance;
+      if (fall > drawdown) {
+        drawdown = fall;
+        drawdownPct = peak > 0 ? fall / peak * 100 : 0;
+      }
+    });
+    var decided = counts.win + counts.loss;
+    return {
+      rows: rows, initial: initial, balance: balance, counts: counts,
+      trades: rows.length, r: round2(r),
+      net: round2(balance - initial),
+      netPct: initial > 0 ? (balance - initial) / initial * 100 : 0,
+      hit: decided ? counts.win / decided * 100 : null,
+      drawdown: round2(drawdown), drawdownPct: drawdownPct,
+      risk: riskFor()
+    };
+  }
+
+  /* Lo que la caja dibujada se juega AHORA: lo que resta si toca el stop y lo
+   * que suma si llega al objetivo. Es lo que va escrito dentro de cada
+   * rectángulo, para no tener que mirar arriba mientras se dibuja abajo. */
+  function simStake() {
+    var risk = riskFor();
+    return { risk: risk, reward: round2(risk * simRatio()) };
+  }
+
+  function recordTrade(result) {
+    var sim = state.sim;
+    if (!sim) { return; }
+    var ratio = Number(simRatio().toFixed(2));
+    state.account.copied = null;
+    state.account.trades.push({
+      result: result,
+      // El múltiplo de riesgo: es lo único que no depende del capital puesto.
+      r: result === "win" ? ratio : (result === "loss" ? -1 : 0),
+      ratio: ratio,
+      chart: state.chart,
+      at: iso(sim.from),
+      box: {
+        side: sim.side, entry: sim.entry, stop: sim.stop, target: sim.target,
+        from: sim.from, to: sim.to
+      }
+    });
+    // La caja se va: ya está cobrada, y dejarla puesta invita a apuntarla dos
+    // veces. La siguiente entrada se planta como la primera.
+    state.sim = null;
+    state.arming = null;
+    draw();
+  }
+
+  /* Deshacer devuelve el saldo Y la caja: el error que se deshace casi siempre
+   * es haber pulsado el botón que no era, y replantar el dibujo a mano para
+   * volver a cobrarlo bien sería perder la medida. */
+  function undoTrade() {
+    var last = state.account.trades.pop();
+    if (!last) { return; }
+    state.account.copied = null;
+    state.sim = {
+      side: last.box.side, entry: last.box.entry, stop: last.box.stop,
+      target: last.box.target, from: last.box.from, to: last.box.to
+    };
+    state.arming = null;
+    draw();
+  }
+
+  function resetAccount() {
+    state.account.trades = [];
+    state.account.copied = null;
+    draw();
+  }
+
+  function setInitial(value) {
+    var amount = parseFloat(value);
+    // Un capital vacío o negativo no se acepta: `syncControls` repone el que
+    // había, así que el control nunca se queda diciendo algo que no está puesto.
+    if (isNaN(amount) || amount <= 0) { draw(); return; }
+    state.account.initial = round2(amount);
+    state.account.copied = null;
+    draw();
+  }
+
+  function setRiskMode(value) {
+    if (value !== "percent" && value !== "cash") { return; }
+    state.account.mode = value;
+    state.account.risk = value === "percent"
+      ? Math.min(100, state.account.risk)
+      : state.account.risk;
+    state.account.copied = null;
+    draw();
+  }
+
+  function setRisk(value) {
+    var amount = parseFloat(value);
+    if (isNaN(amount) || amount <= 0) { draw(); return; }
+    if (state.account.mode === "percent" && amount > 100) { draw(); return; }
+    state.account.risk = round2(amount);
+    state.account.copied = null;
+    draw();
+  }
+
+  function pad(text, width) {
+    var out = String(text);
+    while (out.length < width) { out += " "; }
+    return out;
+  }
+
+  function riskLabel() {
+    return state.account.mode === "percent"
+      ? pct(state.account.risk) + " del capital de partida"
+      : money(state.account.risk) + " fijos";
+  }
+
+  /* El historial en texto plano, para pegarlo fuera del explorador. Lleva la
+   * configuración con la que está contado: la misma lista de operaciones da otra
+   * curva con otro capital o con otro riesgo. */
+  function accountText() {
+    var stats = accountStats();
+    var lines = [
+      "CUENTA SIMULADA · la apunta el propietario a mano sobre cajas dibujadas: " +
+        "el motor no ve estas operaciones y no hay orden ninguna",
+      "capital de partida " + money(stats.initial) + " · riesgo " + riskLabel() +
+        " · " + money(stats.risk) + " en la siguiente operación",
+      "capital " + money(stats.balance) + " · " + signedMoney(stats.net) +
+        " (" + signedPct(stats.netPct) + ") · " + signedR(stats.r) +
+        " · " + plural(stats.trades, "operación", "operaciones") +
+        " (" + stats.counts.win + " ganadas, " + stats.counts.loss + " perdidas, " +
+        stats.counts.be + " en break-even) · acierto " +
+        (stats.hit === null ? "sin decidir" : pct(stats.hit)) +
+        " · caída máxima " + money(stats.drawdown) + " (" + pct(stats.drawdownPct) + ")"
+    ];
+    if (!stats.trades) {
+      lines.push("");
+      lines.push("sin operaciones apuntadas");
+      return lines.join("\n");
+    }
+    lines.push("");
+    lines.push(
+      pad("nº", 4) + pad("entrada (UTC)", 21) + pad("gráfico", 9) + pad("lado", 7) +
+      pad("precio", 9) + pad("stop", 9) + pad("objetivo", 10) + pad("R:R", 8) +
+      pad("resultado", 12) + pad("R", 7) + pad("mueve", 12) + "capital"
+    );
+    stats.rows.forEach(function (row, index) {
+      var trade = row.trade;
+      lines.push(
+        pad(index + 1, 4) + pad(trade.at.slice(0, 16), 21) + pad(label(trade.chart), 9) +
+        pad(sideLabel(trade.box.side).toUpperCase(), 7) +
+        pad(price(trade.box.entry), 9) + pad(price(trade.box.stop), 9) +
+        pad(price(trade.box.target), 10) + pad("1:" + decimal(trade.ratio), 8) +
+        pad(RESULT_NAMES[trade.result], 12) + pad(signedR(trade.r).replace(" R", ""), 7) +
+        pad(signedMoney(row.delta), 12) + money(row.balance)
+      );
+    });
+    return lines.join("\n");
+  }
+
+  /* Copiar es de la barra, no del gráfico: el portapapeles puede no estar —un
+   * navegador viejo, un fichero abierto sin permiso— y el estado tiene que
+   * decirlo en vez de dejar creer que el historial ya está guardado fuera. */
+  function copyAccount() {
+    var text = accountText();
+    var stats = accountStats();
+    var done = false;
+    try {
+      var clipboard = typeof navigator !== "undefined" && navigator.clipboard;
+      if (clipboard && clipboard.writeText) {
+        var promise = clipboard.writeText(text);
+        // El permiso se resuelve después: si lo niegan, el estado tiene que
+        // desdecirse en vez de dejar creer que el historial ya está fuera.
+        if (promise && promise.catch) {
+          promise.catch(function () {
+            state.account.copied = { ok: false, trades: stats.trades };
+            draw();
+          });
+        }
+        done = true;
+      } else {
+        done = legacyCopy(text);
+      }
+    } catch (error) {
+      done = false;
+    }
+    state.account.copied = { ok: done, trades: stats.trades };
+    draw();
+  }
+
+  function legacyCopy(text) {
+    if (!document.body || !document.execCommand) { return false; }
+    var area = document.createElement("textarea");
+    area.value = text;
+    document.body.appendChild(area);
+    if (area.select) { area.select(); }
+    var done = document.execCommand("copy");
+    if (document.body.removeChild) { document.body.removeChild(area); }
+    return done === true;
+  }
+
+  /* Lo corto, para la barra: el saldo tiene que verse sin leer nada más. */
+  function accountSummary() {
+    var stats = accountStats();
+    return money(stats.balance) + " · riesgo " + money(stats.risk) + " · " +
+      plural(stats.trades, "operación", "operaciones") +
+      (stats.trades ? " · " + signedR(stats.r) : "");
+  }
+
+  /* Lo largo, para el estado de abajo. Sólo aparece cuando hay algo que contar
+   * —una caja dibujada o alguna operación apuntada—: con la cuenta intacta no
+   * hay nada que declarar. */
+  function accountCaption() {
+    var stats = accountStats();
+    if (!stats.trades && !state.sim) { return null; }
+    var text = "CUENTA SIMULADA: capital " + money(stats.balance) +
+      " (partía de " + money(stats.initial) + ") · " + signedMoney(stats.net) +
+      " (" + signedPct(stats.netPct) + ") · riesgo " + riskLabel() + " = " +
+      money(stats.risk) + " por operación";
+    if (stats.trades) {
+      text += " · " + plural(stats.trades, "operación apuntada", "operaciones apuntadas") +
+        " (" + stats.counts.win + " ganadas, " + stats.counts.loss + " perdidas, " +
+        stats.counts.be + " en break-even) · acierto " +
+        (stats.hit === null ? "sin decidir" : pct(stats.hit)) +
+        " (el break-even no cuenta) · " + signedR(stats.r) +
+        " · caída máxima " + money(stats.drawdown) + " (" + pct(stats.drawdownPct) + ")";
+    }
+    if (state.sim) {
+      var stake = simStake();
+      text += " · la caja dibujada se juega " + money(stake.risk) + " para ganar " +
+        money(stake.reward);
+    }
+    if (stats.balance <= 0) {
+      text += " · CUENTA A CERO: no queda capital que arriesgar y las operaciones " +
+        "siguientes no mueven nada";
+    }
+    if (state.account.copied) {
+      text += state.account.copied.ok
+        ? " · historial copiado al portapapeles (" +
+          plural(state.account.copied.trades, "operación", "operaciones") + ")"
+        : " · NO SE HA PODIDO COPIAR: este navegador no deja escribir en el portapapeles";
+    }
+    return text + " · NO ES DINERO: los resultados los apunta el propietario a mano " +
+      "mirando el gráfico; nadie comprueba si el precio llegó y el motor no ve nada de esto";
+  }
+
+  function buildAccountButtons() {
+    var container = document.getElementById("account-buttons");
+    if (!container) { return; }
+    ACCOUNT_RESULTS.forEach(function (result) {
+      var button = document.createElement("button");
+      button.type = "button";
+      button.textContent = result.label;
+      button.dataset.result = result.id;
+      button.title = result.title;
+      button.addEventListener("click", function () { recordTrade(result.id); });
+      container.appendChild(button);
+    });
+  }
+
+  function buildRiskModes() {
+    var select = document.getElementById("account-mode");
+    if (!select) { return; }
+    RISK_MODES.forEach(function (mode) {
+      var option = document.createElement("option");
+      option.value = mode.id;
+      option.textContent = mode.label;
+      select.appendChild(option);
+    });
+    select.value = state.account.mode;
+  }
+
+  function bindAccount() {
+    document.getElementById("account-initial").addEventListener("change", function (event) {
+      setInitial(event.target.value);
+    });
+    document.getElementById("account-risk").addEventListener("change", function (event) {
+      setRisk(event.target.value);
+    });
+    document.getElementById("account-mode").addEventListener("change", function (event) {
+      setRiskMode(event.target.value);
+    });
+    document.getElementById("account-undo").addEventListener("click", undoTrade);
+    document.getElementById("account-reset").addEventListener("click", resetAccount);
+    document.getElementById("account-copy").addEventListener("click", copyAccount);
+  }
+
+  function syncAccount() {
+    var stats = accountStats();
+    document.getElementById("account-initial").value = String(state.account.initial);
+    document.getElementById("account-risk").value = String(state.account.risk);
+    document.getElementById("account-mode").value = state.account.mode;
+    document.getElementById("account-summary").textContent = accountSummary();
+    // Sin caja dibujada no hay nada que cobrar: lo que se apunta es SIEMPRE una
+    // caja concreta, con su R:R y su fecha, no un resultado suelto.
+    document.querySelectorAll("#account-buttons button").forEach(function (button) {
+      button.disabled = !state.sim;
+    });
+    document.getElementById("account-undo").disabled = !stats.trades;
+    document.getElementById("account-reset").disabled = !stats.trades;
+    document.getElementById("account-copy").disabled = !stats.trades;
   }
 
   /* Cambiar de tramo de historia —preset, fechas, ventana ciega, arrancar o
@@ -2319,6 +2859,16 @@
     return shapes.concat(box);
   }
 
+  /* Y encima de todo, los recuadros del OB (I.3): los planta el propietario y
+   * tienen que verse sobre lo que dibuja el motor. Se apunta dónde empiezan por
+   * lo mismo que la caja simulada: para poder arrastrar uno sin rehacer la
+   * figura entera. */
+  function obShapes_(shapes) {
+    var boxes = obShapes();
+    obIndex = boxes.length ? shapes.length : null;
+    return shapes.concat(boxes);
+  }
+
   function layout(range) {
     var x = xRange(range);
     return {
@@ -2336,7 +2886,7 @@
       dragmode: "pan",
       showlegend: true,
       legend: { orientation: "h", y: 1.04, x: 0, font: { size: 11 } },
-      shapes: simShapes_(limboShapes(range)),
+      shapes: obShapes_(simShapes_(limboShapes(range))),
       xaxis: {
         type: "date", gridcolor: COLORS.grid, rangeslider: { visible: false },
         // El rango va siempre con su `autorange`: si se diera uno sin apagar el
@@ -2360,11 +2910,10 @@
     if (state.replay && state.zoom.x) { state.zoom.x = followX(state.zoom.x, now_()); }
     var range = bounds();
     var cut = slice(range);
-    // Las zonas van justo detrás de las velas: son áreas, y encima de las
-    // líneas del ID taparían lo que se está auditando.
+    // El marco va justo detrás de las velas: es el contorno del ID entero y
+    // encima de sus líneas competiría con lo que se está auditando.
     var traces = priceTraces(cut)
-      .concat(zoneTraces(range))
-      .concat(candidateTraces(range))
+      .concat(frameTraces(range))
       .concat(impulseTraces(range))
       .concat(stepTraces(range))
       .concat(midTraces(range))
@@ -2372,7 +2921,6 @@
       .concat(avoidedTraces(range))
       .concat(signalTraces(range))
       .concat(cascadeTraces(range))
-      .concat(confirmationTraces(range))
       .concat(contactTraces(range))
       .concat(wrongExtremeTraces(range));
 
@@ -2400,9 +2948,7 @@
     ["contacts", "contactos", function () { return true; }],
     ["mid", "nivel 50 %", function () { return true; }],
     ["wrong", "extremo de color contrario", function () { return true; }],
-    ["zonesContext", "zonas del contexto", function () {
-      return zonesAvailable() && overlays().length > 1;
-    }],
+    ["frame", "marco del ID", function () { return true; }],
     ["signals", "señales de zona", hasSignals],
     ["cascade", "cascada de entrada", hasCascade],
     ["avoided", "roturas evitadas", hasAvoided],
@@ -2432,12 +2978,20 @@
     // siempre: también con la venda puesta, donde es justo el gesto de decir
     // dónde habrías entrado antes de revelar.
     var simulada = simCaption();
+    // Y la cuenta, cuando hay algo que contar: un saldo que se mueve sin decir
+    // de dónde sale se lee como un resultado del motor.
+    var cuenta = accountCaption();
+    // Y los recuadros de OB, por lo mismo: son lo otro que dibuja el propietario
+    // y en la ciega marcar dónde se ve un OB es justo el gesto de la prueba.
+    var obs = obCaption();
     if (blindfolded()) {
       return "AUDITORÍA CIEGA · semilla " + state.seed + " · " + label(state.chart) + " · " +
         range.from + " → " + range.to + " · " + visible.toLocaleString("es-ES") +
         " velas. Marca tus impulsos y pulsa Revelar. Sorteada dentro de " +
         state.scope.from + " → " + state.scope.to + "." +
-        (simulada ? " · " + simulada : "");
+        (simulada ? " · " + simulada : "") +
+        (obs ? " · " + obs : "") +
+        (cuenta ? " · " + cuenta : "");
     }
     var dibujados = overlays().filter(isVisible).map(function (timeframe) {
       var allowed = visibleIds(timeframe, edges);
@@ -2478,33 +3032,36 @@
         (state.visible === "current" ? "ID actual" : "ID actual + anterior") +
         "»: los demás siguen en los datos y en los informes";
     }
+    if (state.frame) {
+      // De quién son los marcos que se están viendo. En este gráfico hay hasta
+      // dos temporalidades y sin decirlo, un marco ausente se lee como que ahí
+      // no había ID.
+      var marcos = overlays().filter(isVisible).map(function (timeframe) {
+        var allowed = visibleIds(timeframe, edges);
+        var cuantos = impulsesOf(timeframe).list.filter(function (impulse) {
+          return impulse.x1 >= edges.lo && impulse.x0 <= knownUntil(timeframe, edges) &&
+            keeps(allowed, impulse.id);
+        }).length;
+        return cuantos.toLocaleString("es-ES") + " de " + label(timeframe);
+      });
+      text += " · marcos de ID dibujados: " +
+        (marcos.length ? marcos.join(", ") : "ninguno") +
+        " · cada temporalidad con su color: el recuadro va de la vela que " +
+        "constituye el ID a la que lo mata, y de su ancla a su extremo · con el " +
+        "ID vivo llega al presente y se remarca cada vez que el extremo se estira";
+    }
     if (hasZones() && !zonesAvailable()) {
       text += " · las zonas de la fase 2.0 se calcularon sobre " +
-        DATA.meta.legStartMode + " y no se dibujan en otro modo: serían zonas de " +
-        "impulsos que en este modo no existen";
-    } else if (zonesAvailable() && (state.zonesUl || state.zonesOb)) {
-      // Qué zonas se están viendo y DE QUIÉN: en este gráfico puede haber cajas
-      // de dos temporalidades y las de una tercera no dibujarse. Sin decirlo,
-      // una zona ausente se lee como que ese ID no tenía ninguna.
-      var dibujadas = zoneTimeframes().map(function (timeframe) {
-        var allowed = zoneIds(timeframe, edges);
-        var cuantas = zonesOf(timeframe).filter(function (zone) {
-          return wantsZone(zone.k) && zone.x1 >= edges.lo && zone.xd <= edges.hi &&
-            keeps(allowed, zone.id);
-        }).length;
-        return cuantas.toLocaleString("es-ES") + " de " + label(timeframe);
-      });
-      var fuera = state.zonesContext
-        ? []
-        : ((DATA.zoneContext || {})[state.chart] || []).map(label);
-      text += " · zonas dibujadas: " +
-        (dibujadas.length ? dibujadas.join(", ") : "ninguna") +
-        " · cada temporalidad con su color, y siempre las del ID actual: al " +
-        "constituirse uno nuevo, las del anterior se van" +
-        (fuera.length ? " · zonas del contexto (" + fuera.join(", ") + ") APAGADAS" : "") +
-        (DATA.meta.breakByZone
-          ? " (fase 2.1: éstas SÍ deciden la rotura)"
-          : " (fase 2.0: sólo se dibujan, no rompen nada)");
+        DATA.meta.legStartMode + " y las capas que cuelgan de ellas —señales y " +
+        "cascada— no se dibujan en otro modo: serían de impulsos que en este " +
+        "modo no existen";
+    }
+    if (zonesAvailable()) {
+      // UL y PUL ya no se pintan. Decirlo es parte del dibujo: quien viene de la
+      // fase 2.0 buscaría las cajas y leería su ausencia como un fallo.
+      text += " · las zonas UL y PUL no se dibujan: siguen en los datos, en los " +
+        "informes y bajo las señales y la cascada" +
+        (DATA.meta.breakByZone ? " (fase 2.1: además deciden la rotura)" : "");
     }
     if (hasSignals() && state.signals && zonesAvailable()) {
       var senales = visibleSignals(edges);
@@ -2531,6 +3088,11 @@
       text += " · cascada a la vista en " + label(state.chart) + ": " +
         pasos.length.toLocaleString("es-ES") +
         (porPaso ? " (" + porPaso + ")" : "") +
+        (tradingWindow()
+          ? " · SÓLO SE OPERA " + tradingWindow() +
+            ": fuera de esa franja no se busca ni se señala nada, y lo descartado" +
+            " por hora NO se dibuja (el veto del Diario sí corre a todas horas)"
+          : "") +
         " · SON SEÑALES: no hay entradas, ni stops, ni targets" +
         (state.visible === "all"
           ? ""
@@ -2589,6 +3151,8 @@
       text += " · revelado de la ventana ciega con semilla " + state.seed;
     }
     if (simulada) { text += " · " + simulada; }
+    if (obs) { text += " · " + obs; }
+    if (cuenta) { text += " · " + cuenta; }
     return text;
   }
 
@@ -2825,18 +3389,10 @@
    * estado de salida ni un nivel de ruido. Se aplica en un solo sitio y después
    * de cada preset, porque el preset no sabe qué llevaba el payload. */
   function enforceAvailability() {
-    if (!hasZones()) { state.zonesUl = state.zonesOb = false; }
     if (!hasSignals()) { state.signals = false; }
     if (!hasCascade()) { state.cascade = false; }
     if (!hasSteps()) { state.steps = false; }
     if (!hasAvoided()) { state.avoided = false; }
-  }
-
-  /* Fase 2.0. Sin zonas en el payload las casillas no se enseñan: una capa que
-   * no puede dibujar nada sólo hace dudar de si está fallando. */
-  function buildZoneLayers() {
-    if (hasZones()) { return; }
-    hide("zone-layers");
   }
 
   /* Mismo criterio para las señales: sin zonas no hay ni una, y una casilla que
@@ -3032,7 +3588,7 @@
     document.querySelectorAll("#sim-buttons button").forEach(function (button) {
       button.setAttribute("aria-pressed", String(button.dataset.side === state.arming));
     });
-    document.getElementById("sim-clear").disabled = !state.sim && !state.arming;
+    document.getElementById("sim-clear").disabled = !state.sim && !simArming();
     document.querySelectorAll("#sim-ratio button").forEach(function (button) {
       button.setAttribute("aria-pressed", String(Number(button.dataset.ratio) === state.ratio));
     });
@@ -3040,15 +3596,14 @@
     var canvas = document.getElementById("chart");
     if (canvas && canvas.style) { canvas.style.cursor = state.arming ? "crosshair" : ""; }
 
-    // Fase 2.0: las zonas sólo existen para el modo con el que se calcularon.
-    if (hasZones()) {
-      ["layer-zones-ul", "layer-zones-ob", "layer-zones-context"].forEach(function (id) {
-        document.getElementById(id).disabled = !zonesAvailable();
-      });
-      document.getElementById("layer-zones-ul").checked = state.zonesUl;
-      document.getElementById("layer-zones-ob").checked = state.zonesOb;
-      document.getElementById("layer-zones-context").checked = state.zonesContext;
-    }
+    // I.3 — el recuadro del OB: el botón dice si está esperando el clic, y sin
+    // recuadros puestos no hay nada que quitar.
+    document.getElementById("ob-mark")
+      .setAttribute("aria-pressed", String(state.arming === "ob"));
+    document.getElementById("ob-undo").disabled = !state.obs.length;
+    document.getElementById("ob-clear").disabled = !state.obs.length;
+
+    document.getElementById("layer-frame").checked = state.frame;
     if (hasSignals()) {
       // Se calcularon sobre las zonas del modo activo: en otro modo no hay nada
       // que encender, igual que con las zonas.
@@ -3065,6 +3620,7 @@
     if (hasSteps()) {
       document.getElementById("layer-steps").checked = state.steps;
     }
+    syncAccount();
     seedInput().value = state.seed === null ? "" : String(state.seed);
     document.getElementById("blind-reveal").disabled = !blindfolded();
     document.getElementById("blind-exit").disabled = !state.blind;
@@ -3124,9 +3680,7 @@
       ["layer-contacts", "contacts"],
       ["layer-mid", "mid"],
       ["layer-wrong", "wrong"],
-      ["layer-zones-ul", "zonesUl"],
-      ["layer-zones-ob", "zonesOb"],
-      ["layer-zones-context", "zonesContext"],
+      ["layer-frame", "frame"],
       ["layer-signals", "signals"],
       ["layer-cascade", "cascade"],
       ["layer-avoided", "avoided"],
@@ -3231,7 +3785,6 @@
 
   buildChartButtons();
   buildModeButtons();
-  buildZoneLayers();
   buildSignalLayers();
   buildCascadeLayers();
   buildBreakLayers();
@@ -3244,8 +3797,12 @@
   buildImpulseLayers();
   buildSimButtons();
   buildRatioButtons();
+  buildAccountButtons();
+  buildRiskModes();
   bindControls();
   bindAxisScaling();
   bindSim();
+  bindOb();
+  bindAccount();
   draw();
 })();

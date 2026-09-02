@@ -49,10 +49,10 @@ implementada, testeada y con un backtest reproducible.
 |---|---|---|---|---|
 | 0 | `ema_cross` | Baseline de referencia para validar el motor | Hecha | — |
 | 1 | Impulso dominante | Detección del ID en Diario y H4 (H1 y M15 se dibujan con el de H4): rotura → limbo → constitución | Implementada y corrida sobre 2018–2025 de Dukascopy; **pendiente de auditoría visual del propietario** | `chronos structure detect` |
-| 2.0 | Zonas UL y OB | Detección y dibujo de las dos zonas de cada ID; la rotura sigue siendo por línea | Implementada sobre 2018–2025; **pendiente de auditoría visual del propietario** | `chronos structure zonas` |
-| 2.1 | Rotura por zona | La zona sustituye a la línea como nivel de rotura del ID: el UL a favor, el OB en contra | Implementada sobre 2018–2025; **pendiente de auditoría visual del propietario** | `chronos structure rotura-por-zona` |
+| 2.0 | Zonas UL y PUL | Detección y dibujo de las dos zonas de cada ID; la rotura sigue siendo por línea | Implementada sobre 2018–2025; **pendiente de auditoría visual del propietario** | `chronos structure zonas` |
+| 2.1 | Rotura por zona | La zona sustituye a la línea como nivel de rotura del ID: el UL a favor, el PUL en contra | Implementada sobre 2018–2025; **pendiente de auditoría visual del propietario** | `chronos structure rotura-por-zona` |
 | 2.2 | — | *(aparcada: FVG)* | — | — |
-| 3.0 | Señales de entrada | La cascada H4 → H1 rehecha desde cero, y **sólo señales**: toque del OB de H4 → se espera a que el **ID de H1** —que en esta fase lleva detector propio— se ponga en la dirección del de H4 y se marca su OB → **el precio toca ese OB de H1 y ahí salta la señal**, en el instante del toque y no al cierre de la vela. Con el OB diario de **veto** direccional. Sin entradas, sin stops, sin targets, sin métricas | Implementada sobre 2018–2025; **pendiente de auditoría visual del propietario** | `chronos structure entradas` |
+| 3.0 | Señales de entrada | La cascada H4 → H1 rehecha desde cero, y **sólo señales**: toque del PUL de H4 → se espera a que el **ID de H1** —que en esta fase lleva detector propio— se ponga en la dirección del de H4 y se marca su PUL → **el precio toca ese PUL de H1 y ahí salta la señal**, en el instante del toque y no al cierre de la vela. Con el PUL diario de **veto** direccional. Sin entradas, sin stops, sin targets, sin métricas | Implementada sobre 2018–2025; **pendiente de auditoría visual del propietario** | `chronos structure entradas` |
 | 3.1 | Entradas | Convertir las señales de la 3.0 en operaciones. **No empieza hasta que la 3.0 esté auditada** | — | — |
 
 ### Fase 3.0 — señales de entrada
@@ -62,22 +62,22 @@ entrada» del explorador, para que el propietario mire si la máquina está vien
 lo que ve él antes de que nada abra una posición.
 
 **Son dos escalones, no tres.** El Diario no es un paso de la cascada: no hace
-falta tocar su OB para poder mirar H4. La lectura, con un ID **alcista** (el
+falta tocar su PUL para poder mirar H4. La lectura, con un ID **alcista** (el
 bajista es su espejo):
 
-1. el precio **toca el OB de un ID de H4** —el `TOQUE_OB` de la fase 2.0, sin
+1. el precio **toca el PUL de un ID de H4** —el `TOQUE_PUL` de la fase 2.0, sin
    redefinirlo— y se abre la búsqueda en H1;
 2. en H1 se **espera a que el ID de H1 vaya en la misma dirección que el de H4**:
    si al bajar manda un ID bajista, hay que esperar a que se rompa y se constituya
-   el alcista. En cuanto ese ID de H1 tiene **OB confirmado**, se marca ese OB.
+   el alcista. En cuanto ese ID de H1 existe, se marca su PUL.
    Da igual que el ID de H1 ya viniera alineado al llegar el toque: lo que se pide
    es que lo esté. **Una confirmación por ventana y ni una más.**
-3. y **el precio toca ese OB de H1: ahí salta la señal**. Es el mismo `TOQUE_OB`
-   de la fase 2.0, leído sobre el OB de H1 y sin redefinir nada. **No se espera
+3. y **el precio toca ese PUL de H1: ahí salta la señal**. Es el mismo `TOQUE_PUL`
+   de la fase 2.0, leído sobre el PUL de H1 y sin redefinir nada. **No se espera
    al cierre de la vela de H1**, igual que no se espera al de la de H4 ni al de
    la diaria: la señal se fecha en la vela fina —M15— en la que el precio entró
    en la zona. Se espera **mientras dure la ventana de H4** y no más: cerrada la
-   búsqueda, el OB de H1 marcado deja de valer aunque su ID siga vivo. **Un toque
+   búsqueda, el PUL de H1 marcado deja de valer aunque su ID siga vivo. **Un toque
    por confirmación y ni uno más.**
 
 **H1 lleva ID propio en esta fase.** Es el cambio de fondo: en H1 se marca el ID
@@ -85,23 +85,23 @@ exactamente igual que en el Diario y en H4 —mismo detector, mismas reglas, mis
 dos zonas—, así que el segundo escalón es estructura y no un patrón de velas. El
 turtle soup y el OB «de dos oportunidades» que confirmaban antes están **borrados
 del proyecto**. El **UL de H1 se dibuja pero no interviene**: la cascada sólo lee
-el OB.
+el PUL.
 
 Encender el detector de H1 mete su temporalidad en el hash de configuración, así
 que la fase 3.0 corre con un hash distinto del de la línea base `e27d20d0fa4e` y
 a propósito: el reparto por defecto de las fases 1 y 2 no se toca.
 
-**El Diario veta, no autoriza.** Mientras el precio esté **dentro** del OB de un
-ID diario no se mira ninguna confirmación que vaya en contra de él: en el OB de
+**El Diario veta, no autoriza.** Mientras el precio esté **dentro** del PUL de un
+ID diario no se mira ninguna confirmación que vaya en contra de él: en el PUL de
 un ID diario alcista, todo toque bajista de H4 se desecha hasta que el precio
 salga de esa zona. Fuera de esos tramos vale cualquier toque de H4, alcista o
 bajista. El tramo del veto y los toques descartados se dibujan para poder
 auditarlo.
 
-**La búsqueda dura hasta romper el OB o hasta llegar al UL.** Decisión del
+**La búsqueda dura hasta romper el PUL o hasta llegar al UL.** Decisión del
 propietario. La ventana se abre en el toque y se cierra con lo primero de tres:
 
-1. una vela de H4 **cierra más allá del borde exterior del OB**, o sea lo
+1. una vela de H4 **cierra más allá del borde exterior del PUL**, o sea lo
    atraviesa entero;
 2. el precio **toca el UL del mismo ID de H4** —el extremo, el sitio al que se
    iba—, y basta con tocarlo: se mide con mechas en la vela fina y no espera al
@@ -110,13 +110,13 @@ propietario. La ventana se abre en el toque y se cierra con lo primero de tres:
    parar;
 3. muere el ID de H4.
 
-**Salir del OB hacia arriba no cierra nada**: el precio puede irse a favor y la
+**Salir del PUL hacia arriba no cierra nada**: el precio puede irse a favor y la
 búsqueda sigue viva hasta el UL. Cada visita nueva la vuelve a armar y anula la
 anterior; si al volver no ha nacido ningún ID de H1 nuevo, se vuelve a coger el
-mismo con su mismo OB.
+mismo con su mismo PUL.
 
 El **tramo diario del veto se mide distinto y es a propósito**: ahí la pregunta es
-estar dentro del OB diario o no estarlo, así que se levanta con el cierre de una
+estar dentro del PUL diario o no estarlo, así que se levanta con el cierre de una
 vela **diaria** fuera de la zona, por el lado que sea.
 
 Parámetros abiertos declarados: que valga un ID de H1 que **ya venía alineado**
@@ -125,11 +125,11 @@ que muchas marcas caigan en la misma vela del toque— y que una confirmación c
 la ventana, de modo que lo que llega después no se dibuja aunque el motor lo vea.
 
 **Las zonas tienen su propio reparto en el explorador.** No es el de los
-impulsos: en **M15** se dibujan el OB y el UL **de H1** y sólo ésos —ahí se fecha
+impulsos: en **M15** se dibujan el PUL y el UL **de H1** y sólo ésos —ahí se fecha
 el toque que dispara la señal, y la caja de H4 a esa escala es cuatro velas de
 alto que sólo tapan—, y en **H1** se dibujan las suyas **y las de H4**, para ver
 si el precio está dentro de la zona grande. Cada temporalidad lleva **su color**
-—violeta el Diario, naranja H4, azul H1—, con el UL en el tono fuerte y el OB
+—violeta el Diario, naranja H4, azul H1—, con el UL en el tono fuerte y el PUL
 aclarado, y el fondo al 25-30 % para que se entienda sin tapar el precio. Es
 DIBUJO de zonas ya calculadas: no mide ningún toque, no añade ninguna señal y no
 cambia la cascada.
@@ -199,7 +199,7 @@ Ninguna de esas mediciones ha tocado la detección, y `chronos structure
 evidencia` comprueba la línea base y el `config_hash` con el esperado y el
 obtenido a la vista.
 
-### Fase 2.0 — zonas UL y OB, sólo detección
+### Fase 2.0 — zonas UL y PUL, sólo detección
 
 Tampoco es una estrategia registrada con `@register`: no emite señales. Añade
 dos zonas de precio a cada impulso ya detectado y las dibuja. El detalle
@@ -211,33 +211,38 @@ La línea base de la fase 1 se conserva intacta y verificada: mismo hash
 apagadas. Encenderlas no puede mover un impulso, y el comando lo comprueba antes
 de escribir nada.
 
-Lo que salió de medirla:
+> **Las cifras de abajo son de la definición anterior de la segunda zona** —el
+> OB, la vela del ancla entera de `low` a `high` y con confirmación—. El
+> propietario la sustituyó por el **PUL** (el cuerpo de la vela del extremo del ID
+> anterior) y todas las mediciones de esta fase y de la 2.1 hay que **volver a
+> generarlas**: `chronos structure zonas` y `chronos structure rotura-por-zona`.
+> Lo único que no cambia es lo que sólo depende del UL.
 
-- **El 5,4 % / 5,0 % / 4,4 % de los ID (D / H4 / H1) nunca llega a tener OB
-  confirmado.** Es la cifra que manda: en la fase 2.1 esos impulsos se romperán
-  por línea, porque no tienen zona con la que romper.
+Lo que salió de medirla con el OB:
+
+- **El 5,4 % / 5,0 % / 4,4 % de los ID (D / H4 / H1) nunca llegaba a tener OB
+  confirmado.** Con el PUL esa cifra se va a **uno por temporalidad**: sólo se
+  queda sin zona el primer ID del histórico, que no tiene ID anterior.
 - **El UL se extiende a la vela siguiente en un 54 % / 44 % / 44 % de los casos.**
   La regla de la vela de margen no es un detalle de borde: afecta a la mitad de
-  las zonas.
-- **El OB es mayor que el UL en el 90,0 % / 84,7 % / 85,2 %**, como se esperaba,
-  porque incluye el cuerpo. Las excepciones apenas se explican por la extensión
-  del UL —su porcentaje se mueve poco entre las dos poblaciones— sino porque ahí
-  el UL es unas 2,5 veces más alto de lo normal y el OB, más bajo: una vela de
-  extremo con mechazo contra una vela de ancla pequeña.
-- **El solape entre las dos zonas del mismo ID es del 10,0 % / 7,4 % / 9,2 %, no
-  cero.** Son ID cuyo rango mediano es unas tres veces menor que el del resto
-  (0,45-0,54 ATR frente a 1,54-1,68): tan cortos que caben dentro de la vela del
-  ancla. Es la población enana que C.5 ya contaba, mirada desde otro sitio.
+  las zonas. **Esta cifra sigue valiendo**: sólo depende del UL.
+- **El OB era mayor que el UL en el 90,0 % / 84,7 % / 85,2 %**, porque incluía la
+  vela entera. El PUL es sólo el cuerpo de otra vela, así que la comparación hay
+  que rehacerla.
+- **El solape entre las dos zonas del mismo ID era del 10,0 % / 7,4 % / 9,2 %.**
+  Con el PUL en el extremo anterior, la población que se solapa es otra.
 - **Anticipo de la fase 2.1 (sólo medición):** el 44,1 % / 41,9 % / 45,8 % de las
   roturas del histórico cerraron dentro de su zona sin atravesarla entera. La
-  diferencia entre las dos clases es grande: 50-55 % en las roturas a favor y
-  29-35 % en las de en contra, donde además 17 / 76 / 253 no tienen siquiera OB
-  con el que romper.
+  mitad a favor (50-55 %) sigue en pie —es el UL—; la de en contra (29-35 %) hay
+  que volver a medirla contra el PUL.
 
 Antes de pasar a la fase 2.1 hace falta que el propietario audite las capturas y
 el explorador y confirme que las zonas se dibujan donde él las dibuja.
 
 ### Fase 2.1 — la zona decide la rotura
+
+> Las cifras de esta sección se midieron con el **OB**. Sustituido por el PUL,
+> hay que volver a generarlas.
 
 Primer **cambio de comportamiento** del proyecto desde que se fijó la línea base.
 Hasta aquí un ID moría cuando una vela cerraba más allá de una de sus dos líneas.
@@ -247,7 +252,7 @@ existe una zona que la sustituya:
 | Lado | Si la zona existe | Si no existe |
 |---|---|---|
 | A favor (extremo) | manda el **UL**, que existe siempre | — |
-| En contra (ancla) | manda el **OB** si está confirmado | manda la línea |
+| En contra (ancla) | manda el **PUL** si el ID tiene uno | manda la línea (sólo el primer ID) |
 
 Romper una zona es **cerrar más allá de su borde exterior**, atravesándola
 entera: perforarla con mecha y cerrar dentro no rompe, y cerrar dentro tampoco.
@@ -257,7 +262,7 @@ como ella.
 No es un filtro posterior: es un cambio en la máquina de estados. Salvar una
 rotura deja el ID vivo y **su extremo sigue extendiéndose**, pero **ninguna de
 las dos zonas se remarca**: el UL lo fija la vela del extremo con la que el ID se
-constituyó y el OB, la vela del ancla. Por eso la comparación de abajo son dos
+constituyó y el PUL, la del extremo del ID anterior. Por eso la comparación de abajo son dos
 ejecuciones completas del módulo sobre las mismas velas, no una tabla
 reetiquetada.
 
@@ -293,9 +298,10 @@ Lo que salió de medirla (D / H4 / H1, totales de 2018–2025):
   / 31,2 % / 29,6 % al 21,4 % / 19,5 % / 16,9 %.
 - **Con las tres temporalidades vigentes se pasa del 36,9 % al 58,9 % del tiempo**,
   y alineadas en la misma dirección, del 12,3 % al 19,0 %.
-- **Casi toda rotura es por zona.** Por línea sólo mueren 2 / 7 / 23 ID en todo el
+- **Casi toda rotura es por zona.** Por línea sólo morían 2 / 7 / 23 ID en todo el
   histórico (0,8 % / 0,6 % / 0,6 % de las roturas), y siempre por el mismo motivo:
-  su OB nunca llegó a confirmarse. En el lado a favor no ocurre nunca, porque el
+  su OB nunca llegó a confirmarse. Con el PUL ese motivo desaparece salvo en el
+  primer ID de cada temporalidad. En el lado a favor no ocurre nunca, porque el
   UL existe siempre.
 - **Las zonas solapadas se caen solas**, que era la hipótesis: del 10,0 % / 7,4 % /
   9,2 % de los ID con OB al 1,7 % / 1,2 % / 1,9 % (37 → 4, 135 → 14, 637 → 79).
@@ -304,7 +310,7 @@ Lo que salió de medirla (D / H4 / H1, totales de 2018–2025):
   solapen no basta: para cumplir las dos condiciones hacen falta los dos bordes
   exteriores *invertidos*, y eso es lo contrario de solaparse. En un ID alcista se
   cumple siempre `borde exterior del UL >= extremo > ancla >= borde exterior del
-  OB` mientras el rango sea positivo, y con la regla nueva no queda ningún impulso
+  PUL` mientras el rango sea positivo, y con la regla nueva no queda ningún impulso
   de rango no positivo. Los dos órdenes quedan implementados y producen la misma
   historia (hashes `48138aa438f1` y `f51fb871d50a`).
 - **R-36 sigue abierto y cambia de puerta.** Extremos sobre vela de color contrario:
@@ -325,7 +331,7 @@ evitadas.
 ### Fase 3 — entradas: RETIRADA, se rehace desde cero
 
 Todo el módulo de entradas se ha **borrado del proyecto**: la cascada
-Diario → H4 → H1 → M15, las tres definiciones de rechazo, el turtle soup, el OB
+Diario → H4 → H1 → M15, las tres definiciones de rechazo, el turtle soup, el PUL
 suelto de M15, la ejecución sobre M1, los costes, las métricas en R, el informe,
 los arquetipos y sus capas del explorador. También el comando
 `chronos structure entradas` y el bloque `entries:` del YAML. Con él se han ido
@@ -336,9 +342,9 @@ La razón no es un bug: la cascada se montó sobre una lectura de la estrategia 
 hay que volver a fijar antes de escribir una línea de código. Lo que toca ahora,
 y en este orden, es comprobar que la base se entiende:
 
-1. **el toque de una zona** —cuándo el precio toca un UL y cuándo toca un OB, y en
+1. **el toque de una zona** —cuándo el precio toca un UL y cuándo toca un PUL, y en
    qué se distingue tocar de atravesar—. El explorador ya lo dibuja: la capa
-   «Señales de zona» marca el toque del OB, el rechazo del UL y la rotura del UL
+   «Señales de zona» marca el toque del PUL, el rechazo del UL y la rotura del UL
    sobre el Diario y H4. Son **dibujo**, no entradas
    ([MODULO_2_ZONAS.md](MODULO_2_ZONAS.md#señales-de-zona-sólo-dibujo));
 2. **los ID** —qué ID está vigente en cada instante y con qué identificador;

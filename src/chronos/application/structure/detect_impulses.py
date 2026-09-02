@@ -73,7 +73,7 @@ AUDIT_COLUMNS = (
     #: reloj y cero velas.
     "indice_constitucion",
     "indice_fin",
-    #: Fase 2.1. De dónde salió el nivel que mató al ID —`linea`, `UL` u `OB`— y
+    #: Fase 2.1. De dónde salió el nivel que mató al ID —`linea`, `UL` o `PUL`— y
     #: cuántas veces su extremo se estiró estando ya vigente, que en la fase 1
     #: era imposible. Con `break_by_zone: false` la primera es siempre `linea` y
     #: la segunda siempre cero.
