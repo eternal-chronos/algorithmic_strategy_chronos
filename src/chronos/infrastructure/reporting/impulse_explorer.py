@@ -401,7 +401,7 @@ def _impulse_payload(
 def _zones(
     zones: TimeframeZones | None, analysis: TimeframeAnalysis, last: pd.Timestamp
 ) -> list[dict[str, Any]]:
-    """Capas "Zonas UL" y "PUL/APUL" (§8). Puramente visual: no interviene en nada.
+    """Capas "Zona UL" y "Zona PUL" (§8). Puramente visual: no interviene en nada.
 
     Cada zona viaja con dos tramos horizontales distintos, igual que las líneas
     del ID en B.1: el rectángulo lleno va del **nacimiento** al fin del ID —que
@@ -415,10 +415,10 @@ def _zones(
     mientras la línea del extremo puede seguir subiendo en escalera por encima.
 
     La zona del lado en contra cuelga de una vela **anterior** al ID —la del
-    extremo de un ID previo, la que llevaba su UL—, así que su `xd` queda siempre
-    por detrás de `x0`. Es el PUL, o el APUL cuando el ID anterior murió por
-    rotura en contra y este ID se quedó sin PUL: nunca las dos, así que cada ID
-    manda como mucho dos zonas y `k` dice cuál es cada una.
+    extremo del ID de al lado, la que llevaba su UL—, así que su `xd` queda
+    siempre por detrás de `x0`. Es el PUL, y cada ID manda como mucho dos zonas:
+    `k` dice cuál es cada una y `wick` si el PUL es la mecha de aquella vela —el
+    UL viejo, porque aquel ID iba en el mismo sentido— o su cuerpo.
     """
     if zones is None:
         return []
@@ -429,7 +429,11 @@ def _zones(
         records.append(_zone_record(zoned, zoned.last, ends[zoned.id_num]))
         against = zoned.against
         if against is not None:
-            records.append(_zone_record(zoned, against, ends[zoned.id_num]))
+            record = _zone_record(zoned, against, ends[zoned.id_num])
+            # De qué tramo de la vela salió el PUL. El navegador no lo puede
+            # deducir de los bordes: haría falta el OHLC de la vela.
+            record["wick"] = zoned.penultimate_is_wick
+            records.append(record)
     return records
 
 
@@ -551,8 +555,8 @@ def _cascade_mark(mark: CascadeMark) -> dict[str, Any]:
         # sin esto, «hasta aquí» no dice si fue el PUL, el UL o el ID.
         record["why"] = mark.window_reason.value
     if mark.zone_kind is not None:
-        # PUL o APUL: el lado en contra de un ID lo lleva una de las dos y el
-        # globo no puede decir «PUL» sobre un APUL.
+        # Qué zona es la del paso. Viaja con la marca para que el globo no tenga
+        # que suponerla a partir del nombre del paso.
         record["zk"] = mark.zone_kind.value
     if mark.zone_start is not None:
         # La zona del PUL de H1 se dibuja sobre la vela del extremo anterior, que
@@ -662,11 +666,10 @@ def _impulse_list(impulses: list[Any], last: pd.Timestamp) -> list[dict[str, Any
             #: dominio al constituir; aquí sólo se transporta para poder marcarlo.
             "ec": impulse.extreme_bar_direction.value,
             "w": impulse.extreme_on_counter_bar,
-            #: Qué zona lleva el ID en su lado EN CONTRA: `PUL`, `APUL` o `linea`
-            #: cuando no hay ninguna. Lo decidió el detector al constituirlo —el
-            #: APUL sale cuando el ID anterior murió rompiéndose en contra— y no
-            #: se puede re-derivar en el navegador: haría falta la cadena entera
-            #: de impulsos hacia atrás. El globo del ID lo dice sin que haya que
+            #: Qué lleva el ID en su lado EN CONTRA: `PUL`, o `linea` cuando no
+            #: hay ID anterior del que sacarlo. Lo decidió el detector al
+            #: constituirlo y no se puede re-derivar en el navegador: haría falta
+            #: la lista de impulsos. El globo del ID lo dice sin que haya que
             #: esperar a la rotura para enterarse.
             "az": impulse.against_source.value,
             #: Si el ID sigue VIVO al final del histórico. `x1` es entonces la

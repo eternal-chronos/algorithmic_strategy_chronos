@@ -179,6 +179,7 @@ def run_zones(
                 timeframe="H4",
                 direction=impulse.direction,
                 index_previous_extreme=impulse.index_penultimate,
+                previous_direction=impulse.penultimate_direction,
                 ts_constitution=impulse.ts_constitution,
             ),
         )

@@ -197,15 +197,15 @@ def test_un_id_sin_zona_en_contra_lo_dice_en_la_nota(
     if not sin_zona:
         pytest.skip("esta fixture no produjo ningún ID sin zona en contra")
     _, nota = _figure(run.analyses[H4], sin_zona[0], "UTC")
-    assert "ni PUL ni APUL" in nota
+    assert "no tiene PUL" in nota
 
 
-def test_un_id_con_apul_lo_dice_en_la_nota(run: ImpulseRun, zones: ZonesRun) -> None:
-    """El APUL no es un PUL: la captura tiene que decir cuál está viendo."""
-    con_apul = zones.per_timeframe[H4].with_ante_penultimate
-    assert con_apul, "sin APUL en la fixture no hay nada que auditar"
-    _, nota = _figure(run.analyses[H4], con_apul[0], "UTC")
-    assert "APUL" in nota
+def test_un_pul_de_mecha_lo_dice_en_la_nota(run: ImpulseRun, zones: ZonesRun) -> None:
+    """El PUL de mecha no es el de cuerpo: la captura dice cuál está viendo."""
+    de_mecha = zones.per_timeframe[H4].with_wick_penultimate
+    assert de_mecha, "sin PUL de mecha en la fixture no hay nada que auditar"
+    _, nota = _figure(run.analyses[H4], de_mecha[0], "UTC")
+    assert "MECHA" in nota
 
 
 def test_un_id_sin_zona_en_contra_dibuja_solo_su_ul(
@@ -219,7 +219,7 @@ def test_un_id_sin_zona_en_contra_dibuja_solo_su_ul(
 
     for zoned in sin_zona[:10]:
         figure, nota = _figure(analysis, zoned, "UTC")
-        assert "ni PUL ni APUL" in nota
+        assert "no tiene PUL" in nota
         rectangulos = [shape for shape in figure.layout.shapes if shape.type == "rect"]
         # Sólo los del UL: el tramo atenuado y el relleno.
         assert len(rectangulos) <= 2

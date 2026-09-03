@@ -46,9 +46,14 @@ TIMEFRAME_MINUTES: dict[str, int] = {M15: 15, H1: 60, H4: 240, DAILY: 1440}
 #: línea base de la fase 1: H1 y M15 llevan dibujado el ID de H4 como contexto.
 #: La fase 3.0 corre con otro reparto —el de `with_hourly_structure`— porque su
 #: cascada sí necesita el ID de H1; las demás fases no lo tocan.
+#:
+#: **El Diario se dibuja sólo en su gráfico.** En H4 no se ve nada suyo —ni el ID,
+#: ni el marco, ni las zonas—: a esa escala la caja diaria tapa el precio y lo que
+#: se está auditando es el ID de H4. Quitarlo de ahí no cambia el hash: el detector
+#: del Diario sigue encendido porque su propio gráfico lo pide.
 DEFAULT_CHARTS: dict[str, tuple[str, ...]] = {
     DAILY: (DAILY,),
-    H4: (H4, DAILY),
+    H4: (H4,),
     H1: (H4,),
     M15: (H4,),
 }

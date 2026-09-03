@@ -1,4 +1,4 @@
-"""Señales de zona: toque del PUL/APUL, rechazo del UL y rotura del UL. **Sólo dibujo.**
+"""Señales de zona: toque del PUL, rechazo del UL y rotura del UL. **Sólo dibujo.**
 
 Esto **mide**, no decide, exactamente igual que `contacts.py`: ninguna regla del
 módulo 1 ni de la fase 2.1 lee nada de aquí, ninguna zona se mueve por su
@@ -12,7 +12,7 @@ Las tres, sobre las zonas que la fase 2.0 ya calculó y con la misma lectura de
 "más allá" que usa la rotura:
 
 - **TOQUE_PUL** — el rango de la barra entra en la zona del lado en contra —el
-  PUL, o el APUL cuando el ID no tiene PUL— viniendo **de fuera**.
+  PUL— viniendo **de fuera**.
   Tocar es un asunto de mechas: basta con que `[low, high]` corte la zona,
   cierre donde cierre. No hace falta esperar a ningún cierre para saberlo, así
   que el toque se **re-fecha** con `moment_of_touch` en la vela fina en la que
@@ -64,9 +64,7 @@ from chronos.domain.structure.zones import Zone, ZoneKind
 class ZoneSignalKind(StrEnum):
     """Las tres señales. Los valores salen al payload del explorador."""
 
-    #: El rango de la barra entra en la zona del lado en contra: el PUL, o el
-    #: APUL cuando el ID no tiene PUL. Cuál de las dos fue lo dice `zone`, no el
-    #: nombre: son la misma señal sobre el mismo lado del ID.
+    #: El rango de la barra entra en la zona del lado en contra: el PUL.
     TOQUE_PUL = "TOQUE_PUL"
     #: El rango entra en la zona UL y el cierre no pasa de su borde exterior.
     RECHAZO_UL = "RECHAZO_UL"

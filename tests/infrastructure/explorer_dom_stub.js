@@ -60,6 +60,7 @@ function declare(id) {
  'prev', 'next',
  'from', 'to', 'layer-limbo', 'layer-marks', 'layer-contacts', 'layer-mid', 'layer-wrong',
  'layer-frame',
+ 'zone-layers', 'layer-zones',
  'signal-layers', 'layer-signals',
  'cascade-layers', 'layer-cascade',
  'break-layers', 'avoided-layer', 'layer-avoided', 'steps-layer', 'layer-steps',
@@ -302,7 +303,7 @@ function snapshot(label) {
     // Las casillas que el preset mueve sin que nadie las toque: si el estado y
     // el control se separan, el explorador miente sobre lo que se está viendo.
     boxes: ['layer-limbo', 'layer-marks', 'layer-contacts', 'layer-mid', 'layer-wrong',
-      'layer-frame', 'layer-signals',
+      'layer-frame', 'layer-zones', 'layer-signals',
       'layer-cascade', 'layer-avoided', 'layer-steps']
       .reduce(function (state, id) {
         state[id] = elements[id].checked === true;
@@ -414,12 +415,14 @@ elements['layer-contacts'].fire('change', { target: { checked: false } });
 elements['layer-mid'].fire('change', { target: { checked: false } });
 
 // El MARCO del ID: el recuadro de la constitución a la muerte y del ancla al
-// extremo. Se enciende y se apaga sobre las mismas velas. El gráfico con
-// contexto lleva dos temporalidades, así que también comprueba que el marco de
-// la superior se dibuja, y con su color.
+// extremo. Se enciende y se apaga sobre las mismas velas. Si el reparto tiene
+// algún gráfico con contexto se retrata ahí, porque así comprueba de paso que el
+// marco de la temporalidad superior se dibuja y con su color; el reparto por
+// defecto no tiene ninguno —el Diario se dibuja sólo en su gráfico— y entonces
+// se retrata H4, que es donde el propietario audita el ID.
 const conMarco = tabs.filter(function (tab) {
   return JSON.parse(elements['explorer-data'].textContent).layout[tab.dataset.tf].length > 1;
-})[0] || tabs[0];
+})[0] || tabs.filter(function (tab) { return tab.dataset.tf === 'H4'; })[0] || tabs[0];
 conMarco.fire('click');
 presets[0].fire('click');
 // El paso `sin-principal` dejó apagado el impulso del gráfico: el marco cuelga
@@ -477,6 +480,14 @@ steps.push(snapshot('evitadas-por-defecto'));
 elements['layer-avoided'].fire('change', { target: { checked: false } });
 steps.push(snapshot('evitadas-apagadas'));
 elements['layer-avoided'].fire('change', { target: { checked: true } });
+
+// Las ZONAS del ID: el UL y el PUL. Se encienden y se apagan sobre las mismas
+// velas; sin zonas en el payload los dos pasos salen iguales, que es lo que
+// comprueba el test de la corrida sin zonas.
+steps.push(snapshot('zonas-por-defecto'));
+elements['layer-zones'].fire('change', { target: { checked: false } });
+steps.push(snapshot('zonas-apagadas'));
+elements['layer-zones'].fire('change', { target: { checked: true } });
 
 // Señales de zona: el toque del PUL y el rechazo/rotura del UL. Se encienden y se
 // apagan sobre las mismas velas; sin zonas en el payload los dos pasos salen

@@ -137,10 +137,11 @@ roto y que en su lugar rompe y gira la pierna."><input type="checkbox" id="layer
         <label class="toggle"><input type="checkbox" id="layer-mid"> Nivel 50 %</label>
         <label class="toggle" title="El MARCO de cada ID: un recuadro con la vela que lo
 CONSTITUYE y la que lo MATA en las dos verticales, y su ANCLA y su EXTREMO en las dos
-horizontales. Es lo que sustituye a las cajas de las zonas, que tapaban el precio.
-El globo dice además QUÉ ZONA lleva el ID en su lado EN CONTRA: el último extremo del
-SENTIDO OPUESTO. Es el PUL cuando el ID anterior iba al revés que éste, y el APUL cuando
-iba en el mismo sentido y hay que retroceder hasta el último contrario.
+horizontales. Lo lleva CADA ID dibujado; las cajas de las zonas, sólo el que se está
+mirando.
+El globo dice además QUÉ lleva el ID en su lado EN CONTRA: su PUL —el extremo del ID
+inmediatamente anterior— o la línea del ancla, que es lo único que tienen los primeros ID
+de cada temporalidad.
 El COLOR lo pone la TEMPORALIDAD —violeta el Diario, naranja H4, azul H1—, no la
 dirección: en el mismo gráfico hay marcos de dos (el de H4 sobre H1, el de H1 sobre M15)
 y lo primero es saber de quién es cada uno. La dirección sigue en la línea del ID.
@@ -149,9 +150,29 @@ o baja cada vez que el extremo se estira (§3.2), así que el recuadro de un ID 
 crece con él.
 Obedece el selector de ID visibles.">
           <input type="checkbox" id="layer-frame" checked> Marco del ID</label>
+        <span id="zone-layers" style="display:flex; gap:16px; flex-wrap:wrap;">
+          <label class="toggle" title="Las ZONAS del ID, dibujadas como recuadros: el UL a favor
+y el PUL en contra.
+  UL  el extremo de ESTE ID: el tramo de mecha de la vela que lo fijó, del borde del
+      cuerpo a la punta. Borde continuo;
+  PUL el lado en contra: la vela que fijó el extremo del ID INMEDIATAMENTE ANTERIOR,
+      por el tramo que MIRA a este ID. Borde a rayas. Si aquel ID iba AL REVÉS es el
+      CUERPO de la vela; si iba en el MISMO SENTIDO —murió por rotura a favor y éste
+      nació más allá— es su MECHA, o sea el UL viejo tal cual. El globo dice cuál.
+Con break_by_zone el borde EXTERIOR de la zona en contra es el nivel de rotura en contra
+del ID.
+SÓLO SE DIBUJAN LAS DEL ID QUE SE ESTÁ MIRANDO: el actual, y su anterior con el selector
+de ID visibles en «actual + anterior». Con «Todos» se quedan en el actual —una caja por ID
+en ocho años de historia tapa el precio, que es por lo que dejaron de pintarse—; los demás
+ID siguen enseñando su marco.
+El COLOR lo pone la TEMPORALIDAD, igual que el marco: violeta el Diario, naranja H4, azul
+H1. El tramo ATENUADO va de la vela que define la zona a la constitución del ID: ahí la
+zona todavía no existía.">
+            <input type="checkbox" id="layer-zones" checked> Zonas del ID (UL / PUL)</label>
+        </span>
         <span id="signal-layers" style="display:flex; gap:16px; flex-wrap:wrap;">
           <label class="toggle" title="Las tres señales sobre las zonas de los ID, en Diario y H4:
-pentágono = el precio TOCA la ZONA EN CONTRA (PUL o APUL) DESDE FUERA; hexagrama = LLEGA
+pentágono = el precio TOCA la ZONA EN CONTRA (el PUL) DESDE FUERA; hexagrama = LLEGA
 al UL DESDE FUERA y lo
 RECHAZA (no pasa de su borde exterior); rombo-estrella = ROMPE el UL (cierra más allá del
 borde exterior).
@@ -189,11 +210,11 @@ un paso, sólo veta. Cada marca va en el gráfico en el que se mira:
      ninguna búsqueda: mientras dure, prohíbe todo lo que vaya en contra de esa dirección;
   ✕ fino (H4, gris) toque de una zona de H4 EN CONTRA de una zona diaria vigente: se
      desecha hasta que el precio salga de esa zona diaria.
-LA ZONA EN CONTRA ES EL PUL O EL APUL, NUNCA LAS DOS: es el último extremo del SENTIDO
-OPUESTO. PUL si es el del ID anterior; APUL si el anterior iba en el mismo sentido y hay
-que retroceder más. El globo de cada marca dice cuál de las dos es.
+LA ZONA EN CONTRA ES EL PUL: el extremo del ID inmediatamente anterior, por el tramo de su
+vela que mira al ID —el cuerpo si aquél iba al revés, la mecha si iba en el mismo sentido—.
+El globo de cada marca dice cuál es.
 El UL de H1 no interviene: el ID de H1 trae sus dos zonas, pero la cascada sólo lee la de
-en contra. Ninguna de las dos se dibuja ya: lo que se ve del ID es su marco.
+en contra. Las dos se dibujan en la capa «Zonas del ID», y sólo las del ID que se mira.
 Una confirmación por ventana y ni una más: la primera cierra la búsqueda, así que lo que
 llegue después no se pinta aunque el motor lo vea.
 La raya punteada que sale de ✦ y de ★ es la VENTANA: hasta cuándo estuvo armada la
@@ -396,19 +417,28 @@ configuración, el historial y las estadísticas, en texto">Copiar</button>
       TEMPORALIDAD —violeta el Diario, naranja H4, azul H1—, no el de la dirección: la
       dirección se lee en la línea del ID y en el globo. Continuo el del gráfico,
       punteado el de la temporalidad de encima</span>
-    <span>cada gráfico lleva su marco y el de la temporalidad que le toca: el del
-      <b>Diario</b> sobre H4, el de <b>H4</b> sobre H1 y el de <b>H1</b> sobre M15</span>
+    <span>cada gráfico lleva su marco y el de la temporalidad que le toca: el de
+      <b>H4</b> sobre H1 y el de <b>H1</b> sobre M15. El <b>Diario</b> se dibuja SÓLO en
+      su gráfico: en H4 no se ve nada suyo</span>
     <span>el marco SE REMARCA mientras el ID vive: el lado derecho llega al presente y el
       del extremo sube o baja cada vez que el extremo se estira (§3.2)</span>
-    <span>las zonas UL, PUL y APUL ya no se dibujan: tapaban el precio. Siguen en los datos, en
-      los informes y debajo de las señales y de la cascada, que se calculan sobre
-      ellas</span>
-    <span>✦ el precio toca la zona en contra (PUL o APUL) de un ID de H4: se baja a H1. La cascada empieza AQUÍ,
+    <span><i class="box" style="background:#eb6834; opacity:.5"></i>ZONAS del ID, con el
+      color de su TEMPORALIDAD y el trazo de su tipo: <b>UL</b> continuo (el extremo de
+      ESTE ID, tramo de mecha de la vela que lo fijó), <b>PUL</b> a rayas (el lado en
+      contra: la vela del extremo del ID ANTERIOR, por el tramo que mira a este ID —su
+      cuerpo si aquél iba al revés, su MECHA si iba en el mismo sentido—)</span>
+    <span>sólo se dibujan las zonas DEL ID QUE SE ESTÁ MIRANDO —el actual, y su anterior
+      con el selector en «actual + anterior»—: una caja por ID tapaba el precio. Con
+      «Todos» se quedan en el ID actual y los demás siguen enseñando su marco</span>
+    <span>el recuadro ATENUADO de una zona va de la vela que la define a la constitución
+      del ID: durante ese tramo el nivel ya estaba en el precio pero la zona todavía no
+      existía</span>
+    <span>✦ el precio toca la zona en contra (el PUL) de un ID de H4: se baja a H1. La cascada empieza AQUÍ,
       sin pedirle nada al Diario</span>
     <span>⋈ = el ID de H1 va ya como el de H4 y tiene zona en contra: se marca esa zona de H1</span>
-    <span>caja punteada gris en H1 = la zona en contra del ID de H1: PUL (cuerpo) o APUL
-      (mecha) de la vela que fijó el
-      extremo del ID anterior, desde esa vela hasta aquella en la que se marcó</span>
+    <span>caja punteada gris en H1 = la zona en contra del ID de H1: su PUL, sobre la vela
+      que fijó el extremo del ID anterior, desde esa vela hasta aquella en la que se
+      marcó</span>
     <span>⬢ = el precio TOCA esa zona de H1: aquí salta la SEÑAL. Fechada en la vela fina
       (M15) del toque, sin esperar al cierre de la vela de H1, igual que el toque de la zona
       en H4 y en el Diario. Se espera mientras viva el ID de H1</span>

@@ -114,9 +114,14 @@ aggregation:
 # EL ID VIVE SÓLO EN EL DIARIO Y EN H4. H1 y M15 no tienen impulso propio: son
 # las temporalidades en las que se mira cómo llega el precio a la zona, y sobre
 # ellas se dibuja el ID de H4 como contexto y nada más.
+#
+# EL DIARIO SE DIBUJA SÓLO EN SU GRÁFICO. En H4 no se ve nada del Diario —ni su
+# ID, ni su marco, ni sus zonas—: lo que manda ahí es el ID de H4, y la caja
+# diaria encima tapaba el precio a una escala que no es la suya. El veto del
+# Diario de la fase 3.0 se mira en el gráfico del Diario.
 charts:
   D: [D]
-  H4: [H4, D]
+  H4: [H4]
   H1: [H4]
   M15: [H4]
 

@@ -80,27 +80,20 @@ class DominantImpulse:
     #: ese ID pasa a llevar el PUL de éste. `None` sólo en el primer impulso del
     #: histórico, que no tiene ID anterior. Se guarda por lo mismo que las otras
     #: dos velas: quien dibuje o audite no tiene que reconstruirla, y la fase 2.1
-    #: la lee barra a barra sin volver a la lista de impulsos. Que exista no
-    #: quiere decir que mande: si el ID anterior iba en el **mismo** sentido que
-    #: éste, su extremo cae en el lado a favor, no sirve de nivel en contra y el
-    #: ID lleva APUL en vez de PUL (`against_source`).
+    #: la lee barra a barra sin volver a la lista de impulsos.
     index_penultimate: int | None
     ts_penultimate: datetime | None
-
-    #: Vela del **APUL**: el extremo del último ID que iba en sentido contrario a
-    #: éste, cuando ese ID no es el inmediatamente anterior. `None` cuando el ID
-    #: lleva PUL —el anterior ya iba al revés— o cuando no hay ningún ID
-    #: contrario detrás. Se guarda porque re-derivarla después exige recorrer la
+    #: Hacia dónde iba aquel ID. No decide si hay PUL —lo hay siempre que haya ID
+    #: anterior—, decide QUÉ TRAMO de esa vela es la zona: su cuerpo si iba al
+    #: revés que éste, su mecha —el UL viejo tal cual— si iba en el mismo
+    #: sentido. Se guarda porque después no se puede reconstruir sin recorrer la
     #: lista de impulsos hacia atrás, y quien dibuja no tiene esa lista.
-    index_ante_penultimate: int | None
-    ts_ante_penultimate: datetime | None
+    penultimate_direction: ImpulseDirection | None
 
-    #: Qué zona lleva este ID en su lado en contra: el PUL, el APUL, o ninguna
-    #: —la línea del ancla— cuando no hay ningún ID contrario detrás. Lo decide
-    #: la constitución buscando el último extremo del sentido opuesto: si es el
-    #: del ID anterior, PUL; si hay que retroceder más, APUL. Desde ahí no
-    #: cambia. Se clasifica siempre, también con `BREAK_BY_ZONE = false`: ahí la
-    #: zona no gobierna la rotura, pero es la misma que se mide y se dibuja.
+    #: Qué gobierna el lado en contra de este ID: su PUL, o la línea del ancla
+    #: mientras no hay ningún ID detrás del que sacarlo. Se clasifica siempre,
+    #: también con `BREAK_BY_ZONE = false`: ahí la zona no gobierna la rotura,
+    #: pero es la misma que se mide y se dibuja.
     against_source: BreakLevelSource
 
     #: Barras cerradas en LIMBO entre la rotura anterior y esta constitución.
@@ -249,18 +242,9 @@ class DominantImpulse:
         return self.against_source is BreakLevelSource.PENULTIMATE
 
     @property
-    def has_ante_penultimate(self) -> bool:
-        """`True` si lo gobierna su APUL: el ID anterior iba en el mismo sentido."""
-        return self.against_source is BreakLevelSource.ANTE_PENULTIMATE
-
-    @property
     def index_against(self) -> int | None:
         """Vela de la que sale el nivel en contra, o `None` si manda la línea."""
-        if self.has_penultimate:
-            return self.index_penultimate
-        if self.has_ante_penultimate:
-            return self.index_ante_penultimate
-        return None
+        return self.index_penultimate if self.has_penultimate else None
 
     @property
     def is_open(self) -> bool:

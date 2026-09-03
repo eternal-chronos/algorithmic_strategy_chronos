@@ -381,7 +381,11 @@ def _lookahead() -> CheckGroup:
         levels.advance(4)
         return _raises(
             lambda: levels.penultimate_level(
-                direction=up, anchor=1995.00, index_penultimate=4, through=3
+                direction=up,
+                anchor=1995.00,
+                index_penultimate=4,
+                previous_direction=up.opposite(),
+                through=3,
             )
         )
 

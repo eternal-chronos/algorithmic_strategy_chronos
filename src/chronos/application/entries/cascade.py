@@ -211,10 +211,9 @@ class CascadeMark:
     #: PUL de H1 se dibuja sobre la vela del extremo del ID anterior al suyo, que
     #: queda detrás.
     zone_start: datetime | None = None
-    #: Qué zona es la del paso: `PUL` o `APUL`. El lado en contra de un ID lo
-    #: lleva una de las dos y nunca las dos, así que una marca que dijera «PUL»
-    #: siempre estaría mintiendo en la mitad de los casos. `None` en los pasos
-    #: que no cuelgan de ninguna zona.
+    #: Qué zona es la del paso —hoy siempre `PUL` o `UL`—. Viaja con la marca en
+    #: vez de escribirse en el nombre para que el dibujo no tenga que suponerla.
+    #: `None` en los pasos que no cuelgan de ninguna zona.
     zone_kind: ZoneKind | None = None
 
 

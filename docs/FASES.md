@@ -213,9 +213,11 @@ de escribir nada.
 
 > **Las cifras de abajo son de la definición anterior de la segunda zona** —el
 > OB, la vela del ancla entera de `low` a `high` y con confirmación—. El
-> propietario la sustituyó por el **PUL** (el cuerpo de la vela del extremo del ID
-> anterior) y todas las mediciones de esta fase y de la 2.1 hay que **volver a
-> generarlas**: `chronos structure zonas` y `chronos structure rotura-por-zona`.
+> propietario la sustituyó por el **PUL** (la vela del extremo del ID
+> inmediatamente anterior, por el tramo que mira al ID nuevo: su cuerpo si aquel
+> ID iba al revés, su mecha —el UL viejo— si iba en el mismo sentido) y todas las
+> mediciones de esta fase y de la 2.1 hay que **volver a generarlas**:
+> `chronos structure zonas` y `chronos structure rotura-por-zona`.
 > Lo único que no cambia es lo que sólo depende del UL.
 
 Lo que salió de medirla con el OB:
@@ -227,8 +229,8 @@ Lo que salió de medirla con el OB:
   La regla de la vela de margen no es un detalle de borde: afecta a la mitad de
   las zonas. **Esta cifra sigue valiendo**: sólo depende del UL.
 - **El OB era mayor que el UL en el 90,0 % / 84,7 % / 85,2 %**, porque incluía la
-  vela entera. El PUL es sólo el cuerpo de otra vela, así que la comparación hay
-  que rehacerla.
+  vela entera. El PUL es sólo un tramo de otra vela —su cuerpo, o su mecha cuando
+  el ID anterior iba igual—, así que la comparación hay que rehacerla.
 - **El solape entre las dos zonas del mismo ID era del 10,0 % / 7,4 % / 9,2 %.**
   Con el PUL en el extremo anterior, la población que se solapa es otra.
 - **Anticipo de la fase 2.1 (sólo medición):** el 44,1 % / 41,9 % / 45,8 % de las

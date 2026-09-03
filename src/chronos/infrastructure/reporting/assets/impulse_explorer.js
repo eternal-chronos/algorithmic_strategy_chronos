@@ -72,19 +72,19 @@
     clean: {
       visible: "current",
       limbo: false, marks: true, contacts: false, mid: false, wrong: false,
-      frame: true,
+      frame: true, zones: true,
       signals: true, cascade: true, avoided: false, steps: false
     },
     normal: {
       visible: "pair",
       limbo: true, marks: true, contacts: false, mid: false, wrong: true,
-      frame: true,
+      frame: true, zones: true,
       signals: true, cascade: true, avoided: true, steps: true
     },
     all: {
       visible: "all",
       limbo: true, marks: true, contacts: true, mid: true, wrong: true,
-      frame: true,
+      frame: true, zones: true,
       signals: true, cascade: true, avoided: true, steps: true
     }
   };
@@ -123,6 +123,11 @@
      * Nace encendido en los tres niveles de ruido: es dónde empieza y dónde
      * acaba el ID, que es lo primero que hay que ver. */
     frame: true,
+    /* Las zonas del ID —el UL y el PUL— dibujadas como recuadros. Nace
+     * encendida en los tres niveles de ruido: es lo que hay que auditar de la
+     * fase 2.0 y de la regla del lado en contra. Sólo se pintan las del ID que
+     * se está mirando, así que no vuelven a tapar el precio. */
+    zones: true,
     /* Señales de zona: toque del PUL, rechazo del UL y rotura del UL. Nace
      * encendida en los tres niveles de ruido —es lo que el propietario ha pedido
      * ver— y sólo existe donde existen las zonas: Diario y H4. */
@@ -850,16 +855,25 @@
     }];
   }
 
-  /* --- Las zonas: ya no se dibujan -----------------------------------------
+  /* --- Las zonas del ID: el UL y el PUL -------------------------------------
    *
-   * UL y PUL llegan calculados desde Python y siguen en el payload —de ellos
-   * cuelgan las señales de zona y la cascada—, pero NO se pintan: dos cajas por
-   * ID tapaban el precio y contaban de la zona lo que no contaban del ID. Lo que
-   * se dibuja en su lugar es el MARCO del ID, más abajo.
+   * Las tres llegan calculadas desde Python —de ellas cuelgan las señales de
+   * zona y la cascada— y se dibujan como recuadros, pero SÓLO LAS DEL ID QUE SE
+   * ESTÁ MIRANDO: una caja por ID en todo el histórico tapaba el precio, que es
+   * por lo que dejaron de pintarse. Con el ID actual (y su anterior, si el
+   * selector de ID visibles lo pide) son dos o cuatro cajas y se pueden auditar.
+   * El resto de los ID siguen enseñando su MARCO, que no es la zona.
+   *
+   * Cada zona va en dos tramos, con la misma convención que las líneas del ID en
+   * B.1: relleno sólido desde que la zona NACE —la constitución del ID— hasta
+   * que el ID muere, que es exactamente cuando existe, y contorno atenuado desde
+   * la vela que la define hasta ese nacimiento. La zona en contra cuelga de una
+   * vela anterior al ID —el extremo de un ID previo—, así que ese tramo
+   * atenuado es casi siempre el más largo de los dos.
    *
    * Lo que sí sigue mandando es de qué modo de R-36 son: se calcularon sobre los
    * impulsos del modo activo, así que en otro modo las capas que cuelgan de
-   * ellas (señales y cascada) se quedan vacías.
+   * ellas (zonas, señales y cascada) se quedan vacías.
    */
   function hasZones() { return DATA.hasZones === true; }
 
@@ -867,12 +881,151 @@
     return hasZones() && state.mode === DATA.meta.legStartMode;
   }
 
+  function zonesOf(timeframe) {
+    if (!zonesAvailable()) { return []; }
+    return impulsesOf(timeframe).zones || [];
+  }
+
+  /* Qué ID enseñan sus zonas. NO es el filtro de dibujo entero: con «Todos» se
+   * quedan en el ID actual, porque las cajas de ocho años de historia son una
+   * pared que no deja ver ni las velas. El estado lo dice con todas las letras.
+   */
+  function zoneIds(timeframe, edges) {
+    return lastIds(timeframe, edges, state.visible === "pair" ? 2 : 1);
+  }
+
+  /* El COLOR lo pone la TEMPORALIDAD, igual que el marco: en el mismo gráfico
+   * hay zonas de dos —las de H4 sobre H1, las de H1 sobre M15— y lo primero que
+   * hay que poder decir es de quién es cada caja. Qué zona es se lee en el trazo
+   * del borde y en el globo: el UL continuo y el PUL a rayas. */
+  var ZONE_ALPHA = { UL: 0.26, PUL: 0.14 };
+  var ZONE_DASH = { UL: "solid", PUL: "dash" };
+
+  /* Un polígono por zona dentro de una sola traza por (temporalidad, tipo): con
+   * `fill: toself` y separadores nulos, Plotly las dibuja todas sin multiplicar
+   * las trazas. */
+  function zoneTraces(range) {
+    if (blindfolded() || !state.zones || !zonesAvailable()) { return []; }
+    var edges = window_(range);
+    var traces = [];
+
+    overlays().forEach(function (timeframe) {
+      if (!isVisible(timeframe)) { return; }
+      pushZoneTraces(traces, timeframe, edges);
+    });
+    return traces;
+  }
+
+  function pushZoneTraces(traces, timeframe, edges) {
+    var allowed = zoneIds(timeframe, edges);
+    var buckets = {};
+
+    zonesOf(timeframe).forEach(function (zone) {
+      if (zone.x1 < edges.lo || zone.xd > edges.hi) { return; }
+      // La zona no existe hasta que cierra la vela que la hace nacer.
+      if (pending(zone.x0, timeframe, edges)) { return; }
+      if (!keeps(allowed, zone.id)) { return; }
+      if (!buckets[zone.k]) { buckets[zone.k] = { live: shape(), before: shape() }; }
+      pushZone(buckets[zone.k].live, zone.x0, clip(zone.x1, edges), zone, timeframe, false);
+      if (zone.xd < zone.x0) {
+        pushZone(buckets[zone.k].before, zone.xd, zone.x0, zone, timeframe, true);
+      }
+    });
+
+    Object.keys(buckets).forEach(function (kind) {
+      var name = "Zona " + kind + " " + label(timeframe) +
+        (timeframe === primary() ? "" : " (contexto)");
+      if (buckets[kind].live.x.length) {
+        traces.push(zoneTrace(name, buckets[kind].live, timeframe, kind, false));
+      }
+      if (buckets[kind].before.x.length) {
+        traces.push(zoneTrace(
+          "Antes de existir · " + name, buckets[kind].before, timeframe, kind, true
+        ));
+      }
+    });
+  }
+
+  /* Un rectángulo cerrado, en el orden que espera `fill: toself`, más el nulo
+   * que lo separa del siguiente. Una zona plana —la vela no dejó mecha— sale
+   * como una línea: es lo que es, y no se le inventa altura. */
+  function pushZone(bucket, from, to, zone, timeframe, before) {
+    var a = iso(from), b = iso(to);
+    var caption = zoneCaption(zone, timeframe, before);
+    bucket.x.push(a, b, b, a, a, null);
+    bucket.y.push(zone.lo, zone.lo, zone.hi, zone.hi, zone.lo, null);
+    bucket.text.push(caption, caption, caption, caption, caption, "");
+  }
+
+  /* Qué es cada zona. El PUL tiene dos lecturas y las dos son la MISMA regla
+   * —el extremo del ID anterior— con distinta geometría: la zona es el tramo de
+   * aquella vela que MIRA a este ID, y cuál es lo dice `wick`, que viene
+   * calculado del motor. */
+  var ZONE_WHAT = {
+    UL: "el extremo de ESTE ID: el tramo de mecha de la vela que lo fijó, del " +
+      "borde del cuerpo a la punta",
+    PUL: "el lado EN CONTRA: la vela que fijó el extremo del ID ANTERIOR",
+    PUL_BODY: "el CUERPO de esa vela, porque aquel ID iba AL REVÉS que éste y " +
+      "su mecha apunta al otro lado",
+    PUL_WICK: "su MECHA —el UL viejo tal cual—, porque aquel ID iba en el MISMO " +
+      "sentido: murió por rotura a favor y éste nació más allá"
+  };
+
+  function zoneCaption(zone, timeframe, before) {
+    var head = before
+      ? "ANTES DE EXISTIR · la vela ya definía la zona, el ID todavía no estaba " +
+        "constituido<br>"
+      : "";
+    var body = "Zona " + zone.k + " del ID " + timeframe + " nº " + zone.id +
+      " · " + zone.d +
+      "<br>" + ZONE_WHAT[zone.k] +
+      (zone.k === "PUL"
+        ? "<br>" + (zone.wick ? ZONE_WHAT.PUL_WICK : ZONE_WHAT.PUL_BODY)
+        : "") +
+      "<br>interior " + price(zone.i) + " · exterior " + price(zone.o) +
+      "<br>altura " + price(zone.hi - zone.lo) +
+      "<br>la define la vela de " + stamp(zone.xd) +
+      "<br>la zona existe desde " + stamp(zone.x0);
+    if (zone.k === "UL") {
+      body += zone.ext
+        ? "<br>extendida a la vela siguiente, que llegó más lejos"
+        : "<br>sin extender";
+      // §3.2: el extremo se estira con cada rechazo, el UL NO. Se marca una vez,
+      // al constituirse el ID, y es el mismo hasta que el ID muere.
+      body += "<br>el UL no se remarca: es el de la constitución del ID";
+    } else if (DATA.meta.breakByZone) {
+      body += "<br>su borde exterior es el nivel de ROTURA EN CONTRA del ID";
+    } else {
+      body += "<br>con break_by_zone apagado NO manda la rotura: se rompe por " +
+        "la línea del ancla";
+    }
+    if (zone.flat) { body += "<br>ALTURA CERO: la vela no dejó mecha"; }
+    return head + body;
+  }
+
+  function zoneTrace(name, bucket, timeframe, kind, before) {
+    var color = timeframeColor(timeframe);
+    return {
+      type: "scatter", mode: "lines", name: name,
+      x: bucket.x, y: bucket.y, text: bucket.text,
+      hoverinfo: "text", hoverlabel: { align: "left" }, connectgaps: false,
+      fill: before ? "none" : "toself",
+      fillcolor: before ? undefined : rgba(color, ZONE_ALPHA[kind]),
+      opacity: before ? 0.35 : 1,
+      line: {
+        color: color,
+        width: before ? 1 : 1.3,
+        dash: before ? "dot" : ZONE_DASH[kind]
+      }
+    };
+  }
+
   /* --- El marco del ID ------------------------------------------------------
    *
    * Dónde EMPIEZA y dónde ACABA cada ID, dibujado como un recuadro: las dos
    * verticales son la vela que lo constituye y la que lo mata, y las dos
-   * horizontales su ancla y su extremo. Es lo que sustituye a las cajas de UL y
-   * de PUL.
+   * horizontales su ancla y su extremo. Lo lleva CADA ID dibujado: las cajas de
+   * las zonas son sólo las del ID que se está mirando.
    *
    * El color lo pone la TEMPORALIDAD y no la dirección: en el mismo gráfico hay
    * marcos de dos —el de H4 sobre H1, el de H1 sobre M15— y lo primero que hay
@@ -947,24 +1100,19 @@
       againstNote(impulse);
   }
 
-  /* Qué zona lleva el ID en su LADO EN CONTRA. Viene calculado (`az`) porque
-   * derivarlo aquí exigiría la cadena entera de impulsos hacia atrás. Sin
-   * `break_by_zone` la zona no manda la rotura y el globo lo dice: si no, un ID
-   * con APUL se leería como si el motor ya estuviera rompiendo por ahí. */
+  /* Qué lleva el ID en su LADO EN CONTRA. Viene calculado (`az`) porque
+   * derivarlo aquí exigiría la lista de impulsos. Sin `break_by_zone` la zona no
+   * manda la rotura y el globo lo dice: si no, se leería como si el motor ya
+   * estuviera rompiendo por ahí. */
   function againstNote(impulse) {
     if (!impulse.az) { return ""; }
     var manda = DATA.meta.breakByZone
       ? " (es su nivel de rotura EN CONTRA)"
       : " (con break_by_zone apagado NO manda: rompe por el ancla)";
     if (impulse.az === "linea") {
-      return "<br>en contra: SIN ZONA, todavía no había ningún ID en sentido " +
-        "contrario del que salga la vela" +
+      return "<br>en contra: SIN ZONA, no hay ningún ID anterior del que salga " +
+        "la vela" +
         "<br>rompe por la línea del ancla";
-    }
-    if (impulse.az === "APUL") {
-      return "<br>en contra: APUL" + manda +
-        "<br>NO tiene PUL: el ID anterior iba en su MISMO sentido, así que su " +
-        "extremo cae en el lado a favor y hay que retroceder al último contrario";
     }
     return "<br>en contra: PUL" + manda;
   }
@@ -1117,15 +1265,11 @@
     traces.push(breakTrace(breaks, "favor", "UL", "ROTURA_A_FAVOR", "triangle-up-open", COLORS.ink));
     traces.push(breakTrace(breaks, "contra", "linea", "ROTURA_EN_CONTRA", "x", COLORS.muted));
     traces.push(breakTrace(breaks, "contra", "PUL", "ROTURA_EN_CONTRA", "x-open", COLORS.muted));
-    /* El APUL lleva SÍMBOLO PROPIO. Es una regla distinta —el ID que nace tras
-     * una rotura en contra no tiene PUL— y meterla en la misma traza que el PUL
-     * diría que el motor rompió por donde no rompió. */
-    traces.push(breakTrace(breaks, "contra", "APUL", "ROTURA_EN_CONTRA", "x-dot", COLORS.muted));
     return traces.filter(Boolean);
   }
 
   /* `source` es el ORIGEN EXACTO del nivel que rompió, tal como lo escribió el
-   * motor: `linea` es la regla de la fase 1 y `UL`, `PUL` o `APUL` la de la 2.1.
+   * motor: `linea` es la regla de la fase 1 y `UL` o `PUL` la de la 2.1.
    * Con `break_by_zone` apagado todas caen en `linea` y las demás salen
    * vacías. */
   function breakTrace(breaks, kind, source, name, symbol, color) {
@@ -1145,13 +1289,9 @@
         var how = item.src === "linea"
           ? (DATA.meta.breakByZone
             ? "<br>por LÍNEA: ese lado no tenía zona (los primeros ID del " +
-              "histórico no tienen ni PUL ni APUL)"
+              "histórico no tienen PUL)"
             : "")
           : "<br>por ZONA " + item.src + ": la atravesó entera" +
-            (item.src === "APUL"
-              ? "<br>este ID no tenía PUL: el ID anterior iba en su MISMO sentido, " +
-                "así que su lado en contra lo llevaba el APUL, un ID más atrás"
-              : "") +
             "<br>línea del ID en " + price(item.ln);
         return name + " (" + primary() + ")<br>" + stamp(item.x) +
           "<br>ID roto: " + item.id + " (" + item.d + ")" +
@@ -1260,9 +1400,6 @@
    * color del ID al que pertenece la señal. */
   var SIGNAL_STYLE = {
     TOQUE_PUL: { symbol: "pentagon", size: 12, title: "TOQUE DE PUL" },
-    /* Misma señal, mismo lado del ID, otra zona: el motor la llama igual y lo
-     * que cambia es `z`. El título se compone con él para no decir «PUL» encima
-     * de un APUL. */
     RECHAZO_UL: { symbol: "hexagram", size: 12, title: "RECHAZO DEL UL" },
     ROTURA_UL: { symbol: "star-diamond", size: 13, title: "ROTURA DEL UL" }
   };
@@ -1345,10 +1482,9 @@
    * tocar su zona para poder mirar H4—: lo que hace es prohibir, y su tramo se
    * dibuja en gris para que se vea de dónde viene cada descarte.
    *
-   * «Zona en contra» es el PUL o el APUL, nunca las dos: el nivel en contra es el
-   * último extremo del sentido opuesto, que es el del ID anterior cuando aquél
-   * iba al revés —PUL— y uno más atrás cuando iba igual —APUL—. Cuál es lo dice
-   * `zk` en cada marca; aquí no se deduce nada.
+   * «Zona en contra» es el PUL: el extremo del ID inmediatamente anterior, sea
+   * su cuerpo o su mecha. Cuál es la zona de cada paso lo dice `zk` en la marca;
+   * aquí no se deduce nada.
    *
    * El toque del PUL de H1 va fechado en la vela FINA en la que el precio entró
    * en la zona —igual que el de H4 y el del Diario—, así que se ve sin esperar a
@@ -1494,8 +1630,8 @@
   /* Por qué se cerró una ventana. Es la regla que se audita, así que la marca lo
    * dice en vez de dejar que se deduzca mirando las velas. */
   var WINDOW_END = {
-    ROTURA_PUL: "una vela de H4 cerró más allá del borde exterior de la zona en " +
-      "contra (PUL o APUL): la atravesó entera",
+    ROTURA_PUL: "una vela de H4 cerró más allá del borde exterior de su PUL: " +
+      "la atravesó entera",
     TOQUE_UL: "el precio llegó al UL de ese mismo ID de H4, que es el sitio al que iba",
     MUERTE_ID: "se acabó el ID",
     SALIDA_ZONA: "una vela DIARIA cerró fuera de la zona"
@@ -1525,18 +1661,10 @@
     };
   }
 
-  /* Cómo se llama la zona de un paso: `PUL` o `APUL`. Viene calculada (`zk`)
-   * porque el lado en contra de un ID lo lleva una de las dos y el navegador no
-   * puede saber cuál sin la cadena de impulsos. Los payloads viejos no la traen
-   * y ahí se dice `PUL`, que es lo que había cuando se generaron. */
+  /* Cómo se llama la zona de un paso. Viene calculada (`zk`) y no se deduce del
+   * nombre del paso; los payloads viejos no la traen y ahí se dice `PUL`, que es
+   * lo que había cuando se generaron. */
   function zoneName(item) { return item.zk || "PUL"; }
-
-  function anteNote(item) {
-    return item.zk === "APUL"
-      ? "<br>es un APUL, no un PUL: el ID anterior a ése iba en su mismo sentido, " +
-        "así que su lado en contra lo lleva el extremo del último ID contrario"
-      : "";
-  }
 
   function cascadeCaption(item) {
     var style = CASCADE_STYLE[item.k];
@@ -1551,8 +1679,7 @@
         item.k === "H4_DESCARTADO" || item.k === "TOQUE_PUL_H1") {
       text += "<br>zona " + zoneName(item) + " [" + price(item.lo) + ", " +
         price(item.hi) + "] · borde interior " + price(item.lvl) +
-        "<br>la mecha llegó a " + price(item.r) + " · cierre " + price(item.c) +
-        anteNote(item);
+        "<br>la mecha llegó a " + price(item.r) + " · cierre " + price(item.c);
     }
     if (item.k === "H4_DESCARTADO") {
       text += "<br>va EN CONTRA de la zona diaria vigente: mientras el precio no " +
@@ -1579,7 +1706,7 @@
         "] · borde interior " + price(item.lvl) +
         " · la vela que la define es la de " + stamp(item.x0) +
         "<br>se sabe en esta vela: la de la constitución del ID de H1, porque la " +
-        "zona nace con él" + anteNote(item);
+        "zona nace con él";
     } else if (item.k === "TOQUE_PUL_H1") {
       text += "<br>el precio ENTRA en la zona en contra (" + zoneName(item) +
         ") de ese ID de H1 viniendo de fuera: aquí salta la señal" +
@@ -3045,6 +3172,9 @@
     // El marco va justo detrás de las velas: es el contorno del ID entero y
     // encima de sus líneas competiría con lo que se está auditando.
     var traces = priceTraces(cut)
+      // Las zonas van las primeras: son cajas con relleno y encima de cualquier
+      // línea taparían justo lo que se audita.
+      .concat(zoneTraces(range))
       .concat(frameTraces(range))
       .concat(impulseTraces(range))
       .concat(stepTraces(range))
@@ -3081,6 +3211,7 @@
     ["mid", "nivel 50 %", function () { return true; }],
     ["wrong", "extremo de color contrario", function () { return true; }],
     ["frame", "marco del ID", function () { return true; }],
+    ["zones", "zonas del ID (UL y PUL)", hasZones],
     ["signals", "señales de zona", hasSignals],
     ["cascade", "cascada de entrada", hasCascade],
     ["avoided", "roturas evitadas", hasAvoided],
@@ -3189,16 +3320,44 @@
         "cascada— no se dibujan en otro modo: serían de impulsos que en este " +
         "modo no existen";
     }
-    if (zonesAvailable()) {
-      // UL y PUL ya no se pintan. Decirlo es parte del dibujo: quien viene de la
-      // fase 2.0 buscaría las cajas y leería su ausencia como un fallo.
-      text += " · las zonas UL, PUL y APUL no se dibujan: siguen en los datos, en " +
-        "los informes y bajo las señales y la cascada" +
-        (DATA.meta.breakByZone ? " (fase 2.1: además deciden la rotura)" : "") +
-        " · el lado EN CONTRA de cada ID es el último extremo del SENTIDO OPUESTO: " +
-        "PUL si es el del ID anterior, APUL si el anterior iba en el mismo sentido " +
-        "y hay que retroceder más · el globo del marco dice cuál, y la rotura por " +
-        "APUL va con su propio símbolo";
+    if (zonesAvailable() && state.zones) {
+      // Cuántas cajas hay, DE QUÉ ID son y CUÁLES. Sin lo segundo, un histórico
+      // entero con dos recuadros se lee como que a los demás ID les faltan las
+      // zonas, cuando lo que pasa es que aquí sólo se dibujan las del ID que se
+      // mira; sin lo tercero no se ve de un vistazo qué se está mirando.
+      var cajas = overlays().filter(isVisible).map(function (timeframe) {
+        var allowed = zoneIds(timeframe, edges);
+        var dibujadas = zonesOf(timeframe).filter(function (zone) {
+          return zone.x1 >= edges.lo && zone.xd <= edges.hi &&
+            !pending(zone.x0, timeframe, edges) && keeps(allowed, zone.id);
+        });
+        var tipos = [];
+        dibujadas.forEach(function (zone) {
+          if (tipos.indexOf(zone.k) < 0) { tipos.push(zone.k); }
+        });
+        return dibujadas.length.toLocaleString("es-ES") + " de " + label(timeframe) +
+          (tipos.length ? " (" + tipos.join(" + ") + ")" : "");
+      });
+      text += " · zonas dibujadas: " + (cajas.length ? cajas.join(", ") : "ninguna") +
+        " · SÓLO LAS DEL ID " +
+        (state.visible === "pair" ? "ACTUAL Y SU ANTERIOR" : "ACTUAL") +
+        (state.visible === "all"
+          ? " (con «Todos» las zonas se quedan en el ID actual: las de ocho años " +
+            "de historia taparían el precio; los demás ID siguen con su marco)"
+          : ", los demás ID siguen con su marco") +
+        " · el tramo atenuado va de la vela que define la zona a la constitución " +
+        "del ID: ahí todavía no existía" +
+        " · el UL es el extremo de ESTE ID y el PUL el del ID ANTERIOR: su " +
+        "cuerpo si aquel ID iba al revés, su MECHA —el UL viejo tal cual— si iba " +
+        "en el mismo sentido" +
+        (DATA.meta.breakByZone
+          ? " (fase 2.1: su borde exterior es el nivel de rotura en contra)"
+          : "");
+    } else if (zonesAvailable()) {
+      // Apagada a mano: quien viene de la fase 2.0 leería la ausencia de las
+      // cajas como un fallo del motor.
+      text += " · las zonas UL y PUL no se están dibujando (capa apagada): " +
+        "siguen en los datos, en los informes y bajo las señales y la cascada";
     }
     if (hasSignals() && state.signals && zonesAvailable()) {
       var senales = visibleSignals(edges);
@@ -3526,10 +3685,18 @@
    * estado de salida ni un nivel de ruido. Se aplica en un solo sitio y después
    * de cada preset, porque el preset no sabe qué llevaba el payload. */
   function enforceAvailability() {
+    if (!hasZones()) { state.zones = false; }
     if (!hasSignals()) { state.signals = false; }
     if (!hasCascade()) { state.cascade = false; }
     if (!hasSteps()) { state.steps = false; }
     if (!hasAvoided()) { state.avoided = false; }
+  }
+
+  /* Sin zonas en la corrida no hay ni un recuadro que pintar, y una casilla que
+   * no puede dibujar nada sólo hace dudar de si está fallando. */
+  function buildZoneLayers() {
+    if (hasZones()) { return; }
+    hide("zone-layers");
   }
 
   /* Mismo criterio para las señales: sin zonas no hay ni una, y una casilla que
@@ -3631,8 +3798,9 @@
     });
   }
 
-  /* Las casillas de impulso cambian con el gráfico: en H4 son H4 y Diario, en
-   * M15 sólo H1. Se reconstruyen en cada cambio de temporalidad. */
+  /* Las casillas de impulso cambian con el gráfico: en H1 de la fase 3.0 son H1 y
+   * H4, y en H4 sólo H4 —el Diario se dibuja únicamente en su gráfico—. Se
+   * reconstruyen en cada cambio de temporalidad. */
   function buildImpulseLayers() {
     var container = document.getElementById("impulse-layers");
     container.innerHTML = "";
@@ -3748,6 +3916,12 @@
     document.getElementById("rect-clear").disabled = !state.rects.length;
 
     document.getElementById("layer-frame").checked = state.frame;
+    if (hasZones()) {
+      // Se calcularon sobre los impulsos del modo activo: en otro modo no hay
+      // ninguna zona de estos ID que enseñar.
+      document.getElementById("layer-zones").disabled = !zonesAvailable();
+      document.getElementById("layer-zones").checked = state.zones;
+    }
     if (hasSignals()) {
       // Se calcularon sobre las zonas del modo activo: en otro modo no hay nada
       // que encender, igual que con las zonas.
@@ -3825,6 +3999,7 @@
       ["layer-mid", "mid"],
       ["layer-wrong", "wrong"],
       ["layer-frame", "frame"],
+      ["layer-zones", "zones"],
       ["layer-signals", "signals"],
       ["layer-cascade", "cascade"],
       ["layer-avoided", "avoided"],
@@ -3929,6 +4104,7 @@
 
   buildChartButtons();
   buildModeButtons();
+  buildZoneLayers();
   buildSignalLayers();
   buildCascadeLayers();
   buildBreakLayers();

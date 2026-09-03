@@ -157,23 +157,19 @@ def test_los_id_de_calentamiento_no_llevan_zonas(
         assert not (sin_publicar & publicados)
 
 
-def test_cada_id_lleva_una_sola_zona_en_contra(measured: ZonesRun) -> None:
-    """PUL o APUL, nunca las dos, y ninguna sólo al principio del histórico."""
+def test_cada_id_lleva_su_pul_menos_el_primero(measured: ZonesRun) -> None:
+    """El lado en contra es siempre el extremo del ID anterior; sin él, nada."""
     item = measured.per_timeframe[H4]
     puls = item.table[item.table["tipo"] == ZoneKind.PENULTIMATE.value]
-    apuls = item.table[item.table["tipo"] == ZoneKind.ANTE_PENULTIMATE.value]
 
     assert len(puls) == len(item.with_penultimate)
     assert set(puls["id_num"]) == {zoned.id_num for zoned in item.with_penultimate}
-    assert len(apuls) == len(item.with_ante_penultimate)
-    assert set(apuls["id_num"]) == {
-        zoned.id_num for zoned in item.with_ante_penultimate
-    }
-    assert not (set(puls["id_num"]) & set(apuls["id_num"]))
-    # El APUL no es una rareza: es la continuación de tendencia.
-    assert item.with_ante_penultimate
-    # Sin ningún ID contrario detrás sólo se quedan los primeros del histórico.
+    # El PUL de MECHA —el ID anterior iba en el mismo sentido— no es una rareza:
+    # es la continuación de tendencia, y es la mitad del histórico.
+    assert item.with_wick_penultimate
+    # Sin ID anterior sólo se quedan los primeros del histórico.
     assert len(item.without_against_zone) <= 1
+    assert len(item.with_penultimate) + len(item.without_against_zone) == len(item.items)
 
 
 def test_las_tres_unidades_de_altura_estan_siempre(measured: ZonesRun) -> None:
@@ -242,7 +238,6 @@ def test_la_vela_definitoria_es_la_que_registro_la_fase_1(
     esperados = {
         ZoneKind.LAST.value: lambda item: item.ts_extreme,
         ZoneKind.PENULTIMATE.value: lambda item: item.ts_penultimate,
-        ZoneKind.ANTE_PENULTIMATE.value: lambda item: item.ts_ante_penultimate,
     }
 
     for id_num, tipo, definitoria in zip(
@@ -281,11 +276,9 @@ def test_la_cobertura_dice_que_todos_tienen_ul(measured: ZonesRun) -> None:
     total = tabla[tabla["anio"] == zone_tables.TOTAL_ROW].iloc[0]
 
     assert total["pct_ul"] == 1.0
-    # Los tres estados del lado en contra suman: nunca hay PUL y APUL a la vez.
-    assert (
-        total["con_pul"] + total["con_apul"] + total["sin_zona"] == total["impulsos"]
-    )
-    assert total["con_apul"] > 0
+    # Los dos estados del lado en contra suman: o hay PUL, o no hay ID anterior.
+    assert total["con_pul"] + total["sin_zona"] == total["impulsos"]
+    assert total["con_pul"] > 0
 
 
 def test_la_comparativa_de_alturas_empareja_solo_los_id_con_las_dos_zonas(
@@ -308,10 +301,7 @@ def test_el_anticipo_de_la_fase_21_reparte_cada_rotura_a_su_zona(
     en_contra = detalle[detalle["tipo_rotura"] == BreakKind.EN_CONTRA.value]
 
     assert (a_favor["zona"] == ZoneKind.LAST.value).all()
-    assert en_contra["zona"].isin(
-        [ZoneKind.PENULTIMATE.value, ZoneKind.ANTE_PENULTIMATE.value]
-    ).all()
-    assert (en_contra["zona"] == ZoneKind.ANTE_PENULTIMATE.value).any()
+    assert (en_contra["zona"] == ZoneKind.PENULTIMATE.value).all()
 
 
 def test_una_rotura_sin_pul_no_cuenta_como_superviviente(measured: ZonesRun) -> None:

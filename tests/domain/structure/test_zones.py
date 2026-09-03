@@ -69,7 +69,8 @@ def test_pedir_un_pul_antes_de_que_nazca_su_id_lanza_lookahead() -> None:
     for barra in (2, 3, 5):
         with pytest.raises(LookaheadError, match="no existe"):
             zona.borders_at(series.at(barra))
-    assert zona.borders_at(series.at(6)) == (pytest.approx(2010.00), pytest.approx(2005.00))
+    # El ID#1 iba en el mismo sentido, así que el PUL del ID#2 es su mecha.
+    assert zona.borders_at(series.at(6)) == (pytest.approx(2012.00), pytest.approx(2010.00))
 
 
 def test_un_id_sin_pul_no_se_puede_consultar() -> None:
@@ -184,6 +185,7 @@ def test_el_pul_alcista_es_el_cuerpo_de_la_vela_del_minimo_anterior() -> None:
         id_num=2,
         timeframe="H4",
         direction=ImpulseDirection.ALCISTA,
+        previous_direction=ImpulseDirection.BAJISTA,
         index_previous_extreme=0,
         ts_constitution=series.at(1),
     )
@@ -207,6 +209,7 @@ def test_el_pul_bajista_es_el_cuerpo_de_la_vela_del_maximo_anterior() -> None:
         id_num=2,
         timeframe="H4",
         direction=ImpulseDirection.BAJISTA,
+        previous_direction=ImpulseDirection.ALCISTA,
         index_previous_extreme=0,
         ts_constitution=series.at(1),
     )
@@ -224,6 +227,7 @@ def test_el_pul_no_cubre_ninguna_mecha() -> None:
         id_num=2,
         timeframe="H4",
         direction=ImpulseDirection.ALCISTA,
+        previous_direction=ImpulseDirection.BAJISTA,
         index_previous_extreme=0,
         ts_constitution=series.at(1),
     )
@@ -242,6 +246,7 @@ def test_sin_id_anterior_no_hay_pul() -> None:
         id_num=1,
         timeframe="H4",
         direction=ImpulseDirection.ALCISTA,
+        previous_direction=ImpulseDirection.BAJISTA,
         index_previous_extreme=None,
         ts_constitution=series.at(0),
     )
@@ -257,6 +262,7 @@ def test_un_pul_de_altura_cero_se_conserva_como_zona_degenerada() -> None:
         id_num=2,
         timeframe="H4",
         direction=ImpulseDirection.ALCISTA,
+        previous_direction=ImpulseDirection.BAJISTA,
         index_previous_extreme=0,
         ts_constitution=series.at(1),
     )
@@ -274,6 +280,7 @@ def test_el_pul_no_espera_a_ninguna_confirmacion() -> None:
         id_num=2,
         timeframe="H4",
         direction=ImpulseDirection.ALCISTA,
+        previous_direction=ImpulseDirection.BAJISTA,
         index_previous_extreme=0,
         ts_constitution=series.at(1),
     )

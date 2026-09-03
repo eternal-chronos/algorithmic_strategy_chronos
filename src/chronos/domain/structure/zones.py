@@ -1,4 +1,4 @@
-"""Zonas UL, PUL y APUL de un impulso dominante. **Sólo geometría.**
+"""Zonas UL y PUL de un impulso dominante. **Sólo geometría.**
 
 El módulo 1 traza la estructura por **cuerpos**: `max(open, close)` y
 `min(open, close)`. Estas dos zonas son lo contrario, un asunto de **mechas**, y
@@ -10,8 +10,8 @@ módulo, así que ninguna regla del módulo 1 puede leer una zona ni por descuid
 En la fase 2.1 las zonas pasarán a decidir la vida y la muerte de los impulsos;
 hasta que el propietario audite lo que se dibuja aquí, no deciden nada.
 
-Las zonas, tal como las define el propietario. Un ID tiene siempre UL, y en el
-lado en contra tiene **una** de las otras dos, nunca las dos:
+Las zonas, tal como las define el propietario. Un ID tiene **dos**: el UL en el
+lado a favor y el PUL en el lado en contra.
 
 **UL (último)** — el extremo del ID, sobre la vela que fija `precio_extremo`.
 Va del **borde del cuerpo** a la **punta de la mecha**, así que ocupa sólo el
@@ -20,34 +20,33 @@ línea del extremo del ID. Si la vela inmediatamente posterior tiene la mecha m�
 extrema en la misma dirección, la zona se estira hasta ella: **una vela de
 margen, no más**.
 
-**PUL (penúltimo)** — el extremo del ID **anterior**, sobre la misma vela que
-fijaba su UL: cuando un ID muere y nace el siguiente, el UL viejo se convierte
-en el PUL del nuevo. A diferencia del UL, que es el tramo de mecha, el PUL es el
-**cuerpo** de esa vela: va de un borde del cuerpo al otro y no cubre ninguna
-mecha. Las dos zonas son complementarias sobre la misma vela —el UL toma la
-punta, el PUL toma la base— y juntas van del `open` a la punta de la mecha.
+**PUL (penúltimo)** — el extremo del ID **inmediatamente anterior**, sobre la
+misma vela que fijaba su UL: cuando un ID muere y nace el siguiente, el UL viejo
+pasa a ser el PUL del nuevo. Siempre, vaya como vaya aquel ID; lo único que
+cambia es QUÉ TRAMO de esa vela es la zona, porque la zona es el tramo que MIRA
+al ID nuevo, que es el que el precio encuentra al volver en contra:
+
+- aquel ID iba **al revés** que éste: su mecha apunta al otro lado, así que el
+  PUL es el **cuerpo** de la vela, de un borde al otro y sin cubrir mecha. Las
+  dos zonas son entonces complementarias sobre la misma vela —el UL viejo toma
+  la punta y el PUL la base— y juntas van del `open` a la punta de la mecha;
+- aquel ID iba **en el mismo sentido** —murió por rotura a favor y éste nació
+  más allá—: su mecha apunta hacia este ID, así que el PUL es esa mecha, **el UL
+  viejo tal cual**, del borde del cuerpo a la punta.
+
 El primer ID del histórico no tiene ID anterior y por tanto no tiene PUL, que es
-un estado legítimo y se registra.
+un estado legítimo y se registra: es el único que se rompe por línea en el lado
+en contra.
 
-**APUL (antes penúltimo)** — el extremo del último ID que iba en sentido
-**contrario** a éste, cuando ese ID no es el inmediatamente anterior. Aparece
-cuando el ID anterior iba en el **mismo** sentido que éste —rotura a favor, o una
-constitución abortada que giró la pierna dos veces—: su extremo cae en el lado a
-favor y no sirve de nivel en contra, así que se retrocede hasta el último ID
-contrario. La regla que las une es una sola: **el nivel en contra es el último
-extremo del sentido opuesto**.
+El PUL no se estira a ninguna vela de margen aunque sea el UL viejo: esa regla
+es la del extremo recién fijado, y esta vela cerró antes de que el ID naciera.
 
-Geometría del UL leída del otro lado: **tramo de mecha** hacia el lado de la
-rotura en contra, del borde del cuerpo a la punta de la mecha, sin cubrir el
-cuerpo. No se estira a la vela de margen. El APUL se va en cuanto nace un ID cuyo
-anterior ya va al revés, que vuelve a tener PUL.
-
-`interior` y `exterior` significan lo mismo en las tres: el borde **interior** es
+`interior` y `exterior` significan lo mismo en las dos: el borde **interior** es
 el que un precio que sale del rango encuentra primero, y el **exterior** el que
 tiene que cruzar para dejar la zona atrás. En un ID alcista el UL se recorre
-hacia arriba (cuerpo -> mecha) y el PUL hacia abajo (borde alto del cuerpo ->
-borde bajo), porque la rotura a favor sube y la rotura en contra baja. Es la
-lectura que necesita la fase 2.1 y aquí sólo se calcula.
+hacia arriba (cuerpo -> mecha) y el PUL hacia abajo, porque la rotura a favor
+sube y la rotura en contra baja. Es la lectura que necesita la fase 2.1 y aquí
+sólo se calcula.
 """
 
 from __future__ import annotations
@@ -68,11 +67,10 @@ class ZoneKind(StrEnum):
 
     #: Extremo del ID: el tramo de mecha que va del cuerpo a la punta.
     LAST = "UL"
-    #: Extremo del ID anterior: el cuerpo de la vela que fijaba su UL.
+    #: Extremo del ID anterior, sobre la misma vela que llevaba su UL: el tramo
+    #: de esa vela que MIRA a este ID —el cuerpo si aquél iba al revés, su propia
+    #: mecha (el UL viejo tal cual) si iba en el mismo sentido—.
     PENULTIMATE = "PUL"
-    #: Extremo del ID **anterior a ése**: el tramo de mecha de su vela hacia el
-    #: lado de la rotura en contra. Sustituye al PUL, no lo acompaña.
-    ANTE_PENULTIMATE = "APUL"
 
 
 @dataclass(frozen=True, slots=True)
@@ -295,33 +293,43 @@ def penultimate_zone(
     timeframe: str,
     direction: ImpulseDirection,
     index_previous_extreme: int | None,
+    previous_direction: ImpulseDirection | None,
     ts_constitution: datetime,
 ) -> Zone | None:
     """Zona PUL del ID, o `None` si no hay ID anterior del que salga.
 
-    La vela es la misma que fijó el extremo del ID anterior —la de su UL—, y de
-    ella se toma el **cuerpo**: el borde que el precio encuentra primero al
-    volver en contra es el interior, y el que hay que cruzar para dejar la zona
-    atrás es el otro. En un ID bajista, cuyo PUL es la vela verde del máximo
-    anterior, la rotura en contra sube: el interior es el borde bajo del cuerpo
-    y el exterior el alto.
+    La vela es siempre la misma que fijó el extremo del ID anterior —la que
+    llevaba su UL—, y de ella se toma **el tramo que mira a este ID**, que es el
+    que el precio encuentra al volver en contra. Cuál es depende de hacia dónde
+    iba aquel ID, y sólo de eso:
+
+    - **Iba al revés que éste.** Su mecha apunta al lado contrario, así que lo
+      primero que hay al volver es el **cuerpo**: interior el borde del cuerpo
+      del lado de este ID, exterior el otro. Es la geometría de la fase 2.0.
+    - **Iba en el mismo sentido** —murió por rotura a favor, y este ID nació más
+      allá—. Entonces su mecha apunta HACIA este ID y lo primero que hay al
+      volver es esa mecha: **el UL viejo tal cual**, con interior la punta y
+      exterior el borde del cuerpo. El extremo de aquel ID no queda en el lado a
+      favor de éste, sino por detrás, en el lado en contra: es un nivel bueno y
+      es el que el propietario marca.
+
+    En los dos casos el borde **exterior** es el que hay que cruzar para dejar la
+    zona atrás, que es la regla de rotura en contra de la fase 2.1.
 
     Devolver `None` sólo le pasa al primer ID del histórico, que no tiene ID
     anterior. No es un fallo: ese impulso se rompe por línea en el lado en
     contra, y no hay ninguna zona detrás que lo sustituya.
 
     El PUL no espera a nada: su vela cerró antes de que naciera el ID, así que
-    la zona existe desde la constitución.
+    la zona existe desde la constitución. Y no se estira a ninguna vela de
+    margen aunque sea el UL viejo: esa regla es la del extremo recién fijado.
     """
-    if index_previous_extreme is None:
+    if index_previous_extreme is None or previous_direction is None:
         return None
 
-    # El cuerpo entero de la vela, sin mechas. Cuál de los dos bordes es interior
-    # lo decide el sentido en que se recorre: la rotura en contra de un ID
-    # alcista baja, así que encuentra primero el borde alto del cuerpo y tiene
-    # que cruzar el bajo.
-    inner = series.body_edge_towards(index_previous_extreme, direction)
-    outer = series.body_edge_towards(index_previous_extreme, direction.opposite())
+    inner, outer = penultimate_edges(
+        series, index_previous_extreme, direction, previous_direction
+    )
 
     return Zone(
         kind=ZoneKind.PENULTIMATE,
@@ -338,51 +346,28 @@ def penultimate_zone(
     )
 
 
-def ante_penultimate_zone(
+def penultimate_edges(
     series: CandleSeries,
-    *,
-    id_num: int,
-    timeframe: str,
+    index: int,
     direction: ImpulseDirection,
-    index_ante_penultimate: int | None,
-    ts_constitution: datetime,
-) -> Zone | None:
-    """Zona APUL del ID, o `None` si no hay de dónde sacarla.
+    previous_direction: ImpulseDirection,
+) -> tuple[float, float]:
+    """Los dos bordes del PUL sobre la vela del extremo anterior.
 
-    La vela es la del extremo del último ID que iba en sentido **contrario** a
-    éste, cuando ese ID no es el inmediatamente anterior. De ella se toma el
-    **tramo de mecha** hacia el lado por el que se rompe en contra: del borde del
-    cuerpo a la punta de la mecha, sin cubrir nada del cuerpo. Es la geometría
-    del UL, leída del otro lado: en un ID alcista la rotura en contra baja, así
-    que el borde interior es el borde bajo del cuerpo y el exterior, la punta de
-    la mecha inferior.
-
-    A diferencia del UL, el APUL **no** se estira a la vela siguiente: aquella
-    regla es del extremo recién fijado, y esta vela cerró mucho antes de que el
-    ID naciera.
-
-    Devolver `None` es lo normal en un ID con PUL —no hay APUL que marcar— y le
-    pasa además a los primeros ID del histórico, que no tienen ningún ID
-    contrario detrás. Esos se rompen por línea en el lado en contra.
+    Interior el que el precio encuentra primero al volver en contra, exterior el
+    que hay que cruzar. Lo único que decide cuál es cuál es si aquel ID iba en el
+    mismo sentido que éste: si iba igual, su mecha mira hacia este ID y la zona
+    es esa mecha —el UL viejo—; si iba al revés, la mecha apunta al otro lado y
+    la zona es el cuerpo.
     """
-    if index_ante_penultimate is None:
-        return None
-
-    inner = series.body_edge_towards(index_ante_penultimate, direction.opposite())
-    outer = series.wick_tip_towards(index_ante_penultimate, direction.opposite())
-
-    return Zone(
-        kind=ZoneKind.ANTE_PENULTIMATE,
-        id_num=id_num,
-        timeframe=timeframe,
-        direction=direction,
-        index_defining=index_ante_penultimate,
-        ts_defining=series.at(index_ante_penultimate),
-        defining_body=series.direction_of(index_ante_penultimate),
-        inner=inner,
-        outer=outer,
-        ts_outer_known=series.at(index_ante_penultimate),
-        ts_birth=ts_constitution,
+    if previous_direction is direction:
+        return (
+            series.wick_tip_towards(index, direction),
+            series.body_edge_towards(index, direction),
+        )
+    return (
+        series.body_edge_towards(index, direction),
+        series.body_edge_towards(index, direction.opposite()),
     )
 
 
@@ -455,7 +440,7 @@ __all__ = [
     "Zone",
     "ZoneBook",
     "ZoneKind",
-    "ante_penultimate_zone",
     "last_zone",
+    "penultimate_edges",
     "penultimate_zone",
 ]

@@ -83,7 +83,8 @@ def test_el_reparto_por_defecto_es_el_del_propietario(run: ImpulseRun) -> None:
     assert payload["charts"] == [DAILY, H4, H1, M15]
     assert payload["layout"] == {
         DAILY: [DAILY],
-        H4: [H4, DAILY],
+        # El Diario se dibuja sólo en su gráfico: en H4 no se ve nada suyo.
+        H4: [H4],
         H1: [H4],
         M15: [H4],
     }
@@ -269,7 +270,9 @@ def test_todos_los_controles_que_busca_el_javascript_estan_en_la_plantilla() -> 
 def test_la_cabecera_declara_el_reparto_y_el_hash(run: ImpulseRun) -> None:
     html = render_explorer(run)
     assert "lado bid" in html
-    assert "H4: H4 + Diario" in html
+    # El Diario ya no va dentro de H4: cada uno declara lo que dibuja de verdad.
+    assert "H4: H4" in html
+    assert "H4: H4 + Diario" not in html
     assert "M15: H4" in html
     assert run.config_hash in html
 
@@ -362,39 +365,64 @@ def test_los_botones_dicen_que_impulso_dibuja_cada_grafico(
 ) -> None:
     resultado = _draw(run, tmp_path)
     titulos = dict(zip(resultado["chartTabs"], resultado["chartTitles"], strict=True))
-    assert titulos["H4"] == "Dibuja el impulso de H4 y Diario. Atajo de teclado: 4"
+    assert titulos["H4"] == "Dibuja el impulso de H4. Atajo de teclado: 4"
     assert titulos["M15"] == "Dibuja el impulso de H4. Atajo de teclado: m"
 
 
-def test_cada_grafico_dibuja_su_impulso_y_el_de_contexto(
+def _ids_dibujados(step: dict) -> set[str]:
+    nombres = [trace["name"] for trace in step["plot"]["traces"]]
+    return {
+        " ".join(nombre.split()[:2]) for nombre in nombres if nombre.startswith("ID ")
+    }
+
+
+def test_cada_grafico_dibuja_el_impulso_que_le_toca(
     run: ImpulseRun, tmp_path: Path
 ) -> None:
+    """En el reparto por defecto NINGÚN gráfico lleva contexto.
+
+    El Diario se dibuja sólo en su gráfico: en H4 no se ve nada suyo. H1 y M15 no
+    tienen ID propio, así que lo que llevan es el de H4 y es su principal.
+    """
     resultado = _draw(run, tmp_path)
     esperado = {
         "grafico-D": {"ID Diario"},
-        "grafico-H4": {"ID H4", "ID Diario"},
+        "grafico-H4": {"ID H4"},
         "grafico-H1": {"ID H4"},
         "grafico-M15": {"ID H4"},
     }
     for label, temporalidades in esperado.items():
-        nombres = [trace["name"] for trace in _step(resultado, label)["plot"]["traces"]]
-        dibujadas = {
-            " ".join(nombre.split()[:2]) for nombre in nombres if nombre.startswith("ID ")
-        }
-        assert dibujadas == temporalidades, f"{label}: {nombres}"
+        paso = _step(resultado, label)
+        assert _ids_dibujados(paso) == temporalidades, (label, _trace_names(paso))
 
 
 def test_el_contexto_va_punteado_y_el_principal_continuo(
-    run: ImpulseRun, tmp_path: Path
+    entries_run: ImpulseRun, tmp_path: Path
 ) -> None:
-    trazas = _step(_draw(run, tmp_path), "grafico-H4")["plot"]["traces"]
-    propias = [t for t in trazas if t["name"].startswith("ID H4")]
-    contexto = [t for t in trazas if t["name"].startswith("ID Diario")]
+    """El único gráfico con contexto es el de H1 de la fase 3.0: suyo y el de H4."""
+    trazas = _step(_draw(entries_run, tmp_path), "grafico-H1")["plot"]["traces"]
+    propias = [t for t in trazas if t["name"].startswith("ID H1")]
+    contexto = [t for t in trazas if t["name"].startswith("ID H4")]
 
     assert propias and contexto
     assert all(t["dash"] == "solid" for t in propias)
     assert all(t["dash"] == "dot" for t in contexto)
     assert all("(contexto)" in t["name"] for t in contexto)
+
+
+def test_en_h4_no_se_dibuja_nada_del_diario(
+    entries_run: ImpulseRun, entries_zones: ZonesRun, cascade: CascadeRun, tmp_path: Path
+) -> None:
+    """El Diario es sólo para sí mismo: ni su ID, ni su marco, ni sus zonas.
+
+    Se comprueba con la corrida más cargada —la de la fase 3.0, con zonas y
+    cascada— porque es la que más capas tiene que pueden colarse en el gráfico.
+    """
+    resultado = _draw(entries_run, tmp_path, zones=entries_zones, cascade=cascade)
+    nombres = _trace_names(_step(resultado, f"marco-de-{H4}"))
+
+    assert nombres
+    assert not [nombre for nombre in nombres if "Diario" in nombre], nombres
 
 
 def test_los_marcadores_son_solo_del_impulso_principal(
@@ -410,17 +438,25 @@ def test_las_capas_se_rehacen_al_cambiar_de_grafico(
     run: ImpulseRun, tmp_path: Path
 ) -> None:
     resultado = _draw(run, tmp_path)
-    assert _step(resultado, "grafico-H4")["layerLabels"] == [
-        "ID H4 (principal)",
-        "ID Diario (contexto)",
-    ]
+    assert _step(resultado, "grafico-H4")["layerLabels"] == ["ID H4 (principal)"]
     assert _step(resultado, "grafico-M15")["layerLabels"] == ["ID H4 (principal)"]
 
 
-def test_apagar_el_impulso_principal_deja_el_contexto(
-    run: ImpulseRun, tmp_path: Path
+def test_el_grafico_con_contexto_lleva_una_casilla_por_temporalidad(
+    entries_run: ImpulseRun, tmp_path: Path
 ) -> None:
-    resultado = _draw(run, tmp_path)
+    """En H1 de la fase 3.0 hay dos ID: cada uno con su casilla y dicho cuál manda."""
+    resultado = _draw(entries_run, tmp_path)
+    assert _step(resultado, "grafico-H1")["layerLabels"] == [
+        "ID H1 (principal)",
+        "ID H4 (contexto)",
+    ]
+
+
+def test_apagar_el_impulso_principal_deja_el_contexto(
+    entries_run: ImpulseRun, tmp_path: Path
+) -> None:
+    resultado = _draw(entries_run, tmp_path)
     con = _step(resultado, "con-contexto")["plot"]
     sin = _step(resultado, "sin-principal")["plot"]
     principal = con["traces"][1]["name"].split()[1]
@@ -1331,7 +1367,7 @@ def test_cada_zona_viaja_con_sus_dos_bordes(run: ImpulseRun, zones: ZonesRun) ->
     registros = payload["impulses"][H4]["zones"]
     assert len(registros) == len(zones.per_timeframe[H4].table)
     for registro in registros:
-        assert registro["k"] in {"UL", "PUL", "APUL"}
+        assert registro["k"] in {"UL", "PUL"}
         assert registro["lo"] <= registro["hi"]
         assert {registro["i"], registro["o"]} == {registro["lo"], registro["hi"]} or (
             registro["i"] == registro["o"]
@@ -1350,10 +1386,10 @@ def test_la_zona_no_nace_antes_que_su_vela_definitoria(
 def test_la_zona_en_contra_cuelga_de_una_vela_anterior_a_su_id(
     run: ImpulseRun, zones: ZonesRun
 ) -> None:
-    """El PUL y el APUL salen de extremos anteriores: quedan siempre detrás."""
+    """El PUL sale del extremo del ID anterior: queda siempre detrás."""
     registros = build_payload(run, zones=zones)["impulses"][H4]["zones"]
     uls = [item for item in registros if item["k"] == "UL"]
-    contra = [item for item in registros if item["k"] in {"PUL", "APUL"}]
+    contra = [item for item in registros if item["k"] == "PUL"]
 
     assert uls and contra
     # `xd` es la vela definitoria y `x0` el nacimiento: en la zona en contra nunca
@@ -1364,13 +1400,16 @@ def test_la_zona_en_contra_cuelga_de_una_vela_anterior_a_su_id(
 def test_cada_id_manda_una_sola_zona_en_contra(
     run: ImpulseRun, zones: ZonesRun
 ) -> None:
-    """PUL y APUL nunca conviven: el ID lleva una, no las dos."""
+    """Una zona en contra por ID, y el payload dice de qué tramo salió."""
     registros = build_payload(run, zones=zones)["impulses"][H4]["zones"]
-    con_pul = {item["id"] for item in registros if item["k"] == "PUL"}
-    con_apul = {item["id"] for item in registros if item["k"] == "APUL"}
+    puls = [item for item in registros if item["k"] == "PUL"]
 
-    assert con_apul, "sin APUL en el histórico no hay nada que auditar"
-    assert not (con_pul & con_apul)
+    assert puls
+    assert len({item["id"] for item in puls}) == len(puls)
+    # `wick` dice si es la MECHA del extremo anterior —aquel ID iba en el mismo
+    # sentido— o su cuerpo. El navegador no lo puede deducir de los bordes.
+    assert all(isinstance(item["wick"], bool) for item in puls)
+    assert any(item["wick"] for item in puls), "sin PUL de mecha no hay nada que auditar"
 
 
 def test_los_id_sin_zona_en_contra_no_viajan_como_zona(
@@ -1384,7 +1423,7 @@ def test_los_id_sin_zona_en_contra_no_viajan_como_zona(
     con_zona = {
         item["id"]
         for item in payload["impulses"][H4]["zones"]
-        if item["k"] in {"PUL", "APUL"}
+        if item["k"] == "PUL"
     }
 
     assert not (con_zona & sin_zona)
@@ -1398,11 +1437,11 @@ def test_cada_id_dice_que_zona_lleva_en_su_lado_en_contra(
     impulsos = payload["impulses"][H4]["list"]
     zonas = payload["impulses"][H4]["zones"]
     por_id = {
-        item["id"]: item["k"] for item in zonas if item["k"] in {"PUL", "APUL"}
+        item["id"]: item["k"] for item in zonas if item["k"] == "PUL"
     }
 
     assert impulsos
-    assert all(item["az"] in {"PUL", "APUL", "linea"} for item in impulsos)
+    assert all(item["az"] in {"PUL", "linea"} for item in impulsos)
     for impulso in impulsos:
         if impulso["az"] == "linea":
             assert impulso["id"] not in por_id
@@ -1410,15 +1449,152 @@ def test_cada_id_dice_que_zona_lleva_en_su_lado_en_contra(
             assert por_id.get(impulso["id"]) == impulso["az"]
 
 
-def test_las_zonas_ya_no_se_dibujan(
+def _zonas(nombres: list[str]) -> list[str]:
+    return [nombre for nombre in nombres if "Zona " in nombre]
+
+
+def _trazas_de_zona(step: dict, timeframe: str, kind: str) -> list[dict]:
+    """Las trazas de una zona del gráfico que se mira, sin las del contexto."""
+    return [
+        trace
+        for trace in step["plot"]["traces"]
+        if trace["name"] == f"Zona {kind} {timeframe}"
+    ]
+
+
+def _ids_de_zona(step: dict, timeframe: str) -> set[int]:
+    """De qué ID son las cajas dibujadas: el globo lo dice en cada esquina."""
+    return {
+        int(re.search(r"nº (\d+)", caption).group(1))
+        for trace in step["plot"]["traces"]
+        if trace["name"].endswith(timeframe)
+        for caption in (trace["captions"] or [])
+        if caption and "Zona " in caption
+    }
+
+
+def test_las_zonas_del_id_se_dibujan_y_se_apagan(
     run: ImpulseRun, zones: ZonesRun, tmp_path: Path
 ) -> None:
-    """Tapaban el precio: siguen en el payload, pero no hay ni una caja."""
-    nombres = _trace_names(_step(_draw(run, tmp_path, zones=zones), "marco-por-defecto"))
+    resultado = _draw(run, tmp_path, zones=zones)
+    con = _trace_names(_step(resultado, "zonas-por-defecto"))
+    sin = _step(resultado, "zonas-apagadas")
 
-    assert not any(nombre.startswith("Zona ") for nombre in nombres), nombres
-    assert "PUL sin confirmar" not in nombres
-    assert "Confirmación del PUL" not in nombres
+    assert _zonas(con), con
+    assert not _zonas(_trace_names(sin)), _trace_names(sin)
+    # Y lo dice: quien viene de la fase 2.0 leería la ausencia como un fallo.
+    assert "capa apagada" in sin["notes"]
+
+
+def test_sin_zonas_no_hay_ninguna_caja_que_dibujar(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    """Un explorador de la fase 1 sigue sin una sola caja."""
+    nombres = _trace_names(_step(_draw(run, tmp_path), "zonas-por-defecto"))
+
+    assert not _zonas(nombres), nombres
+
+
+def test_cada_caja_es_la_zona_que_dice_el_payload(
+    run: ImpulseRun, zones: ZonesRun, tmp_path: Path
+) -> None:
+    """El dibujo no calcula: los cuatro lados salen del registro de la zona."""
+    paso = _step(_draw(run, tmp_path, zones=zones), "zonas-por-defecto")
+    registros = build_payload(run, zones=zones)["impulses"][H4]["zones"]
+    dibujadas = 0
+
+    for kind in ("UL", "PUL"):
+        for traza in _trazas_de_zona(paso, H4, kind):
+            for x0, x1, lo, hi in _rectangulos(traza["segments"]):
+                iguales = [
+                    registro
+                    for registro in registros
+                    if registro["k"] == kind
+                    and registro["x0"] == _minute(x0)
+                    and (registro["lo"], registro["hi"]) == (lo, hi)
+                ]
+                assert iguales, (kind, x0, x1, lo, hi)
+                assert _minute(x1) <= iguales[0]["x1"]
+                dibujadas += 1
+
+    assert dibujadas, "el paso tiene que dibujar alguna zona de H4"
+
+
+def test_solo_se_dibujan_las_zonas_del_id_que_se_mira(
+    run: ImpulseRun, zones: ZonesRun, tmp_path: Path
+) -> None:
+    """Una caja por ID tapaba el precio: con «Todos» se quedan en el actual."""
+    resultado = _draw(run, tmp_path, zones=zones)
+
+    actual = _ids_de_zona(_step(resultado, "marco-ids-current"), H4)
+    par = _ids_de_zona(_step(resultado, "marco-ids-pair"), H4)
+    todos = _ids_de_zona(_step(resultado, "marco-ids-all"), H4)
+
+    assert len(actual) == 1, actual
+    assert len(par) == 2, par
+    assert actual < par
+    assert todos == actual
+
+
+def test_el_tramo_anterior_a_la_constitucion_va_sin_relleno(
+    run: ImpulseRun, zones: ZonesRun, tmp_path: Path
+) -> None:
+    """La zona en contra cuelga de una vela anterior al ID: ahí no existía."""
+    paso = _step(_draw(run, tmp_path, zones=zones), "zonas-por-defecto")
+    antes = [
+        trace
+        for trace in paso["plot"]["traces"]
+        if trace["name"].startswith("Antes de existir · Zona ")
+    ]
+    vivas = [
+        trace
+        for trace in paso["plot"]["traces"]
+        if trace["name"].startswith("Zona ")
+    ]
+
+    assert antes, _trace_names(paso)
+    assert all(trace["fill"] in (None, "none") for trace in antes)
+    assert all(trace["dash"] == "dot" for trace in antes)
+    assert vivas and all(trace["fill"] == "toself" for trace in vivas)
+    assert all(
+        "ANTES DE EXISTIR" in caption
+        for trace in antes
+        for caption in (trace["captions"] or [])
+        if caption
+    )
+
+
+def test_cada_zona_lleva_el_color_de_su_temporalidad(
+    run: ImpulseRun, zones: ZonesRun, tmp_path: Path
+) -> None:
+    """El color dice de quién es cada caja; el trazo, qué zona es."""
+    paso = _step(_draw(run, tmp_path, zones=zones), "zonas-por-defecto")
+    colores = build_payload(run, zones=zones)["colors"]["timeframes"]
+    propias = _trazas_de_zona(paso, H4, "UL")
+
+    assert propias and all(trace["color"] == colores[H4] for trace in propias)
+    # El tipo se lee en el trazo del borde: continuo, a rayas y a raya y punto.
+    assert all(trace["dash"] == "solid" for trace in propias)
+    for kind, dash in (("PUL", "dash"),):
+        for traza in _trazas_de_zona(paso, H4, kind):
+            assert traza["dash"] == dash, (kind, traza["dash"])
+
+
+def test_la_zona_de_contexto_lleva_el_color_de_su_temporalidad(
+    entries_run: ImpulseRun, entries_zones: ZonesRun, tmp_path: Path
+) -> None:
+    """En H1 de la fase 3.0 hay cajas de dos: el color dice de quién es cada una."""
+    paso = _step(_draw(entries_run, tmp_path, zones=entries_zones), "zonas-por-defecto")
+    colores = build_payload(entries_run, zones=entries_zones)["colors"]["timeframes"]
+    propias = _trazas_de_zona(paso, H1, "UL")
+    contexto = [
+        trace
+        for trace in paso["plot"]["traces"]
+        if trace["name"].startswith("Zona ") and trace["name"].endswith("(contexto)")
+    ]
+
+    assert propias and all(trace["color"] == colores[H1] for trace in propias)
+    assert contexto and all(trace["color"] == colores[H4] for trace in contexto)
 
 
 def test_el_marco_del_id_se_dibuja_y_se_apaga(
@@ -1514,17 +1690,24 @@ def test_las_notas_dicen_de_quien_es_cada_marco(
     assert "cada temporalidad con su color" in notas
 
 
-def test_las_notas_dicen_que_las_zonas_ya_no_se_pintan(
+def test_las_notas_dicen_cuantas_zonas_hay_y_de_que_id_son(
     run: ImpulseRun, zones: ZonesRun, tmp_path: Path
 ) -> None:
-    """Quien viene de la fase 2.0 buscaría las cajas: su ausencia hay que decirla."""
-    notas = _step(_draw(run, tmp_path, zones=zones), "marco-por-defecto")["notes"]
+    """Dos cajas en ocho años se leen como zonas que faltan si nadie dice que
+    sólo se dibujan las del ID que se mira."""
+    notas = _step(_draw(run, tmp_path, zones=zones), "zonas-por-defecto")["notes"]
 
-    assert "las zonas UL, PUL y APUL no se dibujan" in notas
-    assert "siguen en los datos" in notas
-    # Y dicen que el lado en contra tiene dos zonas posibles: sin eso, un ID con
-    # APUL se lee como si le faltara el PUL.
-    assert "último extremo del SENTIDO OPUESTO" in notas
+    assert "zonas dibujadas" in notas
+    assert "SÓLO LAS DEL ID" in notas
+    assert "los demás ID siguen con su marco" in notas
+    # Y dicen de dónde sale el PUL y qué tramo de aquella vela es: sin eso, un
+    # PUL pegado al precio se lee como una zona que el motor se ha inventado.
+    assert "el PUL el del ID ANTERIOR" in notas
+    assert "el UL viejo tal cual" in notas
+    # Y QUÉ zonas son las que hay dibujadas.
+    dibujadas = notas.split("zonas dibujadas: ")[1].split(" · ")[0]
+    assert re.search(r"\((UL|PUL)( \+ (UL|PUL))*\)", dibujadas), dibujadas
+    assert "UL" in dibujadas
 
 
 def test_las_capas_de_zona_no_se_dibujan_en_otro_modo_de_r36(
@@ -1618,7 +1801,7 @@ def test_cada_rotura_evitada_viaja_con_su_zona_y_su_linea(zoned_run: ImpulseRun)
         else:
             assert registro["y"] < registro["ln"]
             assert registro["y"] >= registro["zo"]
-        assert registro["z"] in ("UL", "PUL", "APUL")
+        assert registro["z"] in ("UL", "PUL")
         assert registro["k"] in ("favor", "contra")
 
 
@@ -1626,14 +1809,14 @@ def test_la_rotura_real_dice_si_fue_por_zona_o_por_linea(zoned_run: ImpulseRun) 
     registros = build_payload(zoned_run)["impulses"][H4]["breaks"]
     fuentes = {item["src"] for item in registros}
 
-    assert fuentes <= {"linea", "UL", "PUL", "APUL"}
+    assert fuentes <= {"linea", "UL", "PUL"}
     # El UL existe siempre, así que ninguna rotura a favor puede ser por línea.
     assert all(
         item["src"] == "UL" for item in registros if item["k"] == "favor"
     )
-    # Y en contra manda una de las dos zonas, nunca las dos: cuál lo dice `src`.
+    # Y en contra manda el PUL, o la línea si ese ID no tenía anterior.
     assert all(
-        item["src"] in ("linea", "PUL", "APUL")
+        item["src"] in ("linea", "PUL")
         for item in registros
         if item["k"] == "contra"
     )
@@ -1670,6 +1853,24 @@ def test_sin_la_regla_nueva_no_hay_nada_que_dibujar(
 # mercado todavía no había llegado: el mismo lookahead que el tramo punteado de
 # B.1 evita por el otro lado, y el que hizo que la línea de abajo de un ID
 # bajista apareciera colgando por debajo de las velas.
+
+
+@pytest.fixture
+def zoned_hourly_run(run: ImpulseRun) -> ImpulseRun:
+    """Rotura por zona **y** con contexto: en H1 va su ID y el de H4 detrás.
+
+    La escalera del extremo sólo la produce la rotura por zona, y el único
+    reparto con gráfico de contexto es el de la fase 3.0, así que para comprobar
+    que el impulso de contexto también marca sus saltos hacen falta los dos.
+    """
+    tuned = replace(
+        run.config,
+        rules=replace(run.config.rules, break_by_zone=True),
+        charts=with_hourly_structure(ChartsConfig()),
+    )
+    return DetectDominantImpulses(tuned).execute(
+        dict(run.chart_bars), provenance="fixture sintética"
+    )
 
 
 def _extendidos(run: ImpulseRun, timeframe: str) -> list:
@@ -1819,22 +2020,36 @@ def test_los_saltos_de_la_escalera_son_una_capa_propia(
     assert "capa de saltos APAGADA" in apagada["notes"]
 
 
+def _marcas_por_salto(paso: dict, run: ImpulseRun, timeframe: str, etiqueta: str) -> None:
+    marcas = [
+        trace for trace in paso["plot"]["traces"]
+        if trace["name"].startswith("Extremo estirado · " + etiqueta)
+        and trace["xs"] is not None
+    ]
+    saltos = sum(impulse.extreme_extensions for impulse in _extendidos(run, timeframe))
+    assert saltos, f"{timeframe} tiene que estirar algún extremo en la fixture"
+    assert sum(len(trace["xs"]) for trace in marcas) == saltos
+
+
 def test_hay_una_marca_por_salto(zoned_run: ImpulseRun, tmp_path: Path) -> None:
-    """Una por extensión, y también las del impulso de contexto: su línea del
-    extremo es igual de escalera y su salto engaña igual."""
+    """Una marca por extensión del extremo del impulso del gráfico."""
     paso = _step(_draw(zoned_run, tmp_path), "escalera-por-defecto")
 
-    for timeframe, etiqueta in ((H4, "H4"), (DAILY, "Diario")):
-        marcas = [
-            trace for trace in paso["plot"]["traces"]
-            if trace["name"].startswith("Extremo estirado · " + etiqueta)
-            and trace["xs"] is not None
-        ]
-        saltos = sum(
-            impulse.extreme_extensions for impulse in _extendidos(zoned_run, timeframe)
-        )
-        assert saltos, f"{timeframe} tiene que estirar algún extremo en la fixture"
-        assert sum(len(trace["xs"]) for trace in marcas) == saltos
+    _marcas_por_salto(paso, zoned_run, H4, "H4")
+
+
+def test_el_impulso_de_contexto_tambien_marca_sus_saltos(
+    zoned_hourly_run: ImpulseRun, tmp_path: Path
+) -> None:
+    """Su línea del extremo es igual de escalera y su salto engaña igual.
+
+    Se mira en el gráfico de H1 del reparto de la fase 3.0, que es el que lleva
+    contexto: el ID de H4 va detrás del suyo.
+    """
+    paso = _step(_draw(zoned_hourly_run, tmp_path), "escalera-por-defecto")
+
+    _marcas_por_salto(paso, zoned_hourly_run, H1, "H1")
+    _marcas_por_salto(paso, zoned_hourly_run, H4, "H4")
 
 
 def test_sin_extensiones_la_capa_de_saltos_no_se_ofrece(
@@ -2846,7 +3061,8 @@ def test_el_grafico_fino_lleva_el_id_de_h1_en_la_fase_3(
 
     assert payload["layout"][M15] == [H1]
     assert payload["layout"][H1] == [H1, H4]
-    assert payload["layout"][H4] == [H4, DAILY]
+    # El Diario sigue sólo en el suyo: la fase 3.0 no lo mete en H4.
+    assert payload["layout"][H4] == [H4]
 
 
 def test_en_m15_se_dibuja_el_marco_de_h1_y_no_el_de_h4(

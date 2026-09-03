@@ -184,7 +184,7 @@ def _zones_summary(zones: ZonesRun) -> dict[str, object]:
                 "impulsos_con_zonas": len(item.items),
                 "zonas": len(item.table),
                 "con_pul": len(item.with_penultimate),
-                "con_apul": len(item.with_ante_penultimate),
+                "pul_de_mecha": len(item.with_wick_penultimate),
                 "sin_zona_en_contra": len(item.without_against_zone),
                 "ul_altura_cero": sum(1 for zoned in item.items if zoned.last.is_flat),
                 "ul_extendidos": sum(1 for zoned in item.items if zoned.last.extended),

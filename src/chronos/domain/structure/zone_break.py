@@ -2,22 +2,17 @@
 
 La fase 1 mata un ID cuando una vela cierra más allá de una de sus dos líneas.
 A partir de la fase 2.1 la línea deja de ser el nivel de rotura **cuando existe
-una zona que la sustituya**: el UL en el lado a favor y el PUL —o el APUL— en el
-lado en contra. Romper una zona es cerrar más allá de su borde **exterior**, es
-decir atravesarla entera; perforarla con mecha o cerrar dentro no rompe.
+una zona que la sustituya**: el UL en el lado a favor y el PUL en el lado en
+contra. Romper una zona es cerrar más allá de su borde **exterior**, es decir
+atravesarla entera; perforarla con mecha o cerrar dentro no rompe.
 
     lado a favor (extremo) -> UL si existe, y existe siempre
-    lado en contra (ancla) -> el último extremo del SENTIDO OPUESTO:
-                              PUL  si es el del ID anterior
-                              APUL si hay que retroceder más
-                              la línea si no hay ningún ID contrario detrás
+    lado en contra (ancla) -> PUL: el extremo del ID INMEDIATAMENTE ANTERIOR
+                              la línea sólo si no hay ningún ID detrás
 
-En el lado en contra hay **dos** zonas posibles y nunca mandan las dos a la vez:
-cuál manda lo decide el sentido del ID anterior, se fija al constituirse el ID y
-no se recalcula después.
-
-Este módulo no decide nada, tampoco eso: recibe qué zona gobierna y sobre qué
-vela, calcula los dos niveles vigentes en un instante y dice de dónde sale cada
+Este módulo no decide nada: recibe sobre qué vela cuelga el lado en contra —y
+hacia dónde iba el ID que la fijó, que es lo que dice qué tramo de esa vela es la
+zona—, calcula los dos niveles vigentes en un instante y dice de dónde sale cada
 uno. Quién los compara con el cierre es el detector.
 
 **Causalidad.** El nivel con el que se juzga la vela `t` sólo puede salir de
@@ -33,10 +28,9 @@ velas cerradas **antes** de `t`. Por eso todo se pide con un `through`, que es e
   regla es que un borde no se lee antes de que lo fije su vela.
 - El PUL sale de una vela que cerró antes de que el ID naciera —la del extremo
   del ID anterior, la misma que llevaba su UL—, así que gobierna desde la
-  primera vela que se juzga y no hay nada que esperar. El APUL cuelga de una
-  vela todavía más antigua, así que tampoco espera a nada, y por lo mismo no
-  hereda la vela de margen del UL: aquella regla es la del extremo recién
-  fijado, no la de una vela que cerró hace decenas de barras.
+  primera vela que se juzga y no hay nada que esperar. Por lo mismo no hereda la
+  vela de margen del UL: aquella regla es la del extremo recién fijado, no la de
+  una vela que cerró antes de que este ID existiera.
 """
 
 from __future__ import annotations
@@ -50,7 +44,7 @@ from chronos.domain.structure.enums import (
     ImpulseDirection,
 )
 from chronos.domain.structure.errors import LookaheadError, StructureError
-from chronos.domain.structure.zones import CandleSeries, ZoneKind
+from chronos.domain.structure.zones import CandleSeries, ZoneKind, penultimate_edges
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,16 +84,18 @@ class AgainstZone:
     """Qué gobierna el lado en contra de un ID, y sobre qué vela.
 
     Se fija en la constitución y viaja con el impulso. No se re-deriva más tarde
-    a propósito: quien decide si manda el PUL o el APUL es el ID que acababa de
-    morir, y en cuanto nace otro detrás esa respuesta ya no se puede reconstruir
-    mirando la lista de impulsos.
+    a propósito: la vela es la del extremo del ID que acababa de morir, y en
+    cuanto nace otro detrás esa respuesta ya no se puede reconstruir mirando la
+    lista de impulsos.
     """
 
-    #: `PENULTIMATE`, `ANTE_PENULTIMATE` o `LINE`. Nunca `LAST`: ése es el otro
-    #: lado del ID.
+    #: `PENULTIMATE` o `LINE`. Nunca `LAST`: ése es el otro lado del ID.
     source: BreakLevelSource
     #: Vela de la que sale la zona. `None` exactamente cuando manda la línea.
     index: int | None
+    #: Hacia dónde iba el ID que fijó esa vela. Decide qué tramo de la vela es la
+    #: zona —su cuerpo o su mecha— y por eso viaja con ella. `None` con la línea.
+    direction: ImpulseDirection | None = None
 
     def __post_init__(self) -> None:
         if self.source is BreakLevelSource.LAST:
@@ -107,6 +103,10 @@ class AgainstZone:
         if (self.source is BreakLevelSource.LINE) != (self.index is None):
             raise StructureError(
                 f"Lado en contra incoherente: {self.source.value} con vela {self.index}"
+            )
+        if (self.index is None) != (self.direction is None):
+            raise StructureError(
+                "El lado en contra necesita la dirección del ID que fijó su vela"
             )
 
 
@@ -243,24 +243,18 @@ class ZoneBreakLevels:
         against: AgainstZone,
         through: int,
     ) -> SideLevel:
-        """Lado en contra: el PUL, el APUL o la línea del ancla.
+        """Lado en contra: el PUL, o la línea del ancla si no hay ID detrás.
 
-        Cuál de las tres manda no se decide aquí —lo trae `against`, que fijó la
+        Cuál de los dos manda no se decide aquí —lo trae `against`, que fijó la
         constitución del ID—: aquí sólo se lee la vela que se dice, con la
-        geometría que le toca a su zona.
+        geometría que le toca.
         """
         if against.source is BreakLevelSource.PENULTIMATE:
             return self.penultimate_level(
                 direction=direction,
                 anchor=anchor,
                 index_penultimate=against.index,
-                through=through,
-            )
-        if against.source is BreakLevelSource.ANTE_PENULTIMATE:
-            return self.ante_penultimate_level(
-                direction=direction,
-                anchor=anchor,
-                index_ante_penultimate=against.index,
+                previous_direction=against.direction,
                 through=through,
             )
         return SideLevel(
@@ -302,6 +296,7 @@ class ZoneBreakLevels:
         direction: ImpulseDirection,
         anchor: float,
         index_penultimate: int | None,
+        previous_direction: ImpulseDirection | None,
         through: int,
     ) -> SideLevel:
         """Lado en contra: el PUL si el ID tiene uno, y si no la línea del ancla.
@@ -311,54 +306,22 @@ class ZoneBreakLevels:
         es un estado legítimo y no un fallo. El PUL no se confirma ni se estira:
         su vela ya estaba cerrada cuando el ID nació, así que el borde contra el
         que se juzga es el mismo desde la primera vela hasta la última.
+
+        La geometría es la de la fase 2.0 leída en un sitio y sólo en uno
+        —`penultimate_edges`—: el tramo de la vela que mira a este ID, que es su
+        cuerpo cuando aquel ID iba al revés y su mecha —el UL viejo— cuando iba
+        en el mismo sentido.
         """
-        if index_penultimate is None:
+        if index_penultimate is None or previous_direction is None:
             return SideLevel(
                 price=anchor, line=anchor, inner=anchor, source=BreakLevelSource.LINE
             )
         self._require_visible(index_penultimate, through, "la vela del PUL")
-        # El cuerpo de la vela del extremo anterior, sin mechas. Cuál de los dos
-        # bordes es interior lo decide el sentido en que se recorre —la rotura en
-        # contra de un ID alcista baja, así que encuentra primero el borde alto
-        # del cuerpo y cruza el bajo—.
-        inner = self._series.body_edge_towards(index_penultimate, direction)
-        outer = self._series.body_edge_towards(index_penultimate, direction.opposite())
+        inner, outer = penultimate_edges(
+            self._series, index_penultimate, direction, previous_direction
+        )
         return SideLevel(
             price=outer, line=anchor, inner=inner, source=BreakLevelSource.PENULTIMATE
-        )
-
-    def ante_penultimate_level(
-        self,
-        *,
-        direction: ImpulseDirection,
-        anchor: float,
-        index_ante_penultimate: int | None,
-        through: int,
-    ) -> SideLevel:
-        """Lado en contra cuando el ID no tiene PUL: el APUL, y si no la línea.
-
-        La vela es la del extremo del último ID que iba en sentido contrario a
-        éste, y de ella se lee el **tramo de mecha** hacia el lado de la rotura
-        en contra: el borde interior es el borde del cuerpo y el exterior, la
-        punta de la mecha. Es la geometría del UL leída del otro lado, no la del
-        PUL, que es el cuerpo.
-
-        Sin vela —los primeros ID del histórico, que no tienen ningún ID
-        contrario detrás— el lado en contra se juzga por la línea del ancla.
-        """
-        if index_ante_penultimate is None:
-            return SideLevel(
-                price=anchor, line=anchor, inner=anchor, source=BreakLevelSource.LINE
-            )
-        self._require_visible(index_ante_penultimate, through, "la vela del APUL")
-        against = direction.opposite()
-        inner = self._series.body_edge_towards(index_ante_penultimate, against)
-        outer = self._series.wick_tip_towards(index_ante_penultimate, against)
-        return SideLevel(
-            price=outer,
-            line=anchor,
-            inner=inner,
-            source=BreakLevelSource.ANTE_PENULTIMATE,
         )
 
     # --- Interno ------------------------------------------------------------

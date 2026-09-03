@@ -70,8 +70,8 @@ class ZoneCapture:
     constituted: pd.Timestamp
     ul_usd: float
     ul_atr: float
-    #: La zona del lado en contra —PUL o APUL— y cuál de las dos es. `None`
-    #: cuando el ID no tiene ninguna: el primero de cada temporalidad.
+    #: La zona del lado en contra —el PUL—. `None` cuando el ID no tiene
+    #: ninguna: el primero de cada temporalidad.
     against_kind: str | None
     against_usd: float | None
     against_atr: float | None
@@ -170,11 +170,10 @@ def _extended(zones: ZonesRun) -> list[Pick]:
 
 
 def _without_against_zone(zones: ZonesRun) -> list[Pick]:
-    """§8.3 — los ID sin zona en contra: ni PUL ni APUL. Es la cifra de 7.1.
+    """§8.3 — los ID sin zona en contra. Es la cifra de 7.1.
 
     Son los primeros de cada temporalidad, que no tienen ID detrás del que salga
-    la vela. Un ID con APUL **no** entra aquí: tiene zona, sólo que no es la que
-    se esperaba.
+    la vela.
     """
     pool = [
         (timeframe, zoned)
@@ -249,9 +248,9 @@ def _figure(
     last_index = len(analysis.bars) - 1
     end = zoned.index_end if zoned.index_end is not None else last_index
     # La ventana arranca en la vela más antigua que define una zona: sin ella la
-    # captura enseñaría un rectángulo que empieza fuera del encuadre. La vela de
-    # la zona en contra es anterior al ID —un ID atrás en el PUL y dos en el
-    # APUL—, así que casi siempre es ella.
+    # captura enseñaría un rectángulo que empieza fuera del encuadre. La vela del
+    # PUL es anterior al ID —es la del extremo del ID de al lado—, así que casi
+    # siempre es ella.
     first = min(zoned.index_constitution, zoned.last.index_defining)
     against = zoned.against
     if against is not None:
@@ -341,15 +340,15 @@ def draw_zones(
             colour,
             above=zoned.direction.value != "alcista",
         )
-        if block.kind is ZoneKind.ANTE_PENULTIMATE:
+        if zoned.penultimate_is_wick:
             notes.append(
-                "no tiene PUL: el ID anterior iba en su mismo sentido, así que "
-                "su zona en contra es el APUL del último ID contrario"
+                "su PUL es la MECHA del extremo anterior —el UL viejo—: aquel ID "
+                "iba en su mismo sentido y éste nació más allá"
             )
     else:
         notes.append(
-            "el arranque de la temporalidad: todavía no hay ningún ID contrario "
-            "detrás, así que no tiene ni PUL ni APUL"
+            "el arranque de la temporalidad: todavía no hay ningún ID detrás, "
+            "así que no tiene PUL"
         )
 
     return " · ".join(notes) if notes else "las dos zonas bien formadas"
@@ -359,8 +358,8 @@ def _birth_index(zoned: ImpulseZones) -> int:
     """Barra en la que la zona empieza a existir.
 
     Las dos nacen con la constitución del ID. La vela que define cada una es
-    anterior —la del extremo en el UL, la del extremo de un ID previo en el PUL
-    y en el APUL— y ese tramo NO es zona.
+    anterior —la del extremo en el UL, la del extremo del ID de al lado en el
+    PUL— y ese tramo NO es zona.
     """
     return zoned.index_constitution
 
@@ -536,7 +535,7 @@ def _write_readme(captures: Sequence[ZoneCapture], folder: Path) -> None:
         "                   con mecha. Se eligen los MÁS CERCANOS A LA MEDIANA de altura",
         "                   del UL en ATR, no los mayores: son casos representativos.",
         "  ul_extendido     los que se estiraron a la vela siguiente",
-        "  sin_zona_en_contra  los que no tienen ni PUL ni APUL: el primero de cada"
+        "  sin_zona_en_contra  los que no tienen PUL: el primero de cada"
         "\n                   temporalidad",
         "  ul_altura_cero   los UL cuya vela del extremo no dejó mecha",
         "  pul_mas_alto/bajo los PUL extremos por altura en ATR",

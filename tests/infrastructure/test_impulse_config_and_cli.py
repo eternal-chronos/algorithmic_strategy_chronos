@@ -47,15 +47,16 @@ def test_el_yaml_del_proyecto_carga_y_declara_los_parametros_abiertos() -> None:
 
 
 def test_el_reparto_de_graficos_del_yaml_es_el_del_propietario() -> None:
-    """Diario solo, H4 con el diario, y H1 y M15 con el de H4.
+    """Cada uno con el suyo, y H1 y M15 con el de H4.
 
-    El ID vive sólo en el Diario y en H4: a H1 y a M15 no se les marca ID.
+    El ID vive sólo en el Diario y en H4: a H1 y a M15 no se les marca ID. Y el
+    Diario se dibuja SÓLO en su gráfico: en H4 no se ve nada suyo.
     """
     charts = load_impulse_config(Path("config/impulse.yaml")).charts
 
     assert charts.charts == ("D", "H4", "H1", "M15")
     assert charts.overlays("D") == ("D",)
-    assert charts.overlays("H4") == ("H4", "D")
+    assert charts.overlays("H4") == ("H4",)
     assert charts.overlays("H1") == ("H4",)
     assert charts.overlays("M15") == ("H4",)
     # H1 y M15 se dibujan pero no llevan detector propio.

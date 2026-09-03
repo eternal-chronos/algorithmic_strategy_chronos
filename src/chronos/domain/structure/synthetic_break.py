@@ -19,9 +19,9 @@ cortas, cada una con lo suyo, más sus espejos:
     8. zonas y una vela que cumple las dos ........ `SYNTHETIC_OVERLAP_UP`, d4
     9. UL de altura cero .......................... `SYNTHETIC_BREAK_UP`, ID#2
    10. todos los anteriores en bajista ............ los espejos, sin escribir a mano
-   11. el APUL, cuando el ID anterior va igual .... `SYNTHETIC_ANTE_UP`, a6 y a9
-   12. cierre dentro del APUL -> no muere ......... `SYNTHETIC_ANTE_UP`, a10
-   13. cierre más allá del APUL -> muere .......... `SYNTHETIC_ANTE_UP`, a11
+   11. PUL de MECHA: el ID anterior iba igual ..... `SYNTHETIC_SAME_UP`, a6 y a9
+   12. cierre dentro de ese PUL -> no muere ....... `SYNTHETIC_SAME_UP`, a10
+   13. cierre más allá de ese PUL -> muere ........ `SYNTHETIC_SAME_UP`, a11
 
 Los espejos se derivan con el `mirror` de la fase 2.0 y no se escriben a mano a
 propósito: la reflexión conserva todas las desigualdades estrictas del módulo,
@@ -115,51 +115,54 @@ SYNTHETIC_PENULTIMATE_UP: tuple[Candle, ...] = (
 )
 
 
-#: Casos 11, 12 y 13: el **APUL**. Tres impulsos encadenados donde el segundo
-#: muere A FAVOR, así que el tercero nace en el MISMO sentido que él y su extremo
-#: —un máximo— cae en el lado a favor del nuevo ID: no sirve de nivel en contra.
-#: Hay que retroceder hasta el último ID contrario, el bajista ID#1, y su extremo
-#: es el APUL del ID#3.
+#: Casos 11, 12 y 13: el **PUL de MECHA**. Tres impulsos encadenados donde el
+#: segundo muere A FAVOR, así que el tercero nace en el MISMO sentido que él y
+#: más allá de su extremo. El PUL del ID#3 sigue siendo el UL del ID#2 —la regla
+#: no cambia—, pero como aquel ID iba en la misma dirección su MECHA es lo que
+#: mira al ID nuevo: la zona es esa mecha, no el cuerpo.
 #:
-#:   11. el ID#2 tiene PUL y el ID#3 tiene APUL ..... a6 y a9
-#:   12. cierre bajo la línea pero dentro del APUL ... a10, sobrevive
-#:   13. cierre más allá del borde exterior del APUL . a11, ROTURA_EN_CONTRA
+#:   11. el ID#2 lleva PUL de cuerpo y el ID#3 de mecha ... a6 y a9
+#:   12. cierre dentro del PUL del ID#3 .................. a10, sobrevive
+#:   13. cierre más allá de su borde exterior ............ a11, ROTURA_EN_CONTRA
 #:
-#: El APUL queda MUY por debajo del ancla del ID#3 (1975 contra 2003) y eso no es
-#: un defecto de la serie: es exactamente lo que la regla hace. El nivel en contra
-#: de un ID que continúa tendencia está en el último giro de verdad, no en el
-#: retroceso del que salió.
-SYNTHETIC_ANTE_UP: tuple[Candle, ...] = (
+#: Aquí la zona en contra queda **por encima** de la línea del ancla del ID#3
+#: (2005 contra 2003) y eso no es un defecto de la serie: es lo que la regla hace
+#: cuando el ID nace de una continuación. El nivel que hay que cruzar para matar
+#: al ID no es su ancla sino el borde del cuerpo que dejó el extremo anterior, y
+#: por tanto la rotura en contra se **adelanta** en vez de evitarse.
+SYNTHETIC_SAME_UP: tuple[Candle, ...] = (
     # --- ID#1 bajista: el primero del histórico, sin ninguna zona en contra ---
     (1990.00, 1996.00, 1989.00, 1995.00),  # a0 verde · semilla alcista; su cuerpo alto (1995) es
     #                                            el ancla del ID#1
     (1995.00, 1996.00, 1985.00, 1986.00),  # a1 roja · abre la pierna bajista
-    (1986.00, 1987.00, 1975.00, 1976.00),  # a2 roja · extremo del ID#1. Su cuerpo [1976, 1986] será
-    #                                            el PUL del ID#2 y su MECHA [1976, 1975], el APUL
-    #                                            del ID#3: la misma vela leída de dos maneras
+    (1986.00, 1987.00, 1975.00, 1976.00),  # a2 roja · extremo del ID#1. Su CUERPO [1976, 1986] será
+    #                                            el PUL del ID#2, que va al revés que él
     (1976.00, 1981.00, 1975.50, 1980.00),  # a3 verde · CONSTITUYE ID#1 bajista; ancla 1995,
     #                                            extremo 1976. 1975.50 > 1975: no estira el UL
     (1980.00, 1998.00, 1979.00, 1997.00),  # a4 verde · cierra 1997 > 1995: ROTURA_EN_CONTRA por
     #                                            línea, que es lo único que tiene el primer ID
-    # --- ID#2 alcista: nace del giro, así que su zona en contra es el PUL -----
-    (1997.00, 2006.00, 1996.00, 2005.00),  # a5 verde · extremo del ID#2
+    # --- ID#2 alcista: nace del giro, así que su PUL es el CUERPO de a2 -------
+    (1997.00, 2006.00, 1996.00, 2005.00),  # a5 verde · extremo del ID#2. Su cuerpo llega a 2005 y
+    #                                            su MECHA sube a 2006: ése será el UL del ID#2 y,
+    #                                            tal cual, el PUL del ID#3
     (2005.00, 2006.00, 2002.00, 2003.00),  # a6 roja · CASO 11a: CONSTITUYE ID#2; ancla 1976,
-    #                                            extremo 2005. El ID#1 iba AL REVÉS, así que su
-    #                                            extremo sirve: PUL#2 = cuerpo de a2 = [1986, 1976]
+    #                                            extremo 2005. El ID#1 iba AL REVÉS, así que lo que
+    #                                            mira a este ID es el cuerpo: PUL#2 = [1986, 1976]
     (2003.00, 2010.00, 2002.00, 2009.00),  # a7 verde · cierra 2009 > 2006 (borde del UL#2):
     #                                            ROTURA_A_FAVOR. La pierna sigue ALCISTA
-    # --- ID#3 alcista: continúa tendencia, así que su zona en contra es el APUL
+    # --- ID#3 alcista: continúa, así que su PUL es la MECHA del extremo de #2 -
     (2009.00, 2016.00, 2008.00, 2015.00),  # a8 verde · extremo del ID#3
     (2015.00, 2016.00, 2012.00, 2013.00),  # a9 roja · CASO 11b: CONSTITUYE ID#3; ancla 2003,
-    #                                            extremo 2015. El ID#2 iba en su MISMO sentido y su
-    #                                            extremo (2005) queda arriba: no vale de nivel en
-    #                                            contra. Se retrocede al ID#1, que es bajista:
-    #                                            APUL#3 = mecha de a2 = [1976, 1975]
-    (2013.00, 2014.00, 1988.00, 1990.00),  # a10 roja · CASO 12: cierra 1990, muy por debajo de la
-    #                                            línea 2003, pero dentro del APUL. La mecha 1988 ni
-    #                                            se acerca a 1975. SOBREVIVE
-    (1990.00, 1991.00, 1974.00, 1974.50),  # a11 roja · CASO 13: cierra 1974.50 < 1975.
-    #                                            ROTURA_EN_CONTRA por APUL
+    #                                            extremo 2015. El ID#2 iba en su MISMO sentido, así
+    #                                            que lo que mira a este ID es su mecha:
+    #                                            PUL#3 = mecha de a5 = [2005, 2006], interior 2006
+    #                                            y exterior 2005
+    (2007.00, 2008.00, 2004.00, 2005.50),  # a10 roja · CASO 12: la mecha 2004 PERFORA el borde
+    #                                            exterior 2005 y el cierre 2005.50 se queda dentro
+    #                                            de la zona. SOBREVIVE
+    (2005.50, 2006.00, 2003.50, 2004.00),  # a11 roja · CASO 13: cierra 2004 < 2005.
+    #                                            ROTURA_EN_CONTRA por PUL, y ANTES de que el precio
+    #                                            llegue a la línea del ancla (2003)
 )
 
 
@@ -196,7 +199,7 @@ SYNTHETIC_PENULTIMATE_DOWN: tuple[Candle, ...] = mirror(
     SYNTHETIC_PENULTIMATE_UP, MIRROR_CENTRE
 )
 SYNTHETIC_OVERLAP_DOWN: tuple[Candle, ...] = mirror(SYNTHETIC_OVERLAP_UP, MIRROR_CENTRE)
-SYNTHETIC_ANTE_DOWN: tuple[Candle, ...] = mirror(SYNTHETIC_ANTE_UP, MIRROR_CENTRE)
+SYNTHETIC_SAME_DOWN: tuple[Candle, ...] = mirror(SYNTHETIC_SAME_UP, MIRROR_CENTRE)
 
 #: Viernes, igual que en las fases anteriores.
 SYNTHETIC_BREAK_START = datetime(2024, 3, 8, 0, 0, tzinfo=UTC)
@@ -204,8 +207,6 @@ SYNTHETIC_BREAK_START = datetime(2024, 3, 8, 0, 0, tzinfo=UTC)
 
 __all__ = [
     "MIRROR_CENTRE",
-    "SYNTHETIC_ANTE_DOWN",
-    "SYNTHETIC_ANTE_UP",
     "SYNTHETIC_BREAK_DOWN",
     "SYNTHETIC_BREAK_START",
     "SYNTHETIC_BREAK_UP",
@@ -213,4 +214,6 @@ __all__ = [
     "SYNTHETIC_OVERLAP_UP",
     "SYNTHETIC_PENULTIMATE_DOWN",
     "SYNTHETIC_PENULTIMATE_UP",
+    "SYNTHETIC_SAME_DOWN",
+    "SYNTHETIC_SAME_UP",
 ]

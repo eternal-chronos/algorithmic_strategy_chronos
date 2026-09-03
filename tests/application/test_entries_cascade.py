@@ -11,7 +11,7 @@ de las fases 1, 2.0 y 2.1.
 
 from __future__ import annotations
 
-from datetime import time
+from datetime import time, timedelta
 
 import pandas as pd
 import pytest
@@ -428,14 +428,20 @@ def test_el_toque_muere_con_la_ventana_de_h4(
 
     Lo atan las dos cosas y manda la que llegue antes: por abajo, que el PUL de
     H1 exista; por arriba, la ventana que mandó bajar a buscarlo.
+
+    Por abajo el límite es la vela de H1 que MATA al ID, no su etiqueta: el toque
+    va fechado en la vela fina y mientras esa vela de H1 no cierra el ID sigue
+    vivo. Con el PUL dentro del rango del ID —el ID anterior iba en el mismo
+    sentido— entrar en la zona y morir caen a menudo en la misma vela.
     """
+    span = timedelta(hours=1)
     por_id = {item.id_num: item for item in zones.per_timeframe[H1].items}
     padres = {mark.seq: mark for mark in cascade.marks}
 
     for mark in _of(cascade, CascadeStep.TOQUE_PUL_H1):
         zoned = por_id[mark.id_num]
         assert mark.timestamp >= zoned.penultimate.ts_birth
-        assert zoned.ts_end is None or mark.timestamp <= zoned.ts_end
+        assert zoned.ts_end is None or mark.timestamp < zoned.ts_end + span
         busqueda = padres[padres[mark.parent].parent]
         assert busqueda.window_end is None or mark.timestamp < busqueda.window_end
 

@@ -57,35 +57,49 @@ informe.
 
 ### PUL (penúltimo)
 
-El extremo del ID **anterior**, sobre la misma vela que llevaba su UL: cuando un
-ID muere y nace el siguiente, **el UL viejo se convierte en el PUL del nuevo**.
-El detector la deja apuntada en `index_penultimate` al constituir el ID.
+El extremo del ID **inmediatamente anterior**, sobre la misma vela que llevaba su
+UL: cuando un ID muere y nace el siguiente, **el UL viejo pasa a ser el PUL del
+nuevo**. Siempre, vaya como fuera aquel ID. El detector deja apuntada la vela en
+`index_penultimate` y su sentido en `penultimate_direction` al constituir el ID.
 
-- **Bordes:** el **cuerpo** de esa vela, de un borde al otro. A diferencia del
-  UL, que ocupa el tramo de mecha, el PUL ocupa el cuerpo: **no cubre ninguna
-  mecha**, ni la de arriba ni la de abajo.
-- **ID alcista** — su PUL es el cuerpo de la vela que fijó el mínimo anterior
-  (una vela roja): interior el **techo** del cuerpo, exterior la **base**.
-- **ID bajista** — el cuerpo de la vela que fijó el máximo anterior (una vela
-  verde): interior la **base** del cuerpo, exterior el **techo**.
+Lo que cambia con ese sentido no es si hay PUL, sino **qué tramo de la vela es la
+zona**: el que MIRA al ID nuevo, que es el que el precio encuentra al volver en
+contra.
+
+- **Aquel ID iba al revés que éste** (lo normal tras una rotura en contra). Su
+  mecha apunta al otro lado, así que el PUL es el **cuerpo** de la vela, de un
+  borde al otro y sin cubrir ninguna mecha. En un ID alcista es el cuerpo de la
+  vela que fijó el mínimo anterior (una vela roja): interior el **techo** del
+  cuerpo, exterior la **base**. En uno bajista, al revés.
+  Las dos zonas son entonces complementarias sobre la misma vela: el UL viejo
+  toma la punta y el PUL la base, compartiendo el borde del cuerpo, y juntas van
+  del `open` de esa vela a la punta de su mecha.
+- **Aquel ID iba en el mismo sentido** (murió por rotura A FAVOR y éste nació más
+  allá). Entonces su mecha apunta HACIA este ID y el PUL es esa **mecha**: **el
+  UL viejo tal cual**, con interior la punta y exterior el borde del cuerpo. Su
+  extremo no queda en el lado a favor de este ID, queda por detrás, que es el
+  lado en contra.
 - **Nace** con la constitución del ID: su vela cerró antes, así que no hay nada
-  que esperar y no se confirma.
-
-Las dos zonas son complementarias sobre la misma vela: el UL toma la punta y el
-PUL del ID siguiente toma la base, compartiendo el borde del cuerpo. Juntas van
-del `open` de esa vela a la punta de su mecha.
+  que esperar y no se confirma. Y **no se estira** a ninguna vela de margen
+  aunque sea el UL viejo: esa regla es la del extremo recién fijado.
 
 **Un ID sin PUL es un estado legítimo** y se registra: le pasa al **primer ID de
 cada temporalidad**, que no tiene ID anterior del que sacarlo. En la fase 2.1
 esos impulsos se rompen por línea, y son los **únicos** que lo hacen.
+
+> **Ojo con el PUL de mecha en la fase 2.1.** Cae DENTRO del rango del ID nuevo
+> —por encima de la línea del ancla en un ID alcista—, así que ahí la zona no
+> evita la rotura en contra: la **adelanta**. El ID muere al cruzar el borde del
+> cuerpo del extremo anterior, antes de llegar a su ancla.
 
 ### Interior y exterior
 
 Significan lo mismo en las dos zonas: el borde **interior** es el que un precio
 que sale del rango encuentra primero, y el **exterior** el que tiene que cruzar
 para dejar la zona atrás. En un ID alcista el UL se recorre hacia arriba (cuerpo
-→ mecha) y el PUL hacia abajo (techo del cuerpo → base), porque la rotura a favor
-sube y la rotura en contra baja. Es la lectura que usa la fase 2.1: romper es cerrar más
+→ mecha) y el PUL hacia abajo, porque la rotura a favor sube y la rotura en
+contra baja. Por eso el PUL de mecha es el UL viejo con los bordes cambiados de
+papel: los mismos precios, recorridos al revés. Es la lectura que usa la fase 2.1: romper es cerrar más
 allá del borde **exterior**.
 
 ## Casos límite y qué se decidió
@@ -95,6 +109,7 @@ allá del borde **exterior**.
 | UL de altura cero | Zona degenerada, no se descarta | 1 / 4 (D/H4) |
 | ID sin PUL | Estado legítimo; consultarlo lanza `LookaheadError` | el primero de cada temporalidad |
 | PUL de altura cero | Zona degenerada, igual que en el UL | se cuenta en el informe |
+| PUL de mecha (el ID anterior iba igual) | La zona es el UL viejo tal cual | ~la mitad del histórico |
 | Doji en posición de PUL | No puede ocurrir: el doji no fija ningún extremo | 0 |
 
 **Por qué el PUL no se confirma.** Su vela cerró antes de que el ID naciera —es

@@ -116,6 +116,7 @@ def _zoned(
                 timeframe="H4",
                 direction=impulse.direction,
                 index_previous_extreme=impulse.index_penultimate,
+                previous_direction=impulse.penultimate_direction,
                 ts_constitution=impulse.ts_constitution,
             ),
         )
@@ -175,8 +176,9 @@ def _synthetic_up() -> CheckGroup:
             f"altura {uls[2].height:.2f}, plana {uls[2].is_flat}",
         ),
         Check(
-            "5. PUL = el cuerpo de la vela del UL anterior (ID#2, vela b2)",
-            "vela b2, interior 2010.00, exterior 2005.00, altura 5.00",
+            "5. PUL = la vela del UL anterior (ID#2, vela b2). Aquel ID iba en el "
+            "mismo sentido, así que la zona es su MECHA: el UL viejo tal cual",
+            "vela b2, interior 2012.00, exterior 2010.00, altura 2.00",
             f"vela b{puls[1].index_defining}, interior {puls[1].inner:.2f}, "  # type: ignore[union-attr]
             f"exterior {puls[1].outer:.2f}, altura {puls[1].height:.2f}",  # type: ignore[union-attr]
         ),
@@ -199,14 +201,20 @@ def _synthetic_up() -> CheckGroup:
             f"{sum(1 for zone in puls if zone is None)} de {len(puls)}",
         ),
         Check(
-            "7. UL y PUL se reparten la vela b2 sin solaparse",
-            "UL#1 [2010.00, 2012.00] y PUL#2 [2005.00, 2010.00]",
+            "7. el PUL del ID#2 es EL MISMO tramo que el UL del ID#1 (vela b2)",
+            "UL#1 [2010.00, 2012.00] y PUL#2 [2010.00, 2012.00]",
             f"UL#1 [{uls[0].low:.2f}, {uls[0].high:.2f}] y "
             f"PUL#2 [{puls[1].low:.2f}, {puls[1].high:.2f}]",  # type: ignore[union-attr]
         ),
         Check(
-            "el PUL cubre el cuerpo y el UL no (ID#5, vela b12)",
-            "PUL [2030.00, 2034.00] contiene 2032.00; UL [2039.00, 2040.00] no",
+            "7b. y lo que se invierte es cuál es el borde interior",
+            "UL#1 interior 2010.00 / PUL#2 interior 2012.00",
+            f"UL#1 interior {uls[0].inner:.2f} / "
+            f"PUL#2 interior {puls[1].inner:.2f}",  # type: ignore[union-attr]
+        ),
+        Check(
+            "el PUL de mecha no cubre el cuerpo de su vela (ID#5, vela b12)",
+            "PUL [2034.00, 2035.00] no contiene 2032.00; UL [2039.00, 2040.00] no",
             f"PUL [{puls[4].low:.2f}, {puls[4].high:.2f}] "  # type: ignore[union-attr]
             f"{'contiene' if puls[4].contains(2032.00) else 'no contiene'} 2032.00; "  # type: ignore[union-attr]
             f"UL [{uls[4].low:.2f}, {uls[4].high:.2f}] "

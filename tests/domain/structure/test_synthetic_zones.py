@@ -164,28 +164,41 @@ def test_la_zona_plana_sigue_existiendo(alcista: list[ZonedImpulse]) -> None:
     assert zona.low == zona.high == pytest.approx(alcista[2].impulse.extreme)
 
 
-# --- Caso 5: el PUL es el cuerpo de la vela del extremo anterior ------------
+# --- Caso 5: el PUL sale de la vela del extremo anterior ---------------------
+#
+# En esta serie los cinco ID van al alza —cada uno nace de la ROTURA A FAVOR del
+# anterior—, así que todos los PUL son de MECHA: la del extremo anterior apunta
+# hacia el ID nuevo y es lo primero que el precio encuentra al volver. El PUL de
+# CUERPO —el ID anterior iba al revés— se prueba en `test_zones.py` y en la serie
+# `SYNTHETIC_SAME_UP` de la fase 2.1.
 
 
-def test_el_pul_es_el_cuerpo_del_extremo_anterior(alcista: list[ZonedImpulse]) -> None:
-    """ID#2: su PUL sale de b2, la vela con la que se constituyó el ID#1."""
+def test_el_pul_es_la_mecha_del_extremo_anterior_cuando_iba_igual(
+    alcista: list[ZonedImpulse],
+) -> None:
+    """ID#2: su PUL sale de b2, la vela con la que se constituyó el ID#1.
+
+    El ID#1 iba en su MISMO sentido, así que la zona es su mecha —el UL viejo tal
+    cual— y no el cuerpo: interior la punta (2012) y exterior el borde del cuerpo
+    (2010), que es el que hay que cruzar para dejarla atrás bajando.
+    """
     item = alcista[1]
     zona = item.penultimate
 
     assert zona is not None
     assert zona.index_defining == 2 == alcista[0].impulse.index_extreme
-    assert zona.inner == pytest.approx(2010.00)  # borde alto del cuerpo: lo primero
-    assert zona.outer == pytest.approx(2005.00)  # borde bajo: lo que hay que cruzar
-    assert zona.height == pytest.approx(5.00)
+    assert zona.inner == pytest.approx(2012.00)  # punta de la mecha: lo primero
+    assert zona.outer == pytest.approx(2010.00)  # borde del cuerpo: lo que hay que cruzar
+    assert zona.height == pytest.approx(2.00)
 
 
 def test_cada_pul_hereda_la_vela_del_ul_anterior(alcista: list[ZonedImpulse]) -> None:
     """La cadena entera, escrita a mano leyendo la serie."""
     esperado = [
-        (2, 2010.00, 2005.00),  # ID#2 <- extremo del ID#1 en b2
-        (5, 2019.00, 2015.00),  # ID#3 <- extremo del ID#2 en b5
-        (8, 2026.00, 2023.00),  # ID#4 <- extremo del ID#3 en b8
-        (12, 2034.00, 2030.00),  # ID#5 <- extremo del ID#4 en b12
+        (2, 2012.00, 2010.00),  # ID#2 <- extremo del ID#1 en b2
+        (5, 2020.00, 2019.00),  # ID#3 <- extremo del ID#2 en b5
+        (8, 2026.00, 2026.00),  # ID#4 <- extremo del ID#3 en b8: sin mecha, altura cero
+        (12, 2035.00, 2034.00),  # ID#5 <- extremo del ID#4 en b12
     ]
     for item, (vela, interior, exterior) in zip(alcista[1:], esperado, strict=True):
         zona = item.penultimate
@@ -195,14 +208,16 @@ def test_cada_pul_hereda_la_vela_del_ul_anterior(alcista: list[ZonedImpulse]) ->
         assert zona.outer == pytest.approx(exterior)
 
 
-def test_el_pul_no_cubre_las_mechas_de_su_vela(alcista: list[ZonedImpulse]) -> None:
-    """b2 va de 2004 a 2012 con mechas; el PUL sólo toma [2005, 2010]."""
+def test_el_pul_de_mecha_no_cubre_el_cuerpo_de_su_vela(
+    alcista: list[ZonedImpulse],
+) -> None:
+    """b2 va de 2004 a 2012; el PUL del ID#2 sólo toma la mecha [2010, 2012]."""
     zona = alcista[1].penultimate
 
     assert zona is not None
-    assert zona.contains(2007.00)
-    assert not zona.contains(2011.00)  # mecha de arriba: es del UL del ID#1
-    assert not zona.contains(2004.50)  # mecha de abajo: de nadie
+    assert zona.contains(2011.00)
+    assert not zona.contains(2007.00)  # el cuerpo: queda por detrás de la zona
+    assert not zona.contains(2004.50)  # la mecha de abajo: de nadie
 
 
 def test_el_pul_nace_con_su_id_y_no_antes(alcista: list[ZonedImpulse]) -> None:
@@ -239,17 +254,23 @@ def test_solo_el_primero_se_queda_sin_pul(alcista: list[ZonedImpulse]) -> None:
 # --- Caso 7: el UL y el PUL se reparten la misma vela ------------------------
 
 
-def test_el_ul_y_el_pul_se_reparten_la_vela(alcista: list[ZonedImpulse]) -> None:
-    """b2 lleva el UL del ID#1 en la mecha y el PUL del ID#2 en el cuerpo."""
+def test_el_pul_del_id_siguiente_es_el_ul_viejo_tal_cual(
+    alcista: list[ZonedImpulse],
+) -> None:
+    """b2 lleva el UL del ID#1, y el ID#2 —que va igual— hereda ESA MISMA zona.
+
+    Los bordes son los mismos y lo que se invierte es cuál es interior: el UL se
+    recorre hacia arriba (cuerpo -> punta) y el PUL hacia abajo (punta ->
+    cuerpo), porque la rotura a favor sube y la rotura en contra baja.
+    """
     ul = alcista[0].last
     pul = alcista[1].penultimate
 
     assert pul is not None
     assert ul.index_defining == pul.index_defining == 2
     assert ul.low == pytest.approx(2010.00) and ul.high == pytest.approx(2012.00)
-    assert pul.low == pytest.approx(2005.00) and pul.high == pytest.approx(2010.00)
-    # Comparten el borde del cuerpo y no se pisan en ningún otro precio.
-    assert ul.low == pul.high
+    assert (pul.low, pul.high) == (ul.low, ul.high)
+    assert (pul.inner, pul.outer) == (ul.outer, ul.inner)
 
 
 def test_el_color_de_la_constituyente_es_siempre_el_contrario(
@@ -258,8 +279,7 @@ def test_el_color_de_la_constituyente_es_siempre_el_contrario(
     """La vela que constituye es siempre del color contrario al impulso.
 
     No depende de ninguna zona, pero es la regla que hace que la vela del UL y
-    la de la constitución nunca sean la misma, y de ahí que el PUL del ID
-    siguiente caiga siempre sobre una vela del color del ID anterior.
+    la de la constitución nunca sean la misma.
     """
     series_up, _ = run_zones(SYNTHETIC_ZONES_UP)
     series_down, _ = run_zones(SYNTHETIC_ZONES_DOWN)
