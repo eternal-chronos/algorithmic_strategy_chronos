@@ -323,16 +323,27 @@ def draw_zones(
             f"<b>{block.kind.value} {block.inner:,.{DECIMALS}f} → "
             f"{block.outer:,.{DECIMALS}f}</b>"
             + (
-                "<br>cuerpo de la vela del extremo anterior"
+                "<br>la mecha del extremo del ID anterior, que iba en el mismo "
+                "sentido"
                 if block.kind is ZoneKind.PENULTIMATE
-                else "<br>mecha en contra de la vela del extremo del último ID contrario"
+                else (
+                    "<br>la zona en contra que le prestó el ID anterior, que iba "
+                    "al revés"
+                    if zoned.against_is_inherited
+                    else (
+                        "<br>el UL del ID anterior, que iba al revés pero dejó su "
+                        "extremo por detrás del ancla de éste"
+                        if zoned.against_is_counter_extreme
+                        else "<br>mecha en contra de la vela del extremo del último "
+                        "ID interior del retroceso anterior"
+                    )
+                )
             )
+            + "<br>la punta llega hasta la mecha más lejana de la vida de aquel ID"
             + (
                 "<br>ALTURA CERO: "
                 + (
-                    "la vela abrió y cerró igual"
-                    if block.kind is ZoneKind.PENULTIMATE
-                    else "la vela no dejó mecha en ese lado"
+                    "la vela no dejó mecha en ese lado"
                 )
                 if block.is_flat
                 else ""
@@ -340,10 +351,28 @@ def draw_zones(
             colour,
             above=zoned.direction.value != "alcista",
         )
-        if zoned.penultimate_is_wick:
+        if zoned.has_penultimate:
             notes.append(
-                "su PUL es la MECHA del extremo anterior —el UL viejo—: aquel ID "
-                "iba en su mismo sentido y éste nació más allá"
+                "su PUL es el UL del ID anterior —la MECHA del extremo viejo—: aquel "
+                "ID iba en su mismo sentido y éste nació más allá"
+            )
+        elif zoned.against_is_inherited:
+            notes.append(
+                "no tiene PUL sino APUL: el ID anterior iba AL REVÉS, así que su "
+                "extremo es el ancla de éste y el nivel en contra es el que aquel "
+                "ID llevaba, HEREDADO tal cual"
+            )
+        elif zoned.against_is_counter_extreme:
+            notes.append(
+                "no tiene PUL sino APUL: el ID anterior iba AL REVÉS pero su "
+                "extremo quedó POR DETRÁS del ancla de éste —el giro lo trajo una "
+                "constitución abortada—, así que el nivel en contra es su UL"
+            )
+        elif zoned.has_ante_penultimate:
+            notes.append(
+                "no tiene PUL sino APUL: nació tras una CONSTITUCIÓN ABORTADA, así "
+                "que su nivel en contra sale del último ID interior del retroceso "
+                "del ID anterior"
             )
     else:
         notes.append(
@@ -439,7 +468,7 @@ def _band(
         y0=zone.low,
         y1=zone.high,
         fillcolor=colour if fill else "rgba(0,0,0,0)",
-        opacity=(0.18 if zone.kind is ZoneKind.PENULTIMATE else 0.28) if fill else 0.4,
+        opacity=(0.28 if zone.kind is ZoneKind.LAST else 0.18) if fill else 0.4,
         line={
             "color": colour,
             "width": 1.4 if fill else 1.0,
@@ -519,24 +548,25 @@ def _ratio(numerator: float, denominator: float) -> float:
 def _write_readme(captures: Sequence[ZoneCapture], folder: Path) -> None:
     """Una línea por imagen: fichero, ID, fecha, dirección y las dos alturas."""
     lines = [
-        "CAPTURAS DE LA FASE 2.0 · ZONAS UL Y PUL",
-        "=======================================",
+        "CAPTURAS DE LA FASE 2.0 · ZONAS UL, PUL Y APUL",
+        "=============================================",
         "",
         "Una línea por imagen. Las alturas van en USD y en ATR: el oro pasó de ~1.200 a",
         "~4.300 USD en el histórico y los dólares solos no comparan nada entre años.",
         "",
-        "El PUL es el cuerpo de la vela que fijó el extremo del ID ANTERIOR —la que",
-        "llevaba su UL—, así que su vela queda por detrás del ID: el tramo entre esa vela",
-        "y la constitución va con contorno atenuado, porque ahí la zona todavía no era",
-        "de este ID.",
+        "La zona en contra es el UL de un ID que ya murió: el del ID ANTERIOR si iba en",
+        "el mismo sentido (PUL), y si iba al revés la que aquél llevaba, heredada (APUL).",
+        "Su vela queda por detrás del ID: el tramo entre esa vela y la constitución va",
+        "con contorno atenuado, porque ahí la zona todavía no era de este ID. La punta",
+        "llega hasta la mecha más lejana que el precio alcanzó con aquel ID en pie.",
         "",
         "Los lotes son los cinco del §8:",
         "  bien_formados_*  diez alcistas y diez bajistas de H4 con las dos zonas y el UL",
         "                   con mecha. Se eligen los MÁS CERCANOS A LA MEDIANA de altura",
         "                   del UL en ATR, no los mayores: son casos representativos.",
         "  ul_extendido     los que se estiraron a la vela siguiente",
-        "  sin_zona_en_contra  los que no tienen PUL: el primero de cada"
-        "\n                   temporalidad",
+        "  sin_zona_en_contra  los que no tienen ninguna: los del arranque de cada"
+        "\n                   temporalidad, hasta que la cadena de zonas empieza",
         "  ul_altura_cero   los UL cuya vela del extremo no dejó mecha",
         "  pul_mas_alto/bajo los PUL extremos por altura en ATR",
         "",

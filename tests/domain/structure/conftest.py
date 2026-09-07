@@ -38,8 +38,9 @@ from chronos.domain.structure.zone_break import ZoneBreakLevels
 from chronos.domain.structure.zones import (
     CandleSeries,
     Zone,
+    ZoneKind,
+    against_zone,
     last_zone,
-    penultimate_zone,
 )
 
 H4 = timedelta(hours=4)
@@ -123,14 +124,24 @@ def make_series(candles: Sequence[Candle], *, start: datetime = START) -> Candle
 
 @dataclass(frozen=True, slots=True)
 class ZonedImpulse:
-    """Un impulso con sus dos zonas, que es lo que se audita en la fase 2.0."""
+    """Un impulso con sus dos zonas, que es lo que se audita en la fase 2.0.
+
+    En el lado en contra hay una y sólo una: el PUL, o el APUL cuando el ID nació
+    tras una constitución abortada. `against` devuelve la que haya.
+    """
 
     impulse: DominantImpulse
     last: Zone
     penultimate: Zone | None
+    ante_penultimate: Zone | None = None
+
+    @property
+    def against(self) -> Zone | None:
+        return self.penultimate if self.penultimate is not None else self.ante_penultimate
 
     def zones_tuple(self) -> tuple[Zone, ...]:
-        return (self.last,) if self.penultimate is None else (self.last, self.penultimate)
+        against = self.against
+        return (self.last,) if against is None else (self.last, against)
 
 
 def run_zones(
@@ -173,19 +184,36 @@ def run_zones(
                 index_extreme=impulse.index_extreme,
                 ts_constitution=impulse.ts_constitution,
             ),
-            penultimate=penultimate_zone(
-                series,
-                id_num=impulse.id_num,
-                timeframe="H4",
-                direction=impulse.direction,
-                index_previous_extreme=impulse.index_penultimate,
-                previous_direction=impulse.penultimate_direction,
-                ts_constitution=impulse.ts_constitution,
-            ),
+            penultimate=_against(series, impulse, ZoneKind.PENULTIMATE),
+            ante_penultimate=_against(series, impulse, ZoneKind.ANTE_PENULTIMATE),
         )
         for impulse in detector.impulses
     ]
     return series, zoned
+
+
+def _against(
+    series: CandleSeries, impulse: DominantImpulse, kind: ZoneKind
+) -> Zone | None:
+    """La zona en contra del impulso si es de ese tipo, como en `application/`."""
+    lleva = (
+        impulse.has_penultimate
+        if kind is ZoneKind.PENULTIMATE
+        else impulse.has_ante_penultimate
+    )
+    if not lleva:
+        return None
+    return against_zone(
+        series,
+        kind=kind,
+        id_num=impulse.id_num,
+        timeframe="H4",
+        direction=impulse.direction,
+        index_body=impulse.index_against,
+        tip_window=impulse.against_tip_window,
+        zone_direction=impulse.against_direction,
+        ts_constitution=impulse.ts_constitution,
+    )
 
 
 # --- Fase 2.1: la rotura por zona --------------------------------------------
@@ -195,6 +223,7 @@ def run_break(
     candles: Sequence[Candle],
     *,
     break_by_zone: bool = True,
+    break_against_by_zone: bool = True,
     overlap_priority: OverlapPriority = OverlapPriority.A_FAVOR_FIRST,
     anchor_mode: AnchorMode = AnchorMode.A1_LAST_COUNTER_BODY,
     seed_mode: SeedMode = SeedMode.S2_FIRST_COUNTER_BAR,
@@ -218,6 +247,7 @@ def run_break(
         leg_start_mode=leg_start_mode,
         warmup_bars=warmup_bars,
         break_by_zone=break_by_zone,
+        break_against_by_zone=break_against_by_zone,
         overlap_priority=overlap_priority,
         zone_levels=(
             ZoneBreakLevels(series, timeframe="H4") if break_by_zone else None

@@ -37,6 +37,7 @@ import pandas as pd
 import plotly.offline as pyo
 
 from chronos.application.entries.cascade import CascadeMark, CascadeRun
+from chronos.application.entries.trades import EntriesRun, Entry
 from chronos.application.structure.config import DAILY, H1, H4
 from chronos.application.structure.detect_impulses import ImpulseRun, TimeframeAnalysis
 from chronos.application.structure.lateralization import (
@@ -86,6 +87,12 @@ HAND_RECTS: dict[str, str] = {
 
 DECIMALS = 4
 
+#: Con qué cuenta se audita la fase 3.1: 50 $ y el 17 % por operación, que son
+#: 8,50 $ de riesgo y 25,50 $ de objetivo a 1:3. Lo fija el propietario y viaja
+#: con la corrida que trae operaciones, no con el explorador: en una corrida sin
+#: entradas la cuenta es una herramienta de mano y arranca donde arrancaba.
+ENTRIES_ACCOUNT: dict[str, Any] = {"initial": 50.0, "mode": "percent", "risk": 17.0}
+
 #: Minuto cero de la escala de tiempos del explorador.
 _EPOCH = pd.Timestamp("1970-01-01", tz="UTC")
 
@@ -122,10 +129,11 @@ def render_explorer(
     variants: Sequence[ModeVariant] = (),
     zones: ZonesRun | None = None,
     cascade: CascadeRun | None = None,
+    entries: EntriesRun | None = None,
 ) -> str:
     """Devuelve el HTML completo del explorador."""
     generated_at = generated_at or SystemClock().now()
-    payload = build_payload(run, max_bars, lateralization, variants, zones, cascade)
+    payload = build_payload(run, max_bars, lateralization, variants, zones, cascade, entries)
     # El JSON viaja dentro de un <script>: escapar `</` evita que un texto
     # cualquiera pueda cerrar la etiqueta antes de tiempo.
     data = json.dumps(payload, separators=(",", ":"), ensure_ascii=False, default=str).replace(
@@ -153,6 +161,7 @@ def build_payload(
     variants: Sequence[ModeVariant] = (),
     zones: ZonesRun | None = None,
     cascade: CascadeRun | None = None,
+    entries: EntriesRun | None = None,
 ) -> dict[str, Any]:
     """Serializa la corrida a la estructura que consume el explorador.
 
@@ -194,6 +203,9 @@ def build_payload(
             "legStartMode": run.config.rules.leg_start_mode.value,
             #: Fase 2.1: qué regla de rotura produjo estos impulsos.
             "breakByZone": run.config.rules.break_by_zone,
+            #: Fase 3.0: con `false` el lado en contra se rompe por el ancla
+            #: aunque las zonas manden el lado a favor.
+            "breakAgainstByZone": run.config.rules.break_against_by_zone,
             "overlapPriority": run.config.rules.overlap_priority.value,
             "h4OffsetHours": run.config.aggregation.h4_offset_hours,
             "dSessionStart": run.config.aggregation.d_session_start,
@@ -249,6 +261,24 @@ def build_payload(
         #: dónde viene aunque su padre se dibuje en otro gráfico.
         "cascadeChain": _cascade_chain(cascade),
         "hasCascade": cascade is not None and not cascade.empty,
+        #: Fase 3.1: las operaciones. Van en una sola lista y no por gráfico —una
+        #: operación es un tramo de precio y de tiempo, y se dibuja igual en los
+        #: cuatro—, con el régimen de H4 aparte porque es el fondo sobre el que
+        #: se leen: qué se estaba buscando en cada tramo y por qué.
+        "entries": _entries(entries),
+        "regimes": _regimes(entries),
+        "hasEntries": entries is not None and not entries.empty,
+        #: El R:R con el que se calcularon. El explorador lo escribe, no lo elige.
+        "riskReward": entries.risk_reward if entries is not None else None,
+        #: La holgura del límite del rechazo con OB: ese límite cae FUERA del
+        #: patrón dibujado y sin este número no hay forma de auditarlo.
+        "rejectionOffset": entries.rejection_offset if entries is not None else None,
+        #: El cierre del viernes. Una operación que acaba sin tocar el stop ni el
+        #: objetivo no se entiende sin saber a qué hora cierra la semana.
+        "marketWeek": _market_week(entries),
+        #: Y con qué cuenta se miran. Va aquí y no incrustado en el JavaScript
+        #: porque es una decisión de esta fase, no del explorador.
+        **({} if entries is None else {"account": dict(ENTRIES_ACCOUNT)}),
         #: La franja de operativa con la que se calculó la cascada. Sin ella un
         #: gráfico sin marcas de madrugada se leería como que la regla no
         #: encontró nada, cuando lo que pasa es que ahí no se mira.
@@ -415,10 +445,12 @@ def _zones(
     mientras la línea del extremo puede seguir subiendo en escalera por encima.
 
     La zona del lado en contra cuelga de una vela **anterior** al ID —la del
-    extremo del ID de al lado, la que llevaba su UL—, así que su `xd` queda
-    siempre por detrás de `x0`. Es el PUL, y cada ID manda como mucho dos zonas:
-    `k` dice cuál es cada una y `wick` si el PUL es la mecha de aquella vela —el
-    UL viejo, porque aquel ID iba en el mismo sentido— o su cuerpo.
+    extremo del ID de al lado, la que llevaba su UL; o una de dentro del
+    retroceso de aquél cuando este ID nació tras una constitución abortada—, así
+    que su `xd` queda siempre por detrás de `x0`. Es el PUL o el APUL, nunca las
+    dos, y cada ID manda como mucho dos zonas: `k` dice cuál es cada una y `apu`,
+    en el APUL, de dónde salió: heredado, del extremo del ID contrario anterior o
+    del retroceso.
     """
     if zones is None:
         return []
@@ -430,9 +462,13 @@ def _zones(
         against = zoned.against
         if against is not None:
             record = _zone_record(zoned, against, ends[zoned.id_num])
-            # De qué tramo de la vela salió el PUL. El navegador no lo puede
-            # deducir de los bordes: haría falta el OHLC de la vela.
-            record["wick"] = zoned.penultimate_is_wick
+            origin = zoned.ante_penultimate_origin
+            if origin is not None:
+                # De dónde salió el APUL: heredado del ID anterior, el UL de aquel
+                # ID contrario que dejó su extremo detrás, o el del ID interior de
+                # su retroceso. El navegador no lo puede deducir de los bordes, y
+                # son tres historias distintas.
+                record["apu"] = origin.value
             records.append(record)
     return records
 
@@ -565,6 +601,106 @@ def _cascade_mark(mark: CascadeMark) -> dict[str, Any]:
     return record
 
 
+def _entries(entries: EntriesRun | None) -> list[dict[str, Any]]:
+    """Capa "Entradas": el límite, su patrón de M15 y la operación que salió.
+
+    Cada registro lleva las tres cosas que se auditan por separado y que el
+    navegador no puede deducir: **dónde** estaba el límite (`e`, `s`, `t`),
+    **cuándo** se puso y cuándo se fue (`x`, `xf`, `xc`) y **de qué cuelga** —la
+    zona de H1 y el patrón de M15—. Lo que sí se deriva en el navegador es el
+    dinero: depende del capital que haya escrito en la barra, no del motor.
+    """
+    if entries is None or not entries.entries:
+        return []
+    return [_entry_record(item) for item in entries.entries]
+
+
+def _entry_record(item: Entry) -> dict[str, Any]:
+    record: dict[str, Any] = {
+        "n": item.seq,
+        "d": item.direction.value,
+        "f": item.form.value,
+        "pat": item.pattern.value,
+        "h4": item.h4_id,
+        "h1": item.h1_id,
+        "zk": item.zone_kind.value,
+        "zlo": round(item.zone_low, DECIMALS),
+        "zhi": round(item.zone_high, DECIMALS),
+        "plo": round(item.pattern_low, DECIMALS),
+        "phi": round(item.pattern_high, DECIMALS),
+        #: Vela que define el patrón y vela en cuyo cierre se supo que existía.
+        "xp": _minute(pd.Timestamp(item.ts_pattern)),
+        "xk": _minute(pd.Timestamp(item.ts_pattern_known)),
+        #: Vela de M15 en cuyo cierre se puso el límite: antes de ella no hay
+        #: nada que dibujar, y el replay lo necesita para no adelantarse.
+        "x": _minute(pd.Timestamp(item.ts_armed)),
+        "e": round(item.entry, DECIMALS),
+        "s": round(item.stop, DECIMALS),
+        "t": round(item.target, DECIMALS),
+    }
+    if item.ts_filled is not None:
+        record["xf"] = _minute(pd.Timestamp(item.ts_filled))
+    if item.ts_closed is not None:
+        record["xe"] = _minute(pd.Timestamp(item.ts_closed))
+    if item.exit_price is not None:
+        record["px"] = round(item.exit_price, DECIMALS)
+    if item.outcome is not None:
+        record["o"] = item.outcome.value
+    if item.cancelled_by is not None and item.ts_cancelled is not None:
+        record["why"] = item.cancelled_by.value
+        record["xc"] = _minute(pd.Timestamp(item.ts_cancelled))
+    return record
+
+
+def _regimes(entries: EntriesRun | None) -> list[dict[str, Any]]:
+    """Capa "Régimen de H4": qué se busca en cada tramo, y entre qué dos sitios.
+
+    Es el fondo de la fase: una operación de compra en un tramo en el que se
+    buscaban ventas es un error, y sin dibujar el tramo no hay forma de verlo.
+    """
+    if entries is None or not entries.regimes:
+        return []
+    return [
+        {
+            "seq": item.seq,
+            "k": item.kind.value,
+            #: Lo que se busca. Ausente en el tramo mudo del UL.
+            **({} if item.direction is None else {"d": item.direction.value}),
+            "h4": item.h4_id,
+            "h4d": item.h4_direction.value,
+            "x0": _minute(pd.Timestamp(item.start)),
+            **(
+                {}
+                if item.end is None
+                else {"x1": _minute(pd.Timestamp(item.end))}
+            ),
+            "a": item.opened_by.value,
+            **({} if item.closed_by is None else {"b": item.closed_by.value}),
+            "zlo": round(item.zone_low, DECIMALS),
+            "zhi": round(item.zone_high, DECIMALS),
+            "ulo": round(item.last_low, DECIMALS),
+            "uhi": round(item.last_high, DECIMALS),
+        }
+        for item in entries.regimes
+    ]
+
+
+def _market_week(entries: EntriesRun | None) -> dict[str, str]:
+    """El cierre semanal con el que se corrió, como dato y no como texto.
+
+    Es la única regla de la fase que cierra una operación sin que el precio haya
+    llegado a ningún sitio: sin escribir la hora, el punto de salida parece un
+    fallo del motor.
+    """
+    if entries is None:
+        return {}
+    week = entries.market_week
+    return {
+        "tz": week.timezone,
+        "at": f"{week.close.hour:02d}:{week.close.minute:02d}",
+    }
+
+
 def _trading_window(cascade: CascadeRun | None) -> dict[str, str]:
     """La franja en la que se opera, tal cual la usó la cascada.
 
@@ -666,12 +802,18 @@ def _impulse_list(impulses: list[Any], last: pd.Timestamp) -> list[dict[str, Any
             #: dominio al constituir; aquí sólo se transporta para poder marcarlo.
             "ec": impulse.extreme_bar_direction.value,
             "w": impulse.extreme_on_counter_bar,
-            #: Qué lleva el ID en su lado EN CONTRA: `PUL`, o `linea` cuando no
-            #: hay ID anterior del que sacarlo. Lo decidió el detector al
-            #: constituirlo y no se puede re-derivar en el navegador: haría falta
-            #: la lista de impulsos. El globo del ID lo dice sin que haya que
-            #: esperar a la rotura para enterarse.
+            #: Qué lleva el ID en su lado EN CONTRA: `PUL`, `APUL` o `linea`
+            #: cuando no hay ID anterior del que sacarlo, y en el APUL `ah` dice
+            #: cuál de los tres es. Lo decidió el detector al constituirlo y no se
+            #: puede re-derivar en el navegador: haría falta la lista de impulsos.
+            #: El globo del ID lo dice sin que haya que esperar a la rotura para
+            #: enterarse.
             "az": impulse.against_source.value,
+            "ah": (
+                None
+                if impulse.ante_penultimate_origin is None
+                else impulse.ante_penultimate_origin.value
+            ),
             #: Si el ID sigue VIVO al final del histórico. `x1` es entonces la
             #: última vela y no la de su muerte: el marco llega al presente y
             #: tiene que poder decir por qué en vez de fechar una muerte que no
@@ -831,7 +973,13 @@ def _subtitle(run: ImpulseRun) -> str:
     # La regla de rotura va delante del hash: es lo que decide si lo que se está
     # mirando es la línea base de la fase 1 o la de la 2.1, y confundirlas sería
     # auditar una cosa creyendo que se audita la otra.
-    regla = "por ZONA (fase 2.1)" if run.config.rules.break_by_zone else "por línea"
+    rules = run.config.rules
+    if not rules.break_by_zone:
+        regla = "por línea"
+    elif rules.break_against_by_zone:
+        regla = "por ZONA (fase 2.1)"
+    else:
+        regla = "por el UL a favor y por línea del ancla en contra (fase 3.0)"
     return (
         f"{published:,} impulsos · {reparto} · ancla {run.config.rules.anchor_mode.value} · "
         f"arranque de pierna {run.config.rules.leg_start_mode.value} · "

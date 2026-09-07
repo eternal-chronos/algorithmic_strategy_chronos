@@ -200,12 +200,12 @@ def test_un_id_sin_zona_en_contra_lo_dice_en_la_nota(
     assert "no tiene PUL" in nota
 
 
-def test_un_pul_de_mecha_lo_dice_en_la_nota(run: ImpulseRun, zones: ZonesRun) -> None:
-    """El PUL de mecha no es el de cuerpo: la captura dice cuál está viendo."""
-    de_mecha = zones.per_timeframe[H4].with_wick_penultimate
-    assert de_mecha, "sin PUL de mecha en la fixture no hay nada que auditar"
-    _, nota = _figure(run.analyses[H4], de_mecha[0], "UTC")
-    assert "MECHA" in nota
+def test_un_apul_heredado_lo_dice_en_la_nota(run: ImpulseRun, zones: ZonesRun) -> None:
+    """El heredado y el del retroceso no son lo mismo: la nota dice cuál es."""
+    heredados = zones.per_timeframe[H4].with_inherited_ante_penultimate
+    assert heredados, "sin APUL heredado en la fixture no hay nada que auditar"
+    _, nota = _figure(run.analyses[H4], heredados[0], "UTC")
+    assert "HEREDADO" in nota
 
 
 def test_un_id_sin_zona_en_contra_dibuja_solo_su_ul(

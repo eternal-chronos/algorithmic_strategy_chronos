@@ -24,6 +24,12 @@ import pandas as pd
 import pytest
 
 from chronos.application.entries.cascade import CascadeRun, CascadeStep, detect_cascade
+from chronos.application.entries.trades import (
+    REJECTION_OFFSET,
+    EntriesRun,
+    OrderEnd,
+    detect_entries,
+)
 from chronos.application.structure.config import (
     DAILY,
     H1,
@@ -311,6 +317,7 @@ def _draw(
     variants: Sequence[ModeVariant] = (),
     zones: ZonesRun | None = None,
     cascade: CascadeRun | None = None,
+    entries: EntriesRun | None = None,
 ) -> dict:
     node = shutil.which("node")
     if node is None:
@@ -325,6 +332,7 @@ def _draw(
                 variants=variants,
                 zones=zones,
                 cascade=cascade,
+                entries=entries,
             ),
             default=str,
         ),
@@ -1367,7 +1375,7 @@ def test_cada_zona_viaja_con_sus_dos_bordes(run: ImpulseRun, zones: ZonesRun) ->
     registros = payload["impulses"][H4]["zones"]
     assert len(registros) == len(zones.per_timeframe[H4].table)
     for registro in registros:
-        assert registro["k"] in {"UL", "PUL"}
+        assert registro["k"] in {"UL", "PUL", "APUL"}
         assert registro["lo"] <= registro["hi"]
         assert {registro["i"], registro["o"]} == {registro["lo"], registro["hi"]} or (
             registro["i"] == registro["o"]
@@ -1386,10 +1394,10 @@ def test_la_zona_no_nace_antes_que_su_vela_definitoria(
 def test_la_zona_en_contra_cuelga_de_una_vela_anterior_a_su_id(
     run: ImpulseRun, zones: ZonesRun
 ) -> None:
-    """El PUL sale del extremo del ID anterior: queda siempre detrás."""
+    """El PUL sale del extremo del ID anterior y el APUL de más atrás todavía."""
     registros = build_payload(run, zones=zones)["impulses"][H4]["zones"]
     uls = [item for item in registros if item["k"] == "UL"]
-    contra = [item for item in registros if item["k"] == "PUL"]
+    contra = [item for item in registros if item["k"] in {"PUL", "APUL"}]
 
     assert uls and contra
     # `xd` es la vela definitoria y `x0` el nacimiento: en la zona en contra nunca
@@ -1402,14 +1410,21 @@ def test_cada_id_manda_una_sola_zona_en_contra(
 ) -> None:
     """Una zona en contra por ID, y el payload dice de qué tramo salió."""
     registros = build_payload(run, zones=zones)["impulses"][H4]["zones"]
-    puls = [item for item in registros if item["k"] == "PUL"]
+    puls = [item for item in registros if item["k"] in {"PUL", "APUL"}]
 
     assert puls
     assert len({item["id"] for item in puls}) == len(puls)
-    # `wick` dice si es la MECHA del extremo anterior —aquel ID iba en el mismo
-    # sentido— o su cuerpo. El navegador no lo puede deducir de los bordes.
-    assert all(isinstance(item["wick"], bool) for item in puls)
-    assert any(item["wick"] for item in puls), "sin PUL de mecha no hay nada que auditar"
+    # `apu` dice de cuál de los tres APUL se trata. El navegador no lo puede
+    # deducir de los bordes, y sólo lo llevan los APUL.
+    apuls = [item for item in puls if item["k"] == "APUL"]
+    assert apuls
+    assert all(
+        item["apu"] in {"heredado", "extremo_contrario", "retroceso"} for item in apuls
+    )
+    assert not [item for item in puls if item["k"] == "PUL" and "apu" in item]
+    assert [item for item in apuls if item["apu"] == "heredado"], (
+        "sin APUL heredado no hay nada que auditar"
+    )
 
 
 def test_los_id_sin_zona_en_contra_no_viajan_como_zona(
@@ -1423,7 +1438,7 @@ def test_los_id_sin_zona_en_contra_no_viajan_como_zona(
     con_zona = {
         item["id"]
         for item in payload["impulses"][H4]["zones"]
-        if item["k"] == "PUL"
+        if item["k"] in {"PUL", "APUL"}
     }
 
     assert not (con_zona & sin_zona)
@@ -1437,16 +1452,189 @@ def test_cada_id_dice_que_zona_lleva_en_su_lado_en_contra(
     impulsos = payload["impulses"][H4]["list"]
     zonas = payload["impulses"][H4]["zones"]
     por_id = {
-        item["id"]: item["k"] for item in zonas if item["k"] == "PUL"
+        item["id"]: item["k"] for item in zonas if item["k"] in {"PUL", "APUL"}
     }
 
     assert impulsos
-    assert all(item["az"] in {"PUL", "linea"} for item in impulsos)
+    assert all(item["az"] in {"PUL", "APUL", "linea"} for item in impulsos)
     for impulso in impulsos:
         if impulso["az"] == "linea":
             assert impulso["id"] not in por_id
         else:
             assert por_id.get(impulso["id"]) == impulso["az"]
+
+
+# --- El APUL: la zona en contra del ID nacido tras una constitución abortada --
+#
+# En H4 de la fixture no cae ninguna, así que estos tests se hacen sobre el
+# DIARIO, cuyo ID nº 5 sí nace de una abortada. El histórico se corta mientras
+# ese ID sigue vivo para que sea el ÚLTIMO: las cajas de las zonas son sólo las
+# del ID que se está mirando, así que un APUL en mitad de la historia no se
+# dibujaría y no habría nada que auditar.
+
+#: Último minuto del histórico recortado: el ID nº 5 del Diario se constituye el
+#: 14-02 y muere el 18-02, así que aquí está vigente.
+APUL_CUT = "2024-02-17 22:00"
+
+#: El Diario se dibuja con su nombre largo, y las trazas van por ese nombre.
+DIARIO = "Diario"
+
+
+@pytest.fixture(scope="module")
+def run_apul() -> ImpulseRun:
+    history = make_m1_history(weeks=16)
+    config = ImpulseConfig(
+        data=StructureDataConfig(path="no-se-lee.parquet"),
+        rules=ImpulseRulesConfig(warmup_bars=5),
+    )
+    series = {
+        timeframe: aggregated.frame
+        for timeframe, aggregated in aggregate_all(
+            history.loc[: pd.Timestamp(APUL_CUT, tz="UTC")],
+            AggregationConfig(),
+            config.charts.charts,
+        ).items()
+    }
+    return DetectDominantImpulses(config).execute(series, provenance="fixture APUL")
+
+
+@pytest.fixture(scope="module")
+def zones_apul(run_apul: ImpulseRun) -> ZonesRun:
+    return detect_zones(
+        run_apul, replace(run_apul.config, zones=ZonesConfig(enabled=True))
+    )
+
+
+def _apul_id(zones: ZonesRun) -> int:
+    marcados = zones.per_timeframe[DAILY].with_ante_penultimate
+    assert marcados, "la fixture tiene que traer algún ID con APUL que auditar"
+    return marcados[-1].id_num
+
+
+def test_el_apul_viaja_como_zona_propia_y_sin_pul_al_lado(
+    run_apul: ImpulseRun, zones_apul: ZonesRun
+) -> None:
+    """El APUL sustituye al PUL: el ID no puede llevar las dos zonas."""
+    payload = build_payload(run_apul, zones=zones_apul)
+    id_num = _apul_id(zones_apul)
+    suyas = {
+        item["k"]
+        for item in payload["impulses"][DAILY]["zones"]
+        if item["id"] == id_num
+    }
+
+    assert suyas == {"UL", "APUL"}
+
+
+def test_el_apul_dice_de_donde_sale(
+    run_apul: ImpulseRun, zones_apul: ZonesRun
+) -> None:
+    """El del retroceso y el heredado se dibujan igual y no son lo mismo."""
+    payload = build_payload(run_apul, zones=zones_apul)
+    apuls = [
+        item for item in payload["impulses"][DAILY]["zones"] if item["k"] == "APUL"
+    ]
+
+    assert apuls
+    assert all(
+        item["apu"] in {"heredado", "extremo_contrario", "retroceso"} for item in apuls
+    )
+    assert [item for item in apuls if item["apu"] == "retroceso"], (
+        "la fixture tiene que traer el APUL de una constitución abortada"
+    )
+    # Y cuelga de una vela anterior al ID, como cualquier zona en contra.
+    assert all(item["xd"] < item["x0"] for item in apuls)
+
+
+def test_el_id_con_apul_lo_dice_en_su_lado_en_contra(
+    run_apul: ImpulseRun, zones_apul: ZonesRun
+) -> None:
+    """`az` es lo que lee el globo del marco: sin él no se puede derivar."""
+    payload = build_payload(run_apul, zones=zones_apul)
+    id_num = _apul_id(zones_apul)
+    impulso = next(
+        item for item in payload["impulses"][DAILY]["list"] if item["id"] == id_num
+    )
+
+    assert impulso["az"] == "APUL"
+
+
+def test_el_apul_se_dibuja_con_su_capa_y_su_trazo(
+    run_apul: ImpulseRun, zones_apul: ZonesRun, tmp_path: Path
+) -> None:
+    """Capa propia, punteada, y el globo dice de dónde sale el nivel."""
+    paso = _step(_draw(run_apul, tmp_path, zones=zones_apul), f"marco-de-{DAILY}")
+    trazas = _trazas_de_zona(paso, DIARIO, "APUL")
+
+    assert trazas, _trace_names(paso)
+    assert all(traza["dash"] == "dot" for traza in trazas)
+    globos = [
+        caption for traza in trazas for caption in (traza["captions"] or []) if caption
+    ]
+    assert globos
+    assert all("Zona APUL" in caption for caption in globos)
+    assert all("CONSTITUCIÓN ABORTADA" in caption for caption in globos)
+
+
+def test_el_globo_del_apul_heredado_dice_que_lo_es(
+    run: ImpulseRun, zones: ZonesRun, tmp_path: Path
+) -> None:
+    """Los dos APUL se dibujan igual y no son lo mismo: el globo los separa."""
+    heredados = {
+        item.id_num
+        for item in zones.per_timeframe[DAILY].with_inherited_ante_penultimate
+    }
+    assert heredados, "sin APUL heredado en la fixture no hay nada que auditar"
+
+    paso = _step(_draw(run, tmp_path, zones=zones), f"marco-de-{DAILY}")
+    globos = [
+        caption
+        for traza in _trazas_de_zona(paso, DIARIO, "APUL")
+        for caption in (traza["captions"] or [])
+        if caption and int(re.search(r"nº (\d+)", caption).group(1)) in heredados
+    ]
+
+    assert globos
+    assert all("HEREDA la zona en contra" in caption for caption in globos)
+    assert all("CONSTITUCIÓN ABORTADA" not in caption for caption in globos)
+
+
+def test_el_globo_de_la_zona_en_contra_dice_que_la_punta_se_estira(
+    run: ImpulseRun, zones: ZonesRun, tmp_path: Path
+) -> None:
+    """La punta no es la de su vela: es la de toda la vida de aquel ID."""
+    paso = _step(_draw(run, tmp_path, zones=zones), f"marco-de-{DAILY}")
+    globos = [
+        caption
+        for kind in ("PUL", "APUL")
+        for traza in _trazas_de_zona(paso, DIARIO, kind)
+        for caption in (traza["captions"] or [])
+        if caption
+    ]
+
+    assert globos
+    assert all("la mecha más lejana" in caption for caption in globos)
+    # Y el UL no lo dice, porque el suyo no se estira mientras el ID vive.
+    uls = [
+        caption
+        for traza in _trazas_de_zona(paso, DIARIO, "UL")
+        for caption in (traza["captions"] or [])
+        if caption
+    ]
+    assert uls
+    assert all("la mecha más lejana" not in caption for caption in uls)
+
+
+def test_el_globo_del_marco_dice_que_el_id_lleva_apul(
+    run_apul: ImpulseRun, zones_apul: ZonesRun, tmp_path: Path
+) -> None:
+    """Sin esto, un ID sin PUL dibujado se lee como un fallo del motor."""
+    paso = _step(_draw(run_apul, tmp_path, zones=zones_apul), f"marco-de-{DAILY}")
+    globos = _globos_de_marco(paso, DIARIO)
+
+    assert globos
+    assert any("en contra: APUL" in caption for caption in globos)
+    assert any("NO tiene PUL" in caption for caption in globos)
 
 
 def _zonas(nombres: list[str]) -> list[str]:
@@ -1801,7 +1989,7 @@ def test_cada_rotura_evitada_viaja_con_su_zona_y_su_linea(zoned_run: ImpulseRun)
         else:
             assert registro["y"] < registro["ln"]
             assert registro["y"] >= registro["zo"]
-        assert registro["z"] in ("UL", "PUL")
+        assert registro["z"] in ("UL", "PUL", "APUL")
         assert registro["k"] in ("favor", "contra")
 
 
@@ -1809,14 +1997,15 @@ def test_la_rotura_real_dice_si_fue_por_zona_o_por_linea(zoned_run: ImpulseRun) 
     registros = build_payload(zoned_run)["impulses"][H4]["breaks"]
     fuentes = {item["src"] for item in registros}
 
-    assert fuentes <= {"linea", "UL", "PUL"}
+    assert fuentes <= {"linea", "UL", "PUL", "APUL"}
     # El UL existe siempre, así que ninguna rotura a favor puede ser por línea.
     assert all(
         item["src"] == "UL" for item in registros if item["k"] == "favor"
     )
-    # Y en contra manda el PUL, o la línea si ese ID no tenía anterior.
+    # Y en contra manda la zona que llevara ese ID, o la línea si no llevaba
+    # ninguna porque la cadena se le heredó vacía.
     assert all(
-        item["src"] in ("linea", "PUL")
+        item["src"] in ("linea", "PUL", "APUL")
         for item in registros
         if item["k"] == "contra"
     )
@@ -2230,7 +2419,10 @@ def test_cada_senal_viaja_con_lo_que_hace_falta_para_juzgarla(
     assert registros
     for registro in registros:
         assert registro["k"] in SIGNAL_KINDS
-        assert registro["z"] == ("PUL" if registro["k"] == "TOQUE_PUL" else "UL")
+        if registro["k"] == "TOQUE_PUL":
+            assert registro["z"] in ("PUL", "APUL")
+        else:
+            assert registro["z"] == "UL"
         assert registro["d"] in ("alcista", "bajista")
         assert registro["n"] >= 1
         assert isinstance(registro["in"], bool)
@@ -2394,6 +2586,12 @@ def entries_zones(entries_run: ImpulseRun) -> ZonesRun:
 @pytest.fixture
 def cascade(entries_run: ImpulseRun, entries_zones: ZonesRun) -> CascadeRun:
     return detect_cascade(entries_run, entries_zones)
+
+
+@pytest.fixture
+def trades(entries_run: ImpulseRun, entries_zones: ZonesRun) -> EntriesRun:
+    """Las operaciones de la fase 3.1 sobre la misma corrida que la cascada."""
+    return detect_entries(entries_run, entries_zones)
 
 
 def _pasos(step: dict) -> list[str]:
@@ -2573,6 +2771,16 @@ def test_la_franja_de_operativa_viaja_en_el_payload(
         "to": "12:00",
     }
     assert build_payload(entries_run)["tradingWindow"] == {}
+
+
+def test_el_cierre_del_viernes_viaja_en_el_payload(
+    entries_run: ImpulseRun, entries_zones: ZonesRun, trades: EntriesRun
+) -> None:
+    """Una operación que acaba sin llegar a ningún precio no se audita sin la hora."""
+    payload = build_payload(entries_run, zones=entries_zones, entries=trades)
+
+    assert payload["marketWeek"] == {"tz": "America/New_York", "at": "17:00"}
+    assert build_payload(entries_run)["marketWeek"] == {}
 
 
 def test_el_estado_dice_que_solo_se_opera_dentro_de_la_franja(
@@ -3304,3 +3512,426 @@ def test_sin_recuadros_los_botones_de_quitar_estan_apagados(
 
     assert vacio["rectUndoDisabled"] and vacio["rectClearDisabled"]
     assert vacio["rectArmed"] is None
+
+
+# --- Fase 3.1 · las entradas -------------------------------------------------
+#
+# Es lo primero del explorador que ABRE Y CIERRA posiciones, así que lo que se
+# comprueba aquí es que se dibujan las tres cosas que se auditan —el límite, la
+# operación y su final—, que la capa se apaga, que el fondo del régimen dice
+# hacia dónde se buscaba y que el replay no enseña ninguna antes de tiempo.
+
+ENTRY_TRACES = (
+    "Límite puesto",
+    "Entrada",
+    "Operación · riesgo",
+    "Operación · objetivo",
+    "Operación · riesgo · en una vela",
+    "Operación · objetivo · en una vela",
+    "Patrón M15 de la entrada",
+)
+
+
+def _entradas(step: dict) -> list[str]:
+    return [nombre for nombre in _trace_names(step) if nombre in ENTRY_TRACES]
+
+
+def test_sin_entradas_el_payload_no_las_declara(run: ImpulseRun) -> None:
+    """Sin ellas la casilla ni se enseña: una capa vacía sólo hace dudar."""
+    payload = build_payload(run)
+
+    assert payload["hasEntries"] is False
+    assert payload["entries"] == []
+    assert payload["regimes"] == []
+    assert payload["riskReward"] is None
+    assert payload["rejectionOffset"] is None
+
+
+def test_el_objetivo_esta_siempre_a_tres_veces_el_riesgo(
+    entries_run: ImpulseRun, entries_zones: ZonesRun, trades: EntriesRun
+) -> None:
+    """1:3 no es un parámetro por operación: es la regla de la fase."""
+    payload = build_payload(entries_run, zones=entries_zones, entries=trades)
+
+    assert payload["hasEntries"] is True
+    assert payload["riskReward"] == 3
+    assert payload["rejectionOffset"] == pytest.approx(REJECTION_OFFSET)
+    assert payload["entries"], "la fixture tiene que producir alguna operación"
+    for item in payload["entries"]:
+        riesgo = abs(item["e"] - item["s"])
+        assert riesgo > 0
+        # Los tres precios viajan redondeados a los decimales del explorador, así
+        # que la igualdad se juzga con esa tolerancia y no con la del motor: el
+        # 1:3 exacto lo fija el test de la capa de aplicación.
+        assert abs(item["t"] - item["e"]) == pytest.approx(3 * riesgo, abs=4e-4)
+        # El stop siempre al otro lado de la entrada, y el objetivo al contrario.
+        if item["d"] == "bajista":
+            assert item["s"] > item["e"] > item["t"]
+        else:
+            assert item["s"] < item["e"] < item["t"]
+
+
+def test_una_entrada_o_entra_o_se_quita_pero_no_las_dos(
+    entries_run: ImpulseRun, entries_zones: ZonesRun, trades: EntriesRun
+) -> None:
+    payload = build_payload(entries_run, zones=entries_zones, entries=trades)
+
+    for item in payload["entries"]:
+        assert not ("xf" in item and "why" in item), item
+        assert "xf" in item or "why" in item, item
+        # Nada ocurre antes de que el límite exista.
+        assert item["xk"] <= item["x"]
+        assert item.get("xf", item["x"]) >= item["x"]
+
+
+def test_el_regimen_dice_hacia_donde_se_buscaba(
+    entries_run: ImpulseRun, entries_zones: ZonesRun, trades: EntriesRun
+) -> None:
+    """El tramo mudo del UL es el único sin dirección: ahí no se busca nada."""
+    payload = build_payload(entries_run, zones=entries_zones, entries=trades)
+    regimenes = payload["regimes"]
+
+    assert regimenes
+    for item in regimenes:
+        assert ("d" in item) is (item["k"] != "EN_UL"), item
+        if "x1" in item:
+            assert item["x1"] >= item["x0"]
+
+
+def test_ninguna_entrada_va_contra_el_regimen_de_su_tramo(
+    entries_run: ImpulseRun, entries_zones: ZonesRun, trades: EntriesRun
+) -> None:
+    """Una compra en un tramo en el que se buscaban ventas sería un error."""
+    payload = build_payload(entries_run, zones=entries_zones, entries=trades)
+    tramos = payload["regimes"]
+
+    for item in payload["entries"]:
+        cubre = [
+            tramo
+            for tramo in tramos
+            if tramo["x0"] <= item["x"] <= tramo.get("x1", item["x"])
+            and tramo["h4"] == item["h4"]
+        ]
+        assert cubre, item
+        assert any(tramo.get("d") == item["d"] for tramo in cubre), (item, cubre)
+
+
+def test_la_capa_de_entradas_se_apaga_y_se_enciende(
+    entries_run: ImpulseRun, entries_zones: ZonesRun, trades: EntriesRun, tmp_path: Path
+) -> None:
+    resultado = _draw(entries_run, tmp_path, zones=entries_zones, entries=trades)
+
+    encendida = _entradas(_step(resultado, f"entradas-{M15}"))
+    apagada = _entradas(_step(resultado, f"entradas-apagadas-{M15}"))
+    assert encendida, _trace_names(_step(resultado, f"entradas-{M15}"))
+    assert not apagada
+
+
+def test_las_operaciones_se_dibujan_en_todos_los_graficos(
+    entries_run: ImpulseRun, entries_zones: ZonesRun, trades: EntriesRun, tmp_path: Path
+) -> None:
+    """Una operación es un tramo de precio y de tiempo: se ve igual en los cuatro."""
+    resultado = _draw(entries_run, tmp_path, zones=entries_zones, entries=trades)
+
+    for grafico in (DAILY, H4, H1, M15):
+        assert _entradas(_step(resultado, f"entradas-{grafico}")), grafico
+
+
+def test_sin_entradas_en_el_payload_la_capa_no_dibuja_nada(
+    entries_run: ImpulseRun, entries_zones: ZonesRun, tmp_path: Path
+) -> None:
+    resultado = _draw(entries_run, tmp_path, zones=entries_zones)
+
+    assert not _entradas(_step(resultado, f"entradas-{M15}"))
+
+
+def test_el_regimen_de_h4_se_pinta_de_fondo_y_se_puede_apagar(
+    entries_run: ImpulseRun, entries_zones: ZonesRun, trades: EntriesRun, tmp_path: Path
+) -> None:
+    resultado = _draw(entries_run, tmp_path, zones=entries_zones, entries=trades)
+
+    assert (
+        _step(resultado, "regimen-encendido")["plot"]["shapes"]
+        > _step(resultado, "regimen-apagado")["plot"]["shapes"]
+    )
+
+
+def test_las_notas_dicen_cuantas_operaciones_hay_y_lo_que_se_juega(
+    entries_run: ImpulseRun, entries_zones: ZonesRun, trades: EntriesRun, tmp_path: Path
+) -> None:
+    notas = _step(
+        _draw(entries_run, tmp_path, zones=entries_zones, entries=trades),
+        f"entradas-{M15}",
+    )["notes"]
+
+    assert "ENTRADAS (fase 3.1)" in notas
+    assert "nunca dos vivas" in notas
+    assert "entraron y salieron en la misma vela" in notas
+    assert "RÉGIMEN DE H4" in notas
+
+
+def test_las_notas_avisan_de_que_la_capa_de_entradas_esta_apagada(
+    entries_run: ImpulseRun, entries_zones: ZonesRun, trades: EntriesRun, tmp_path: Path
+) -> None:
+    """Un gráfico sin operaciones dibujadas no puede quedarse callado."""
+    notas = _step(
+        _draw(entries_run, tmp_path, zones=entries_zones, entries=trades),
+        f"entradas-apagadas-{M15}",
+    )["notes"]
+
+    assert "las ENTRADAS no se están dibujando (capa apagada)" in notas
+
+
+def test_las_entradas_no_se_dibujan_en_la_auditoria_ciega(
+    entries_run: ImpulseRun, entries_zones: ZonesRun, trades: EntriesRun, tmp_path: Path
+) -> None:
+    ciega = _step(
+        _draw(entries_run, tmp_path, zones=entries_zones, entries=trades), "ciega"
+    )
+
+    assert len(ciega["plot"]["traces"]) == 1
+
+
+def test_el_replay_no_dibuja_una_operacion_antes_de_tiempo(
+    entries_run: ImpulseRun, entries_zones: ZonesRun, trades: EntriesRun, tmp_path: Path
+) -> None:
+    """Con las entradas encendidas el replay sigue sin adelantarse al reloj."""
+    resultado = _draw(entries_run, tmp_path, zones=entries_zones, entries=trades)
+    payload = build_payload(
+        entries_run, lateralization=measure(entries_run), zones=entries_zones,
+        entries=trades,
+    )
+    pasos = _replay_steps(resultado)
+    assert pasos
+
+    for paso in pasos:
+        dibujado = paso["plot"]["maxEngineX"]
+        assert dibujado is not None, f"{paso['label']}: no se dibujó ninguna capa"
+        assert _minute(dibujado) <= _clock(payload, paso), paso["label"]
+
+
+def test_una_operacion_de_una_sola_vela_ocupa_esa_vela(
+    entries_run: ImpulseRun, entries_zones: ZonesRun, trades: EntriesRun, tmp_path: Path
+) -> None:
+    """Entrar y salir en la misma vela de M15 no puede dibujarse con ancho cero.
+
+    Es una de cada cuatro operaciones: con el ancho real —cero— el rectángulo del
+    riesgo no se pinta y la operación desaparece del gráfico. Ocupa entonces la
+    vela en la que vivió, ni un minuto más, y va en su propia traza.
+    """
+    payload = build_payload(entries_run, zones=entries_zones, entries=trades)
+    de_una_vela = [
+        item
+        for item in payload["entries"]
+        if "xf" in item and item.get("xe") == item["xf"]
+    ]
+    assert de_una_vela, "la fixture tiene que traer alguna operación de una sola vela"
+
+    paso = _step(
+        _draw(entries_run, tmp_path, zones=entries_zones, entries=trades),
+        f"entradas-{M15}",
+    )
+    trazas = [
+        traza
+        for traza in paso["plot"]["traces"]
+        if traza["name"] == "Operación · riesgo · en una vela"
+    ]
+    assert trazas, _trace_names(paso)
+    assert trazas[0]["dash"] == "dot", "el ancho dibujado tiene que distinguirse del vivido"
+
+    # Cada caja son seis puntos: (a, b, b, a, a, None). El ancho es b - a.
+    puntos = trazas[0]["segments"]
+    assert puntos and len(puntos) % 6 == 0
+    for inicio in range(0, len(puntos), 6):
+        ancho = _minute(puntos[inicio + 1][0]) - _minute(puntos[inicio][0])
+        assert ancho == payload["spans"][M15], puntos[inicio : inicio + 2]
+    assert len(puntos) // 6 == len(de_una_vela)
+
+
+def test_la_etiqueta_escrita_dice_como_acabo_la_operacion(
+    entries_run: ImpulseRun, entries_zones: ZonesRun, trades: EntriesRun, tmp_path: Path
+) -> None:
+    """El resultado va ESCRITO, no sólo en el globo.
+
+    Una operación que se resuelve dentro de su vela no deja nada que mirar si hay
+    que pasarle el ratón por encima para saber cómo acabó.
+    """
+    paso = _step(
+        _draw(entries_run, tmp_path, zones=entries_zones, entries=trades),
+        "entradas-un-dia",
+    )
+    escritas = [
+        texto
+        for traza in paso["plot"]["traces"]
+        if traza["name"] == "Entrada"
+        for texto in (traza["captions"] or [])
+        if texto.startswith("#")
+    ]
+
+    assert escritas, _trace_names(paso)
+    finales = ("OBJETIVO", "STOP", "CIERRE_SEMANAL", "ABIERTA")
+    for texto in escritas:
+        assert any(final in texto for final in finales), texto
+        assert "$" in texto, texto
+
+
+def test_el_globo_del_rechazo_con_ob_dice_de_donde_sale_su_limite(
+    entries_run: ImpulseRun, entries_zones: ZonesRun, trades: EntriesRun, tmp_path: Path
+) -> None:
+    """Ese límite cae FUERA del recuadro del patrón: sin decirlo se lee como un fallo."""
+    paso = _step(
+        _draw(entries_run, tmp_path, zones=entries_zones, entries=trades),
+        "entradas-rechazo-ob",
+    )
+    globos = [
+        texto
+        for traza in paso["plot"]["traces"]
+        if traza["name"] in ENTRY_TRACES
+        for texto in (traza["captions"] or [])
+    ]
+
+    assert globos, _trace_names(paso)
+    dicho = [texto for texto in globos if "EL LÍMITE NO VA EN EL OB" in texto]
+    assert dicho, globos[:2]
+    assert "cierre de la vela que lo crea" in dicho[0]
+    # Y con cuánta holgura, que es un número de la corrida y no del explorador.
+    assert f"{REJECTION_OFFSET:.4f}" in dicho[0], dicho[0]
+
+
+def test_el_globo_del_rechazo_con_ob_dice_a_que_borde_va_su_stop(
+    entries_run: ImpulseRun, entries_zones: ZonesRun, trades: EntriesRun, tmp_path: Path
+) -> None:
+    """En ese setup el stop va al borde INTERIOR, y el dibujo tiene que decirlo:
+    el mismo recuadro con el stop en el otro borde es otra operación."""
+    paso = _step(
+        _draw(entries_run, tmp_path, zones=entries_zones, entries=trades),
+        "entradas-rechazo-ob",
+    )
+    globos = [
+        texto
+        for traza in paso["plot"]["traces"]
+        if traza["name"] in ENTRY_TRACES
+        for texto in (traza["captions"] or [])
+    ]
+
+    assert globos, _trace_names(paso)
+    dicho = [texto for texto in globos if "EL STOP VA A SU BORDE INTERIOR" in texto]
+    assert dicho, globos[:2]
+    assert "donde arranca la mecha" in dicho[0]
+
+
+def test_la_posicion_cerrada_el_viernes_tiene_su_marca_y_su_globo(
+    entries_run: ImpulseRun, entries_zones: ZonesRun, trades: EntriesRun, tmp_path: Path
+) -> None:
+    """Sale del gráfico sin que el precio haya llegado a ningún sitio: sin marca
+    propia y sin globo que lo diga, se lee como un fallo del motor."""
+    paso = _step(
+        _draw(entries_run, tmp_path, zones=entries_zones, entries=trades),
+        "entradas-cierre-viernes",
+    )
+
+    assert "Cierre del viernes" in _trace_names(paso), _trace_names(paso)
+    globos = [
+        texto
+        for traza in paso["plot"]["traces"]
+        if traza["name"] in ENTRY_TRACES or traza["name"] == "Cierre del viernes"
+        for texto in (traza["captions"] or [])
+    ]
+    dicho = [
+        texto for texto in globos if "NO LLEGÓ AL STOP NI AL OBJETIVO" in texto
+    ]
+    assert dicho, globos[:2]
+    assert "viernes a las 17:00 de America/New_York" in dicho[0]
+    assert " R" in dicho[0], "tiene que decir cuántas R se llevó"
+
+
+def _limite_quitado_el_viernes(trades: EntriesRun) -> EntriesRun:
+    """La misma corrida con un límite retirado por el cierre del viernes.
+
+    Que un límite aguante puesto desde la franja de operativa hasta las cinco de
+    la tarde del viernes es raro, y la corrida de la fixture —dieciséis semanas—
+    no da ninguno. Lo que se prueba aquí es el DIBUJO de ese motivo, no que el
+    motor lo produzca —eso lo fija `tests/application/test_entries_trades.py`—,
+    así que se le pone a un límite que sí se quitó.
+    """
+    quitados = [
+        position
+        for position, item in enumerate(trades.entries)
+        if item.cancelled_by is not None
+    ]
+    assert quitados, "la fixture tiene que quitar algún límite"
+    entries = list(trades.entries)
+    entries[quitados[0]] = replace(
+        entries[quitados[0]], cancelled_by=OrderEnd.CIERRE_SEMANAL
+    )
+    return replace(trades, entries=tuple(entries))
+
+
+def test_el_limite_quitado_el_viernes_dice_por_que(
+    entries_run: ImpulseRun, entries_zones: ZonesRun, trades: EntriesRun, tmp_path: Path
+) -> None:
+    paso = _step(
+        _draw(
+            entries_run,
+            tmp_path,
+            zones=entries_zones,
+            entries=_limite_quitado_el_viernes(trades),
+        ),
+        "entradas-limite-viernes",
+    )
+    globos = [
+        texto
+        for traza in paso["plot"]["traces"]
+        if traza["name"] in ENTRY_TRACES or traza["name"] == "Límite quitado"
+        for texto in (traza["captions"] or [])
+    ]
+
+    assert globos, _trace_names(paso)
+    dicho = [texto for texto in globos if "cerró el mercado el viernes" in texto]
+    assert dicho, globos[:2]
+    assert "no se deja ninguna orden puesta el fin de semana" in dicho[0]
+
+
+def test_el_estado_dice_que_el_viernes_no_queda_nada_vivo(
+    entries_run: ImpulseRun, entries_zones: ZonesRun, trades: EntriesRun, tmp_path: Path
+) -> None:
+    """Un gráfico con posiciones que se cierran solas tiene que declarar la regla."""
+    notas = _step(
+        _draw(entries_run, tmp_path, zones=entries_zones, entries=trades),
+        f"entradas-{M15}",
+    )["notes"]
+
+    assert "cerradas el viernes" in notas
+    assert (
+        "el viernes a las 17:00 de America/New_York cierra el mercado y no queda "
+        "nada vivo" in notas
+    )
+
+
+def test_la_cuenta_se_abre_con_la_del_propietario_cuando_hay_operaciones(
+    entries_run: ImpulseRun, entries_zones: ZonesRun, trades: EntriesRun, tmp_path: Path
+) -> None:
+    """50 $ al 17 %: 8,50 $ por operación, que a 1:3 son 25,50 $ de objetivo.
+
+    Es una decisión de la fase 3.1 y viaja con la corrida: una corrida sin
+    operaciones abre la cuenta donde la abría, que es lo que comprueba el test de
+    abajo.
+    """
+    resultado = _draw(entries_run, tmp_path, zones=entries_zones, entries=trades)
+    cuenta = _step(resultado, "ruido-de-salida")["account"]
+
+    assert cuenta["initial"] == "50"
+    assert cuenta["risk"] == "17"
+    assert "riesgo 8,50 $" in cuenta["summary"]
+    assert "se juega 8,50 $ para ganar 25,50 $" in _step(
+        resultado, f"entradas-{M15}"
+    )["notes"]
+
+
+def test_sin_operaciones_la_cuenta_no_cambia_de_riesgo(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    """La cuenta de mano no la mueve una fase que no se está corriendo."""
+    cuenta = _step(_draw(run, tmp_path), "ruido-de-salida")["account"]
+
+    assert cuenta["risk"] == "2"

@@ -6,18 +6,24 @@ que fuera, y hay un test que lo fija. En la fase 2.1 las zonas pasarán a decidi
 la vida y la muerte de los impulsos; hasta que el propietario audite lo que se
 dibuja aquí, la rotura sigue siendo por línea.
 
-Cada ID lleva **dos** zonas: el UL en el lado a favor y el PUL en el lado en
-contra. El PUL es siempre el UL del ID **inmediatamente anterior**, sobre la
-misma vela: lo único que cambia con el sentido de aquel ID es qué tramo de esa
-vela es la zona —su cuerpo si iba al revés, su mecha si iba en el mismo
-sentido—, y eso lo resuelve la geometría del dominio. Sólo se quedan sin PUL los
-primeros ID de cada temporalidad, que no tienen ID anterior.
+Cada ID lleva **dos** zonas: el UL en el lado a favor y, en el lado en contra,
+una sola de las otras dos. Es el PUL cuando el ID anterior iba en el **mismo
+sentido** que éste: su extremo quedó por detrás, así que su UL es el nivel al que
+el precio vuelve. Si aquel ID iba al revés hay que mirar dónde quedó su extremo:
+cuando es el ancla de éste no sirve de nivel y se **hereda la zona en contra de
+aquel ID**, y cuando quedó por detrás del ancla —el giro no lo trajo él sino una
+constitución abortada posterior— el nivel es su propio UL. Las dos se llaman
+APUL. Y hay un tercer APUL: el del ID nacido tras una **constitución abortada**
+con el anterior en su mismo sentido, cuyo nivel sale del último ID interior del
+retroceso anterior, que el detector fue a buscar corriendo la máquina ahí dentro.
+El PUL y el APUL nunca conviven. Sólo se quedan sin ninguna los primeros ID de
+cada temporalidad, que no tienen ID anterior.
 
-Las zonas no necesitan volver a recorrer la historia: el detector ya registró
-qué vela fija cada nivel —`index_extreme` para el UL, `index_penultimate` y
-`penultimate_direction` para el PUL—, así que se derivan de esas velas y del OHLC
-de la temporalidad. Por eso este módulo no toca el detector ni lo vuelve a
-ejecutar.
+Las zonas no necesitan volver a recorrer la historia: el detector ya registró qué
+velas fijan cada nivel —`index_extreme` para el UL, y para la de en contra la
+vela del cuerpo, el sentido de la mecha y la ventana en la que buscar su punta—,
+así que se derivan de esas velas y del OHLC de la temporalidad. Por eso este
+módulo no toca el detector ni lo vuelve a ejecutar.
 
 Sobre las tres unidades de altura: el oro pasó de ~1.200 a ~4.300 USD en el
 histórico, así que una altura en dólares no es comparable entre 2018 y 2025. El
@@ -35,15 +41,19 @@ import pandas as pd
 
 from chronos.application.structure.config import ImpulseConfig
 from chronos.application.structure.detect_impulses import ImpulseRun, TimeframeAnalysis
-from chronos.domain.structure.enums import BreakKind, ImpulseDirection
+from chronos.domain.structure.enums import (
+    AntePenultimateOrigin,
+    BreakKind,
+    ImpulseDirection,
+)
 from chronos.domain.structure.impulse import BreakEvent, DominantImpulse
 from chronos.domain.structure.zones import (
     CandleSeries,
     Zone,
     ZoneBook,
     ZoneKind,
+    against_zone,
     last_zone,
-    penultimate_zone,
 )
 
 #: Columnas que pide el §4, en su orden.
@@ -94,11 +104,12 @@ SURVIVAL_COLUMNS = (
 
 @dataclass(frozen=True, slots=True)
 class ImpulseZones:
-    """Las dos zonas de un impulso: el UL a favor y el PUL en contra.
+    """Las dos zonas de un impulso: el UL a favor y, en contra, el PUL o el APUL.
 
-    El UL existe siempre. El PUL existe siempre que haya un ID anterior del que
-    sacarlo, que son todos menos los primeros de cada temporalidad; `against`
-    devuelve la del lado en contra sin que quien pregunte tenga que mirar cuál.
+    El UL existe siempre. En el lado en contra hay una zona y sólo una: el PUL
+    cuando el ID anterior iba en el mismo sentido y dejó su extremo detrás, y si
+    no el APUL, con los tres orígenes de `AntePenultimateOrigin`. `against`
+    devuelve la que gobierna sin que quien pregunte tenga que mirar cuál.
     """
 
     id_num: int
@@ -106,14 +117,23 @@ class ImpulseZones:
     direction: ImpulseDirection
     year: int
     last: Zone
-    #: `None` sólo cuando no hay ID anterior del que sacarlo —el principio del
-    #: histórico—. Es un estado legítimo, no un fallo: ese ID se rompe por línea
-    #: en el lado en contra.
+    #: El UL del ID anterior cuando aquél iba en el mismo sentido que éste.
+    #: `None` cuando no hay ID anterior del que sacarlo —el principio del
+    #: histórico— y cuando manda el APUL. Lo primero es un estado legítimo, no un
+    #: fallo: ese ID se rompe por línea en el lado en contra.
     penultimate: Zone | None
-    #: Hacia dónde iba el ID del que sale el PUL. Es lo que dice si la zona es el
-    #: cuerpo de aquella vela o su mecha, y se copia del impulso para poder
-    #: contarlo en el informe sin volver a la lista de impulsos.
+    #: El lado en contra cuando no lo lleva el PUL: la zona heredada del ID
+    #: anterior, el UL de aquel ID cuando iba al revés y su extremo quedó por
+    #: detrás del ancla, o la del último ID interior del retroceso tras una
+    #: constitución abortada. Sustituye al PUL, no lo acompaña.
+    ante_penultimate: Zone | None
+    #: Hacia dónde iba el ID anterior. Es lo que dice si este ID lleva PUL —sólo
+    #: si iba en el mismo sentido—. Se copia del impulso para poder contarlo en
+    #: el informe sin volver a la lista de impulsos.
     penultimate_direction: ImpulseDirection | None
+    #: Cuál de los tres APUL lleva, o `None` si no lleva APUL. Lo decidió el
+    #: detector al constituir: por los bordes de la zona no se distinguen.
+    ante_penultimate_origin: AntePenultimateOrigin | None
     #: ATR previo a la constitución del ID, el mismo con el que la fase 1
     #: normaliza su rango. Las dos zonas del ID comparten denominador para que
     #: la comparación de alturas de 7.5 sea entre ellas y no entre dos ATR.
@@ -133,21 +153,36 @@ class ImpulseZones:
         return self.penultimate is not None
 
     @property
-    def against(self) -> Zone | None:
-        """La zona del lado en contra. `None` si ese lado se rompe por línea."""
-        return self.penultimate
+    def has_ante_penultimate(self) -> bool:
+        return self.ante_penultimate is not None
 
     @property
-    def penultimate_is_wick(self) -> bool:
-        """`True` si el PUL es la MECHA del extremo anterior —el UL viejo—.
+    def against(self) -> Zone | None:
+        """La zona del lado en contra. `None` si ese lado se rompe por línea."""
+        return self.penultimate if self.penultimate is not None else self.ante_penultimate
 
-        Pasa cuando aquel ID iba en el mismo sentido que éste: murió por rotura a
-        favor y éste nació más allá, así que lo que mira a este ID es su mecha.
+    @property
+    def against_is_inherited(self) -> bool:
+        """`True` si el APUL es el que le **prestó** el ID anterior.
+
+        Pasa cuando aquel ID iba al revés que éste y su extremo es el ancla de
+        éste, así que no queda ningún nivel detrás y el que vale es el que aquél
+        llevaba. Los otros dos APUL salen de un extremo: el del propio ID
+        anterior contrario cuando sí quedó por detrás del ancla, y el del ID
+        interior de un retroceso. Quien dibuja no puede distinguirlos por los
+        bordes, y son tres historias distintas.
         """
-        return (
-            self.penultimate is not None
-            and self.penultimate_direction is self.direction
-        )
+        return self.ante_penultimate_origin is AntePenultimateOrigin.INHERITED
+
+    @property
+    def against_is_counter_extreme(self) -> bool:
+        """`True` si el APUL es el UL del ID anterior, que iba al revés.
+
+        El caso del giro que no trajo aquel ID sino una constitución abortada
+        posterior: su extremo quedó por detrás del ancla de éste, así que sigue
+        siendo el nivel al que volver.
+        """
+        return self.ante_penultimate_origin is AntePenultimateOrigin.COUNTER_EXTREME
 
     @property
     def zones_overlap(self) -> bool:
@@ -184,9 +219,19 @@ class TimeframeZones:
         return tuple(item for item in self.items if item.has_penultimate)
 
     @property
-    def with_wick_penultimate(self) -> tuple[ImpulseZones, ...]:
-        """ID cuyo PUL es la mecha del extremo anterior y no su cuerpo."""
-        return tuple(item for item in self.items if item.penultimate_is_wick)
+    def with_ante_penultimate(self) -> tuple[ImpulseZones, ...]:
+        """ID que llevan APUL en vez de PUL, por cualquiera de los dos motivos."""
+        return tuple(item for item in self.items if item.has_ante_penultimate)
+
+    @property
+    def with_inherited_ante_penultimate(self) -> tuple[ImpulseZones, ...]:
+        """ID cuyo APUL es el que les prestó un ID anterior que iba al revés."""
+        return tuple(item for item in self.items if item.against_is_inherited)
+
+    @property
+    def with_counter_extreme_ante_penultimate(self) -> tuple[ImpulseZones, ...]:
+        """ID cuyo APUL es el UL del ID anterior, que iba al revés y quedó detrás."""
+        return tuple(item for item in self.items if item.against_is_counter_extreme)
 
     @property
     def without_against_zone(self) -> tuple[ImpulseZones, ...]:
@@ -296,25 +341,15 @@ def _zones_of_impulse(
             index_extreme=impulse.index_extreme_at_constitution,
             ts_constitution=impulse.ts_constitution,
         ),
-        # El PUL sale de la vela del extremo del ID anterior: el UL viejo, que
-        # el detector ya dejó apuntado al constituir éste, con el sentido que
-        # llevaba aquel ID. Ese sentido no decide si hay PUL —lo hay siempre que
-        # haya ID anterior—, decide qué tramo de la vela es la zona, y de eso se
-        # encarga el dominio. Aquí no se re-deriva nada.
-        penultimate=(
-            penultimate_zone(
-                series,
-                id_num=impulse.id_num,
-                timeframe=impulse.timeframe,
-                direction=impulse.direction,
-                index_previous_extreme=impulse.index_penultimate,
-                previous_direction=impulse.penultimate_direction,
-                ts_constitution=impulse.ts_constitution,
-            )
-            if impulse.has_penultimate
-            else None
-        ),
+        # Y la zona en contra, que es una sola: el PUL cuando el ID anterior iba
+        # en el mismo sentido, y si no el APUL —el que le prestó aquel ID, su
+        # propio UL si quedó por detrás del ancla, o el del último ID interior de
+        # su retroceso—. Cuál es y sobre qué velas ya lo decidió el detector al
+        # constituir; aquí no se re-deriva nada.
+        penultimate=_against_zone_of(series, impulse, ZoneKind.PENULTIMATE),
+        ante_penultimate=_against_zone_of(series, impulse, ZoneKind.ANTE_PENULTIMATE),
         penultimate_direction=impulse.penultimate_direction,
+        ante_penultimate_origin=impulse.ante_penultimate_origin,
         atr=atr_by_id.get(impulse.id_num, float("nan")),
         anchor=impulse.anchor,
         extreme=impulse.extreme,
@@ -324,6 +359,39 @@ def _zones_of_impulse(
         ts_end=impulse.ts_end,
         exit_break=impulse.exit_break_kind,
     )
+
+
+def _against_zone_of(
+    series: CandleSeries, impulse: DominantImpulse, kind: ZoneKind
+) -> Zone | None:
+    """La zona en contra del impulso si es de ese tipo, y si no `None`.
+
+    Un ID lleva una sola zona en contra, así que de las dos llamadas —PUL y
+    APUL— una devuelve siempre `None`. Las dos velas, el sentido de la mecha y
+    la ventana en la que buscar la punta vienen del impulso: el detector las
+    apuntó al constituir y no se pueden re-derivar después.
+    """
+    if _against_kind(impulse) is not kind:
+        return None
+    return against_zone(
+        series,
+        kind=kind,
+        id_num=impulse.id_num,
+        timeframe=impulse.timeframe,
+        direction=impulse.direction,
+        index_body=impulse.index_against,
+        tip_window=impulse.against_tip_window,
+        zone_direction=impulse.against_direction,
+        ts_constitution=impulse.ts_constitution,
+    )
+
+
+def _against_kind(impulse: DominantImpulse) -> ZoneKind | None:
+    if impulse.has_penultimate:
+        return ZoneKind.PENULTIMATE
+    if impulse.has_ante_penultimate:
+        return ZoneKind.ANTE_PENULTIMATE
+    return None
 
 
 def _atr_by_id(analysis: TimeframeAnalysis) -> dict[int, float]:
@@ -396,7 +464,8 @@ def _survivals(
 
     Qué zona le toca a cada rotura no es una elección: la rotura a favor cruza el
     extremo, y la zona que hay pegada al extremo es el UL; la rotura en contra
-    cruza el ancla, y la zona que hay detrás en ese lado es el PUL.
+    cruza el ancla, y la zona que hay detrás en ese lado es la que gobierne ese
+    lado en ese ID, el PUL o el APUL.
     """
     by_id = {item.id_num: item for item in items}
     rows: list[dict[str, object]] = []
@@ -413,12 +482,13 @@ def _survivals(
                 "tipo_rotura": event.kind.value,
                 "ts_rotura": event.timestamp,
                 "cierre": event.close,
-                # Sin PUL el nombre sigue siendo PUL: es la zona que FALTABA, y
-                # la columna `sin_zona` de al lado ya dice que no había ninguna.
+                # El nombre sale de la zona que había. Sin ninguna en el lado en
+                # contra se escribe PUL: es la zona que FALTABA, y la columna
+                # `sin_zona` de al lado ya dice que no había ninguna.
                 "zona": (
                     ZoneKind.LAST.value
                     if event.kind is BreakKind.A_FAVOR
-                    else ZoneKind.PENULTIMATE.value
+                    else (zone.kind.value if zone is not None else ZoneKind.PENULTIMATE.value)
                 ),
                 "borde_interior": None if zone is None else zone.inner,
                 "borde_exterior": None if zone is None else zone.outer,
@@ -464,15 +534,16 @@ HEIGHT_UNITS = (
 def coverage_by_year(measurement: TimeframeZones) -> pd.DataFrame:
     """§7.1 — qué lleva cada ID en cada uno de sus dos lados.
 
-    El lado en contra tiene dos estados: PUL, o nada porque no hay ID anterior
-    del que sacarlo.
+    El lado en contra tiene tres estados: PUL, APUL —el ID nació tras una
+    constitución abortada—, o nada porque no hay ID anterior del que sacarlo.
+    Los tres suman `impulsos`.
 
     **La cifra que manda de la fase 2.0 es `pct_sin_zona`**: en la fase 2.1 esos
     impulsos —y sólo ésos— se romperán por línea en el lado en contra.
     """
     columns = [
         "anio", "impulsos", "con_ul", "pct_ul", "con_pul", "pct_pul",
-        "sin_zona", "pct_sin_zona",
+        "con_apul", "pct_apul", "sin_zona", "pct_sin_zona",
     ]
     if not measurement.items:
         return pd.DataFrame(columns=columns)
@@ -480,7 +551,8 @@ def coverage_by_year(measurement: TimeframeZones) -> pd.DataFrame:
     def row(label: str, group: Sequence[ImpulseZones]) -> dict[str, object]:
         total = len(group)
         with_pul = sum(1 for item in group if item.has_penultimate)
-        without = total - with_pul
+        with_apul = sum(1 for item in group if item.has_ante_penultimate)
+        without = total - with_pul - with_apul
         return {
             "anio": label,
             "impulsos": total,
@@ -491,6 +563,8 @@ def coverage_by_year(measurement: TimeframeZones) -> pd.DataFrame:
             "pct_ul": 1.0 if total else float("nan"),
             "con_pul": with_pul,
             "pct_pul": with_pul / total if total else float("nan"),
+            "con_apul": with_apul,
+            "pct_apul": with_apul / total if total else float("nan"),
             "sin_zona": without,
             "pct_sin_zona": without / total if total else float("nan"),
         }
@@ -545,10 +619,11 @@ def heights_by_year(measurement: TimeframeZones, kind: ZoneKind) -> pd.DataFrame
 def height_comparison(measurement: TimeframeZones) -> pd.DataFrame:
     """§7.5 — UL frente a PUL sobre los ID que tienen las dos zonas.
 
-    Se espera que el PUL salga mayor cuando es el **cuerpo** de su vela —el ID
-    anterior iba al revés— y parecido al UL cuando es una mecha —iba en el mismo
-    sentido—, porque entonces es el UL viejo. Las excepciones se cuentan; no se
-    explican aquí.
+    El PUL es el UL de otro ID, así que las dos alturas son comparables. Se
+    espera que el PUL salga algo mayor: comparte el borde del cuerpo con aquel UL
+    pero su punta llega a la mecha más lejana de toda la vida de aquel ID, no
+    sólo a la de su vela del extremo. Las excepciones se cuentan; no se explican
+    aquí.
     """
     columns = [
         "anio", "pares", "ul_mediana_atr", "pul_mediana_atr", "pul_mayor", "pct_pul_mayor",

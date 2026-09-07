@@ -1,4 +1,4 @@
-"""Informe de la fase 2.0 en texto plano (§7): zonas UL y PUL.
+"""Informe de la fase 2.0 en texto plano (§7): zonas UL, PUL y APUL.
 
 Se lee junto a las capturas del propietario, así que dice siempre lo mismo antes
 de cualquier número: que esta fase **sólo detecta y dibuja**, que ninguna zona ha
@@ -46,6 +46,7 @@ _HEIGHTS = {
 _HEIGHT_SECTIONS = {
     ZoneKind.LAST: ("7.3", "UL"),
     ZoneKind.PENULTIMATE: ("7.4", "PUL"),
+    ZoneKind.ANTE_PENULTIMATE: ("7.4b", "APUL"),
 }
 _COMPARISON = {
     "pares": _COUNT, "ul_mediana_atr": ",.3f", "pul_mediana_atr": ",.3f",
@@ -74,8 +75,8 @@ def render_zone_report(
     """Devuelve el informe completo de la fase 2.0 en texto plano."""
     if not zones.enabled:
         return (
-            "FASE 2.0 · ZONAS UL Y PUL\n"
-            "========================\n\n"
+            "FASE 2.0 · ZONAS UL, PUL Y APUL\n"
+            "===============================\n\n"
             "Las zonas están DESACTIVADAS por configuración (`zones.enabled: false`).\n"
             "No se ha calculado ninguna y el módulo 1 sale exactamente como en la fase 1.\n"
         )
@@ -87,6 +88,7 @@ def render_zone_report(
         _coverage_block(zones),
         _height_block(zones, ZoneKind.LAST),
         _height_block(zones, ZoneKind.PENULTIMATE),
+        _height_block(zones, ZoneKind.ANTE_PENULTIMATE),
         _comparison_block(zones),
         _overlap_block(zones),
         _survival_block(zones),
@@ -115,8 +117,8 @@ def _header(run: ImpulseRun, zones: ZonesRun, generated_at: datetime) -> str:
         for timeframe, item in zones.per_timeframe.items()
     )
     return (
-        "FASE 2.0 · ZONAS UL Y PUL · SÓLO DETECCIÓN\n"
-        "=========================================\n\n"
+        "FASE 2.0 · ZONAS UL, PUL Y APUL · SÓLO DETECCIÓN\n"
+        "===============================================\n\n"
         f"{body}\n\n"
         f"{counts}\n\n"
         "El `config_hash` es el mismo de la fase 1 y eso es deliberado: las zonas no\n"
@@ -151,6 +153,14 @@ def _scope_block() -> str:
         "          MECHA, el UL viejo tal cual.\n"
         "      No se estira a ninguna vela de margen: esa regla es la del extremo recién\n"
         "      fijado. Sólo se quedan sin PUL los primeros ID de cada temporalidad.\n\n"
+        " APUL el lado en contra del ID nacido tras una CONSTITUCIÓN ABORTADA. Ahí el ID\n"
+        "      anterior va en el mismo sentido que éste, pero no por continuación: en\n"
+        "      medio había un ID contrario que iba a nacer y una vela lo mató antes. El\n"
+        "      nivel se va a buscar donde estaba: se corre la máquina de ID DENTRO del\n"
+        "      retroceso del ID anterior —de su extremo a la vela que lo rompió— y se\n"
+        "      toma el extremo del último ID interior contrario. La zona es su MECHA, de\n"
+        "      la base del cuerpo a la punta, hacia el lado de la rotura en contra.\n"
+        "      SUSTITUYE al PUL: un ID lleva una zona en contra y sólo una.\n\n"
         "`borde_interior` es el que un precio que sale del rango encuentra primero y\n"
         "`borde_exterior` el que tiene que cruzar para dejar la zona atrás. El UL se\n"
         "recorre a favor del impulso y el PUL en contra, que son los dos límites por los\n"
@@ -169,8 +179,8 @@ def _coverage_block(zones: ZonesRun) -> str:
         "tiene extremo. Se cuenta igualmente porque cualquier cosa distinta del 100 %",
         "sería un fallo del motor y hay que poder verlo.",
         "",
-        "El lado en contra tiene DOS estados: `con_pul` y `sin_zona`. Las dos columnas",
-        "suman `impulsos`.",
+        "El lado en contra tiene TRES estados: `con_pul`, `con_apul` y `sin_zona`. Las",
+        "tres columnas suman `impulsos`.",
         "",
         ">>> `pct_sin_zona` ES LA CIFRA MÁS IMPORTANTE DE ESTA FASE. En la fase 2.1 esos",
         ">>> impulsos —y sólo ésos— se romperán POR LÍNEA en el lado en contra, porque",
@@ -191,10 +201,12 @@ def _coverage_block(zones: ZonesRun) -> str:
         "sentido contrario: el arranque de cada temporalidad y nada más. Una cifra alta",
         "aquí sería un fallo del motor.",
         "",
-        "`con_apul` cuenta los ID cuyo ID ANTERIOR IBA EN EL MISMO SENTIDO —rotura a",
-        "favor, o una constitución abortada que giró la pierna dos veces—, y que por eso",
-        "tienen que retroceder un ID más para encontrar su nivel en contra. No es un",
-        "defecto ni una carencia: es la continuación de tendencia.",
+        "`con_apul` cuenta los ID nacidos tras una CONSTITUCIÓN ABORTADA: el ID contrario",
+        "que tenía que dar el nivel iba a nacer y una vela lo mató antes, así que el nivel",
+        "se va a buscar dentro del retroceso del ID anterior —el extremo del último ID",
+        "interior contrario— en vez de al PUL, que ahí apuntaría al lado a favor. No es",
+        "un defecto ni una carencia: es la estructura que el gráfico enseña y el motor no",
+        "llegó a apuntar.",
     ]
     return "\n".join(lines) + "\n"
 
@@ -221,12 +233,21 @@ def _height_block(zones: ZonesRun, kind: ZoneKind) -> str:
             "",
             "`extendidas` cuenta los que se estiraron a la vela siguiente.",
         ]
-    else:
+    elif kind is ZoneKind.PENULTIMATE:
         lines += [
             "",
             "El PUL no tiene columna de altura cero ni de extensión: cubre la vela entera,",
             "así que sólo sería plano si la vela no tuviera recorrido, y no se extiende",
             "nunca.",
+        ]
+    else:
+        lines += [
+            "",
+            "El APUL es la MECHA de la vela del extremo del último ID interior del retroceso",
+            "anterior, así que puede salir plano —esa vela no dejó mecha por ese lado— y",
+            "tampoco se extiende. Sólo lo llevan los ID nacidos tras una constitución",
+            "abortada, así que esta tabla tiene pocas filas: si sale vacía es que en el",
+            "histórico no cayó ninguna, no que falte el cálculo.",
         ]
     lines.append("")
     for timeframe, item in zones.per_timeframe.items():
@@ -358,8 +379,9 @@ def _edge_cases_block(zones: ZonesRun) -> str:
         "",
         render_table(_edge_counts(zones), formats={
             "id": _COUNT, "ul_altura_cero": _COUNT, "ul_extendidos": _COUNT,
-            "sin_zona": _COUNT, "pul_de_mecha": _COUNT, "pul_doji": _COUNT,
-            "pul_plano": _COUNT,
+            "sin_zona": _COUNT, "apul_heredado": _COUNT,
+            "apul_extremo_contrario": _COUNT, "apul_retroceso": _COUNT,
+            "contra_doji": _COUNT, "contra_plana": _COUNT,
         }),
         "",
         "",
@@ -374,22 +396,36 @@ def _edge_cases_block(zones: ZonesRun) -> str:
         "zonas distingue «no existe» de «no lo he calculado», y preguntarlo lanza",
         "`LookaheadError` en vez de devolver nada. Es la cifra de 7.1.",
         "",
-        "PUL DE MECHA (`pul_de_mecha`). El ID anterior iba en el MISMO sentido que éste",
-        "—murió por rotura A FAVOR y éste nació más allá—, así que lo que mira a este ID",
-        "no es el cuerpo de aquella vela sino su mecha: la zona es el UL viejo tal cual.",
-        "DECISIÓN del propietario: el lado en contra es siempre el extremo del ID de al",
-        "lado, y lo único que cambia es qué tramo de su vela se marca. OJO: ese PUL puede",
-        "quedar POR ENCIMA de la línea del ancla, y entonces la rotura en contra por zona",
-        "se ADELANTA a la de la línea en vez de evitarla.",
+        "APUL HEREDADO (`apul_heredado`). El ID anterior iba AL REVÉS que éste y su",
+        "extremo no queda por detrás sino delante: es el ancla de éste y no un nivel al",
+        "que volver. DECISIÓN del propietario: ahí no hay PUL, y el nivel en contra es",
+        "el que aquel ID llevaba —los mismos dos precios, leídos desde este lado—. La",
+        "cadena puede venir de varios ID atrás; si llega a uno que tampoco tenía zona,",
+        "éste se rompe por línea.",
         "",
-        "DOJI EN POSICIÓN DE PUL (`pul_doji`). La vela del PUL es la que fijó el extremo",
-        "del ID anterior, y el módulo 1 declara el doji neutro: no mueve ningún extremo,",
+        "APUL DEL EXTREMO CONTRARIO (`apul_extremo_contrario`). El ID anterior iba al",
+        "revés pero su extremo SÍ quedó por detrás del ancla de éste: no murió de un",
+        "giro sino por rotura a favor, y el giro lo trajo después una constitución",
+        "abortada, así que el ancla se fijó más allá de aquel extremo. DECISIÓN del",
+        "propietario: ahí el nivel es el UL de aquel ID —el último extremo que quedó",
+        "detrás—, y no la zona que él llevaba, que está mucho más lejos.",
+        "",
+        "APUL DEL RETROCESO (`apul_retroceso`). El ID anterior iba en el MISMO sentido",
+        "pero en medio se abortó una constitución: faltaba el ID contrario que tenía que",
+        "dar el nivel, y se fue a buscarlo corriendo la máquina dentro de aquel retroceso.",
+        "OJO: ese APUL cae DENTRO del rango del ID nuevo, así que la rotura en contra por",
+        "zona se ADELANTA a la de la línea en vez de evitarla. Con la regla del",
+        "propietario desde la fase 3.0 ese lado no rompe por zona, así que sólo se dibuja.",
+        "",
+        "DOJI EN LA ZONA EN CONTRA (`contra_doji`). La vela de esa zona es la que fijó el",
+        "extremo de un ID, y el módulo 1 declara el doji neutro: no mueve ningún extremo,",
         "así que la columna sale en cero. Se cuenta igualmente porque cualquier otra",
         "cifra sería un fallo del motor.",
         "",
-        "PUL DE ALTURA CERO (`pul_plano`). La vela del extremo anterior abrió y cerró en",
-        "el mismo precio. DECISIÓN: la misma que en el UL —se conserva con los dos bordes",
-        "en el mismo precio— y entonces el lado en contra se comporta igual que la línea.",
+        "ZONA EN CONTRA DE ALTURA CERO (`contra_plana`). Aquella vela cerró en su propio",
+        "extremo y no dejó mecha por ese lado, ni siquiera en el resto de la vida de su",
+        "ID. DECISIÓN: la misma que en el UL —se conserva con los dos bordes en el mismo",
+        "precio— y entonces el lado en contra se comporta igual que la línea.",
     ]
     return "\n".join(lines) + "\n"
 
@@ -397,7 +433,8 @@ def _edge_cases_block(zones: ZonesRun) -> str:
 def _edge_counts(zones: ZonesRun) -> pd.DataFrame:
     columns = [
         "temporalidad", "id", "ul_altura_cero", "ul_extendidos", "sin_zona",
-        "pul_de_mecha", "pul_doji", "pul_plano",
+        "apul_heredado", "apul_extremo_contrario", "apul_retroceso", "contra_doji",
+        "contra_plana",
     ]
     rows = [
         {
@@ -406,17 +443,21 @@ def _edge_counts(zones: ZonesRun) -> pd.DataFrame:
             "ul_altura_cero": sum(1 for zoned in item.items if zoned.last.is_flat),
             "ul_extendidos": sum(1 for zoned in item.items if zoned.last.extended),
             "sin_zona": len(item.without_against_zone),
-            "pul_de_mecha": len(item.with_wick_penultimate),
-            "pul_doji": sum(
+            "apul_heredado": len(item.with_inherited_ante_penultimate),
+            "apul_extremo_contrario": len(item.with_counter_extreme_ante_penultimate),
+            "apul_retroceso": len(item.with_ante_penultimate)
+            - len(item.with_inherited_ante_penultimate)
+            - len(item.with_counter_extreme_ante_penultimate),
+            "contra_doji": sum(
                 1
                 for zoned in item.items
-                if zoned.penultimate is not None
-                and zoned.penultimate.defining_body is BodyDirection.DOJI
+                if zoned.against is not None
+                and zoned.against.defining_body is BodyDirection.DOJI
             ),
-            "pul_plano": sum(
+            "contra_plana": sum(
                 1
                 for zoned in item.items
-                if zoned.penultimate is not None and zoned.penultimate.is_flat
+                if zoned.against is not None and zoned.against.is_flat
             ),
         }
         for timeframe, item in zones.per_timeframe.items()

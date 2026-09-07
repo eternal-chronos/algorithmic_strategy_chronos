@@ -24,6 +24,7 @@ from chronos.application.entries.signal_stats import (
     SignalStudy,
     study_signals,
 )
+from chronos.application.entries.trades import EntriesRun, detect_entries
 from chronos.application.structure import (
     baseline_comparison,
     break_comparison,
@@ -449,7 +450,9 @@ def _print_zones(zones: ZonesRun) -> None:
     table.add_column("Temporalidad", style="dim")
     table.add_column("ID", justify="right")
     table.add_column("Con PUL", justify="right")
-    table.add_column("PUL de mecha", justify="right")
+    table.add_column("Con APUL", justify="right")
+    table.add_column("APUL heredado", justify="right")
+    table.add_column("APUL extremo contrario", justify="right")
     table.add_column("SIN ZONA", justify="right")
     table.add_column("UL altura cero", justify="right")
     table.add_column("UL extendidos", justify="right")
@@ -460,7 +463,9 @@ def _print_zones(zones: ZonesRun) -> None:
             timeframe,
             f"{total:,}",
             f"{len(item.with_penultimate):,}",
-            f"{len(item.with_wick_penultimate):,}",
+            f"{len(item.with_ante_penultimate):,}",
+            f"{len(item.with_inherited_ante_penultimate):,}",
+            f"{len(item.with_counter_extreme_ante_penultimate):,}",
             f"{without:,} ({without / total:.1%})" if total else "—",
             f"{sum(1 for zoned in item.items if zoned.last.is_flat):,}",
             f"{sum(1 for zoned in item.items if zoned.last.extended):,}",
@@ -631,11 +636,14 @@ def entries_command(
     esté dentro de él.
 
     Corre el módulo con las zonas encendidas, con **ID propio en H1** —lo que esta
-    fase añade al reparto— y con la rotura **por línea**: el ID muere cuando una
-    vela de su misma temporalidad cierra más allá de su extremo o de su ancla, no
-    cuando el precio atraviesa el UL o el PUL. El hash de configuración es por
-    tanto otro, y a propósito, para que ninguna corrida de esta fase se confunda
-    con la línea base de la fase 1.
+    fase añade al reparto— y con la rotura del propietario: **el UL manda el lado
+    a favor y el ancla el lado en contra**. El ID no cambia mientras una vela no
+    CIERRE más allá del UL entero —una mecha que lo perfora y vuelve a cerrar
+    dentro no lo rompe— y muere en contra cuando una vela cierra más allá de la
+    línea de la que arranca. La zona en contra se dibuja y sostiene el toque,
+    pero no mata al ID. El hash de configuración es por tanto otro, y a
+    propósito, para que ninguna corrida de esta fase se confunda con la línea
+    base de la fase 1.
     """
     with _handled():
         corrida = _cascade_pipeline(config, skip_tz_audit)
@@ -687,19 +695,21 @@ def _cascade_pipeline(
 
     cascade_config = replace(
         run_config,
-        # El ID se rompe POR LÍNEA. Lo mata una vela de SU MISMA temporalidad que
-        # CIERRA más allá de una de sus dos líneas —el extremo por el lado a
-        # favor, el ancla por el contrario—: la mecha no cuenta, y una vela que
-        # la perfora y vuelve a cerrar dentro no rompe nada. Las zonas siguen
-        # encendidas porque de ellas cuelgan el toque del PUL y el veto diario,
-        # pero ya no deciden la vida del ID.
-        rules=replace(run_config.rules, break_by_zone=False),
+        # La regla del propietario: A FAVOR manda el UL y EN CONTRA el ancla. Lo
+        # mata una vela de SU MISMA temporalidad que CIERRA más allá del borde
+        # exterior del UL —atravesando la zona entera, así que perforarla con
+        # mecha y volver a cerrar dentro no rompe nada— o más allá de la línea
+        # del ancla. La zona en contra sigue encendida porque de ella cuelgan el
+        # toque y el veto diario, pero no decide la vida del ID.
+        rules=replace(
+            run_config.rules, break_by_zone=True, break_against_by_zone=False
+        ),
         zones=ZonesConfig(enabled=True),
         charts=with_hourly_structure(run_config.charts),
     )
     console.print(
-        "[dim]Corrida con la rotura por LÍNEA (cierre), las zonas encendidas y "
-        "el ID de H1...[/dim]"
+        "[dim]Corrida con el UL mandando a favor, el ancla en contra, las zonas "
+        "encendidas y el ID de H1...[/dim]"
     )
     run = DetectDominantImpulses(cascade_config).execute(
         aggregated, audit=audit, provenance=provenance, aggregation_notes=notes
@@ -735,6 +745,83 @@ def _print_cascade(cascade: CascadeRun) -> None:
     console.print(
         "[dim]SON SEÑALES: no hay entradas, ni stops, ni targets, ni resultados. "
         "Se auditan en el explorador, capa «Cascada de entrada».[/dim]"
+    )
+
+
+@structure_app.command("operaciones")
+def trades_command(
+    config: Annotated[Path, typer.Option("--config", "-c")] = DEFAULT_CONFIG,
+    output: Annotated[Path, typer.Option("--salida", "-o")] = Path("now/fase31"),
+    skip_tz_audit: Annotated[bool, typer.Option("--skip-tz-audit")] = False,
+) -> None:
+    """Fase 3.1 — las ENTRADAS: límite, stop y objetivo, dibujados sobre el precio.
+
+    H4 dice hacia dónde se busca —hacia su zona en contra o hacia su UL, según
+    dónde esté el precio—, H1 arma el setup —su zona en contra si va en la
+    dirección buscada, o su UL si va al revés y lo ha rechazado— y M15 afina la
+    entrada con un OB o un FVG. Todas las operaciones son 1:3, una por ID de H1 y
+    nunca más de una viva. El Diario no interviene en esta fase.
+
+    **No se publica ninguna métrica**: ni R esperada, ni aciertos, ni curva. Lo
+    que se entrega es el explorador con la capa «Entradas» encendida, para
+    auditarlas una a una en el replay antes de que ningún número diga nada.
+    """
+    with _handled():
+        corrida = _cascade_pipeline(config, skip_tz_audit)
+        if corrida is None:
+            return
+        run_config, run, zones, cascade = corrida
+        entries = detect_entries(run, zones)
+        _print_entries(entries)
+
+        output.mkdir(parents=True, exist_ok=True)
+        explorer = output / "explorador_operaciones.html"
+        explorer.write_text(
+            render_explorer(
+                run,
+                run_config.reporting.max_explorer_bars,
+                lateralization=measure(run),
+                zones=zones,
+                cascade=cascade,
+                entries=entries,
+            ),
+            encoding="utf-8",
+        )
+        console.print(f"\nExplorador: [bold]{explorer}[/bold]")
+
+
+def _print_entries(entries: EntriesRun) -> None:
+    """El recuento crudo. Ni porcentajes, ni expectativa, ni veredicto.
+
+    El propietario ha pedido explícitamente que no se le den resultados hasta
+    tener el dibujo ajustado: lo único que hace falta saber aquí es que la
+    corrida ha producido operaciones y dónde mirarlas.
+    """
+    if not entries.enabled:
+        console.print(
+            "[yellow]No hay entradas que calcular: hacen falta las zonas y los "
+            "dos ID, el de H4 y el de H1.[/yellow]"
+        )
+        return
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Concepto")
+    table.add_column("Cuántas", justify="right")
+    for concept, count in entries.counts().items():
+        table.add_row(concept, f"{count:,}")
+    console.print("\n[bold]Entradas (H4 manda, H1 arma, M15 afina):[/bold]")
+    console.print(table)
+    console.print(
+        f"[dim]Sólo se arma límite de {entries.window.label}. Todas 1:"
+        f"{entries.risk_reward:g}, una por ID de H1 y nunca más de una viva.[/dim]"
+    )
+    console.print(
+        f"[dim]El {entries.market_week.label} cierra el mercado y no queda nada "
+        "vivo: la posición se cierra al precio de esa vela y el límite se "
+        "quita.[/dim]"
+    )
+    console.print(
+        "[dim]SIN MÉTRICAS a propósito: lo que se entrega es el dibujo. Se "
+        "auditan en el explorador, capa «Entradas», con el replay.[/dim]"
     )
 
 

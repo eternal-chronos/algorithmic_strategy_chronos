@@ -148,13 +148,18 @@ class BreakLevelSource(StrEnum):
 
     Con `BREAK_BY_ZONE = false` es siempre `linea` y la columna no dice nada
     nuevo. Con la regla nueva separa las formas de morir: atravesando una zona
-    entera —UL a favor, PUL en contra—, o por línea porque en ese lado no había
-    ninguna zona que la sustituyera, que es lo que le pasa al ancla de los
+    entera —UL a favor, PUL o APUL en contra—, o por línea porque en ese lado no
+    había ninguna zona que la sustituyera, que es lo que le pasa al ancla de los
     primeros ID del histórico.
 
-    El lado en contra es **siempre** la zona del extremo del ID inmediatamente
-    anterior: su UL viejo pasa a ser el PUL de éste. Sólo se rompe por línea
-    mientras no hay ningún ID detrás del que sacarla.
+    El lado en contra es **casi siempre** la zona del extremo del ID
+    inmediatamente anterior: su UL viejo pasa a ser el PUL de éste. La excepción
+    es el ID que nace tras una **constitución abortada**: ahí, entre los dos ID
+    del mismo sentido, hubo un ID contrario que iba a existir y una vela mató
+    antes de que naciera, y el nivel en contra sale de la estructura interior de
+    aquel retroceso. Esa zona es el APUL y sustituye al PUL: nunca conviven.
+
+    Sólo se rompe por línea mientras no hay ningún ID detrás del que sacarla.
     """
 
     #: El nivel es la línea del ID: el extremo a favor, el ancla en contra.
@@ -165,6 +170,34 @@ class BreakLevelSource(StrEnum):
     #: tramo que mira a este ID —el cuerpo si aquél iba al revés, su mecha si iba
     #: en el mismo sentido—.
     PENULTIMATE = "PUL"
+    #: Borde exterior de la zona APUL: el lado en contra de un ID que no tiene
+    #: PUL. `AntePenultimateOrigin` dice de dónde sale en cada caso.
+    ANTE_PENULTIMATE = "APUL"
+
+
+class AntePenultimateOrigin(StrEnum):
+    """De dónde sale el APUL de un ID. Los tres motivos son excluyentes.
+
+    El PUL tiene una sola historia —el UL del ID anterior, que iba en el mismo
+    sentido— y el APUL tres, que por los bordes de la zona no se distinguen. El
+    detector lo decide al constituir y el dato viaja con el impulso: quien dibuja
+    o audita no puede reconstruirlo sin recorrer la cadena de impulsos hacia
+    atrás.
+    """
+
+    #: El ID anterior iba al revés y su extremo es el ancla de éste, así que no
+    #: queda ningún nivel detrás: se hereda el que aquel ID llevaba en su propio
+    #: lado en contra, con los mismos dos precios. La cadena puede venir de
+    #: varios ID atrás.
+    INHERITED = "heredado"
+    #: El ID anterior iba al revés pero su extremo quedó por DETRÁS del ancla de
+    #: éste: no murió de un giro sino por rotura a favor, y el giro lo trajo
+    #: después una constitución abortada. El nivel es su propio UL.
+    COUNTER_EXTREME = "extremo_contrario"
+    #: El ID anterior iba en el MISMO sentido pero en medio se abortó una
+    #: constitución: falta el ID contrario que tenía que dar el nivel, y sale del
+    #: último ID **interior** del retroceso de aquél.
+    PULLBACK = "retroceso"
 
 
 class OverlapPriority(StrEnum):

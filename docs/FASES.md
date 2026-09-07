@@ -49,11 +49,108 @@ implementada, testeada y con un backtest reproducible.
 |---|---|---|---|---|
 | 0 | `ema_cross` | Baseline de referencia para validar el motor | Hecha | — |
 | 1 | Impulso dominante | Detección del ID en Diario y H4 (H1 y M15 se dibujan con el de H4): rotura → limbo → constitución | Implementada y corrida sobre 2018–2025 de Dukascopy; **pendiente de auditoría visual del propietario** | `chronos structure detect` |
-| 2.0 | Zonas UL y PUL | Detección y dibujo de las dos zonas de cada ID; la rotura sigue siendo por línea | Implementada sobre 2018–2025; **pendiente de auditoría visual del propietario** | `chronos structure zonas` |
-| 2.1 | Rotura por zona | La zona sustituye a la línea como nivel de rotura del ID: el UL a favor, el PUL en contra | Implementada sobre 2018–2025; **pendiente de auditoría visual del propietario** | `chronos structure rotura-por-zona` |
+| 2.0 | Zonas UL, PUL y APUL | Detección y dibujo de las dos zonas de cada ID —en contra, el PUL si el ID anterior iba igual, y si no el APUL: la zona heredada de aquél, su UL cuando su extremo quedó por detrás del ancla, o la del retroceso tras una constitución abortada—; la rotura sigue siendo por línea | Implementada sobre 2018–2025; **pendiente de auditoría visual del propietario** | `chronos structure zonas` |
+| 2.1 | Rotura por zona | La zona sustituye a la línea como nivel de rotura del ID: el UL a favor, el PUL —o el APUL— en contra | Implementada sobre 2018–2025; **pendiente de auditoría visual del propietario** | `chronos structure rotura-por-zona` |
 | 2.2 | — | *(aparcada: FVG)* | — | — |
-| 3.0 | Señales de entrada | La cascada H4 → H1 rehecha desde cero, y **sólo señales**: toque del PUL de H4 → se espera a que el **ID de H1** —que en esta fase lleva detector propio— se ponga en la dirección del de H4 y se marca su PUL → **el precio toca ese PUL de H1 y ahí salta la señal**, en el instante del toque y no al cierre de la vela. Con el PUL diario de **veto** direccional. Sin entradas, sin stops, sin targets, sin métricas | Implementada sobre 2018–2025; **pendiente de auditoría visual del propietario** | `chronos structure entradas` |
-| 3.1 | Entradas | Convertir las señales de la 3.0 en operaciones. **No empieza hasta que la 3.0 esté auditada** | — | — |
+| 3.0 | Señales de entrada | La cascada H4 → H1 rehecha desde cero, con la rotura del propietario —**el UL manda a favor y el ancla en contra**— y **sólo señales**: toque de la zona en contra de H4 → se espera a que el **ID de H1** —que en esta fase lleva detector propio— se ponga en la dirección del de H4 y se marca su PUL → **el precio toca ese PUL de H1 y ahí salta la señal**, en el instante del toque y no al cierre de la vela. Con el PUL diario de **veto** direccional. Sin entradas, sin stops, sin targets, sin métricas | Implementada sobre 2018–2025; **pendiente de auditoría visual del propietario** | `chronos structure entradas` |
+| 3.1 | Entradas | Las operaciones: **H4 dice hacia dónde se busca** —hacia su zona en contra o hacia su UL, según dónde esté el precio—, **H1 arma el setup** —su zona en contra si va en la dirección buscada, su UL si va al revés y lo rechaza— y **M15 afina** con un OB o un FVG. Límite en el borde cercano del patrón, stop en el borde exterior de la zona de H1 —el **interior** en el rechazo del UL afinado con un OB— y objetivo siempre a 1:3. Una por ID de H1, nunca dos vivas. **El viernes al cerrar el mercado se cierra todo.** El Diario queda fuera | Implementada sobre 2018–2025; **pendiente de auditoría visual del propietario** | `chronos structure operaciones` |
+
+### Fase 3.1 — entradas
+
+Es lo primero del proyecto que **abre y cierra posiciones**. No publica ni una
+métrica y es a propósito: lo pidió el propietario. Hasta que el dibujo esté
+ajustado, una expectativa en R sólo diría lo buena que es una regla que todavía
+se está escribiendo. Lo que se entrega es el explorador con la capa «Entradas»
+encendida y el replay, para mirarlas una a una.
+
+**No es la cascada de la 3.0 convertida en órdenes.** La 3.0 baja de un toque de
+la zona de H4 a un toque del PUL de H1 y señala ahí. Esta fase lee otra cosa: un
+ID de H4 vive **entre dos sitios** —su zona en contra, a donde el precio vuelve,
+y su UL, a donde iba— y se busca siempre **en la dirección del sitio al que el
+precio va**. La cascada sigue calculándose y dibujándose al lado, sin tocar nada.
+
+**El régimen de H4**, con un ID alcista (el bajista es su espejo):
+
+1. recién constituido, se buscan **ventas** hasta que el precio toque su zona en
+   contra —el PUL o el APUL—;
+2. tocada, se buscan **compras** hasta que llegue a su UL;
+3. llegado al UL **no se busca nada** y se espera al **cierre de esa vela de
+   H4**: si cierra sin atravesar el UL entero lo ha rechazado y se vuelven a
+   buscar ventas; si cierra más allá, ha roto el ID y ahí se acaba.
+
+Tocar se mide con mechas en M15, como en la 3.0. El cierre de la vela de H4 es la
+única de las tres transiciones que espera a un cierre.
+
+**El setup de H1, de dos maneras y sólo dos.** Con ventas buscadas: o el ID de H1
+es **bajista** y se mira su **zona en contra** (forma `ZONA`), o es **alcista** y
+ha **rechazado su UL** —mecha dentro, cuerpo fuera— y se mira ese **UL** (forma
+`RECHAZO_UL`). No hay tercera.
+
+**M15 afina.** Dentro de esa zona se busca un **OB** —la última vela contraria
+antes de que el precio se fuera— o un **FVG** —el hueco de tres velas—, y de los
+disponibles se coge el **más reciente**, que es «lo más cercano que hay ahí». Un
+patrón que el precio ya atravesó deja de valer.
+
+**Los precios.** Límite en el borde **cercano** del patrón; **stop en el borde
+exterior de la zona de H1**, que es el sitio más cercano en el que el setup deja
+de existir —lo dijo el propietario para el rechazo («el UL de H1») y vale igual
+para la zona en contra—; objetivo **siempre a 1:3**.
+
+**La excepción del rechazo afinado con un OB.** Ahí ni el límite ni el stop van
+donde van siempre. El límite sale del **cierre de la vela que crea el OB** —la
+que se va y convierte a la anterior en bloque—, separado la holgura fija de la
+config (0,175 $), y queda por tanto fuera del recuadro del patrón: lo pidió el
+propietario mirando la operación nº 855, donde el OB sobresalía del UL y el
+límite acababa en un precio al que el mercado ya no volvía. Y el **stop va al
+borde INTERIOR** de la zona, donde arranca la mecha del UL: cuando se baja a M15
+a esperar el OB, la punta de esa mecha queda tan lejos que el riesgo es casi todo
+mecha vieja. El FVG y la forma `ZONA` no cambian.
+
+**Una y sólo una.** Una operación por ID de H1 y nunca más de una viva. El límite
+se quita cuando muere el ID de H1 del que cuelga, cuando cambia el régimen de H4
+o cuando **cierra el mercado el viernes**. La operación abierta la cierran el
+objetivo, el stop o ese mismo cierre del viernes.
+
+**El viernes se cierra todo.** Al cerrar el mercado —viernes a las 17:00 de Nueva
+York— no queda nada vivo: la posición abierta se cierra **al precio de la última
+vela de la semana**, sin esperar al stop ni al objetivo, y el límite puesto se
+quita. El fin de semana no se opera y el hueco de la apertura del domingo no lo
+decide ninguna regla de esta estrategia. El cierre semanal no manda sobre el
+stop: si esa misma vela llegó al stop o al objetivo, la operación acabó ahí. Y la
+última vela del histórico no es un cierre semanal aunque caiga en viernes —ahí lo
+que se acabó son los datos—. El corte se resuelve sobre la última vela que hay
+antes del viernes a las 17:00, no sobre una vela de las 17:00 que no existe: así
+cae donde el histórico dice, con sus festivos y sus huecos.
+
+**Lo que se ha supuesto y no está cerrado.** El propietario dijo «pon el stop
+donde mejor lo veas y luego iremos afinando», así que queda declarado:
+
+- el stop va a un borde de la zona de H1, sin holgura, y no al borde del patrón
+  de M15: con éste salían stops de céntimos —un FVG de M15 mide a veces dos velas
+  de nada— y con eso no se puede auditar un dibujo. Cuál de los dos bordes lo
+  decide el setup: el exterior siempre, salvo en el rechazo afinado con un OB,
+  donde el propietario pidió el interior por distancia;
+- el límite va en el borde cercano del patrón, no dentro de él, salvo en ese
+  mismo rechazo con OB;
+- si una vela de M15 toca el stop y el objetivo, manda el **stop**; y una vela
+  que llena el límite y alcanza el stop en el mismo cuarto de hora entra y sale
+  perdiendo;
+- **la franja de operativa de la 3.0 sigue puesta**: sólo se arma límite de 03:00
+  a 12:00 de Nueva York. Uno ya puesto se llena a cualquier hora **de la
+  semana**, porque una orden en el mercado no mira el reloj —pero el viernes se
+  quita, que es cuando el mercado sí lo mira—. Si el propietario quiere las
+  entradas de madrugada, se quita la franja y no se toca nada más;
+- el OB le da al precio **tres velas de M15** para irse; es el único número que
+  no sale de la geometría.
+
+**En el explorador** son dos capas nuevas: «Entradas», con el límite punteado
+mientras estuvo puesto, el rectángulo rojo del riesgo y el verde del objetivo
+desde que entró hasta que salió y un punto en el final —✦ objetivo, ✕ stop y ⧗
+el cierre del viernes—; y «Régimen de H4», el
+fondo verde/rojo/gris que dice hacia dónde se buscaba en cada tramo. La **cuenta
+simulada** abre en esta fase con **50 $ y el 17 %** —8,50 $ por operación, 25,50 $
+de objetivo—, que es con lo que el propietario quiere mirarlas; el dinero escrito
+en cada operación sale de ahí y cambiarlo no cambia ni una operación.
 
 ### Fase 3.0 — señales de entrada
 
@@ -62,11 +159,12 @@ entrada» del explorador, para que el propietario mire si la máquina está vien
 lo que ve él antes de que nada abra una posición.
 
 **Son dos escalones, no tres.** El Diario no es un paso de la cascada: no hace
-falta tocar su PUL para poder mirar H4. La lectura, con un ID **alcista** (el
+falta tocar su zona en contra para poder mirar H4. La lectura, con un ID **alcista** (el
 bajista es su espejo):
 
-1. el precio **toca el PUL de un ID de H4** —el `TOQUE_PUL` de la fase 2.0, sin
-   redefinirlo— y se abre la búsqueda en H1;
+1. el precio **toca la zona en contra de un ID de H4** —el `TOQUE_PUL` de la
+   fase 2.0, sin redefinirlo, sobre el PUL o el APUL de ese ID— y se abre la
+   búsqueda en H1;
 2. en H1 se **espera a que el ID de H1 vaya en la misma dirección que el de H4**:
    si al bajar manda un ID bajista, hay que esperar a que se rompa y se constituya
    el alcista. En cuanto ese ID de H1 existe, se marca su PUL.
@@ -79,6 +177,27 @@ bajista es su espejo):
    en la zona. Se espera **mientras dure la ventana de H4** y no más: cerrada la
    búsqueda, el PUL de H1 marcado deja de valer aunque su ID siga vivo. **Un toque
    por confirmación y ni uno más.**
+
+**La rotura del ID, tal como la fija el propietario.** El lado a favor lo manda
+el **UL**: el ID no cambia mientras una vela no **cierre más allá del rectángulo
+entero**, así que una mecha que lo perfora y vuelve a cerrar dentro no rompe
+nada. El lado en contra se queda en el **ancla**, que es donde arranca el ID: ahí
+manda la línea y no la zona. La zona en contra —el PUL o el APUL— se sigue
+marcando y dibujando porque de ella cuelgan el toque de la cascada y el veto
+diario, pero ya no mata a ningún ID. Es `break_by_zone: true` con
+`break_against_by_zone: false`, y lo fija la corrida de la fase, no el YAML.
+
+**El lado en contra ya no es siempre el PUL.** El PUL es el UL del ID
+inmediatamente anterior **cuando aquél iba en el mismo sentido**: su extremo
+quedó por detrás y es el nivel al que el precio vuelve. Si iba al revés hay que
+mirar dónde quedó ese extremo: cuando es el ancla de éste no sirve y se
+**hereda** la zona en contra que llevaba aquel ID, y cuando quedó por detrás del
+ancla —murió por rotura a favor y el giro lo trajo una constitución abortada
+posterior— el nivel es su propio UL. Las dos se llaman APUL. La cascada lee «la zona en contra» sin
+preguntar cuál de las dos es. Además la **punta** de esa zona ya no es la de una
+sola vela: llega hasta la mecha más lejana que el precio alcanzó mientras el ID
+que la fijó estuvo vivo, sin contar la vela que lo rompió. Los detalles y los
+casos límite están en [`MODULO_2_ZONAS.md`](MODULO_2_ZONAS.md).
 
 **H1 lleva ID propio en esta fase.** Es el cambio de fondo: en H1 se marca el ID
 exactamente igual que en el Diario y en H4 —mismo detector, mismas reglas, mismas
@@ -101,8 +220,8 @@ auditarlo.
 **La búsqueda dura hasta romper el PUL o hasta llegar al UL.** Decisión del
 propietario. La ventana se abre en el toque y se cierra con lo primero de tres:
 
-1. una vela de H4 **cierra más allá del borde exterior del PUL**, o sea lo
-   atraviesa entero;
+1. una vela de H4 **cierra más allá del borde exterior de la zona en contra**
+   —el PUL o el APUL—, o sea la atraviesa entera;
 2. el precio **toca el UL del mismo ID de H4** —el extremo, el sitio al que se
    iba—, y basta con tocarlo: se mide con mechas en la vela fina y no espera al
    cierre de la vela de H4. Es lo que impide seguir buscando indefinidamente

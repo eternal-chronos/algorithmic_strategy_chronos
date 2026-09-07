@@ -308,6 +308,14 @@ class ImpulseRulesConfig:
     #: de comportamiento del proyecto, así que va apagado por defecto y su
     #: apagado reproduce el hash y los recuentos archivados.
     break_by_zone: bool = False
+    #: FASE 3.0. Sólo significa algo con `break_by_zone: true`. `True` = las dos
+    #: zonas mandan, que es la fase 2.1 tal cual. `False` = **el UL manda el lado
+    #: a favor y el ancla el lado en contra**, que es la regla del propietario
+    #: desde la fase 3.0: el ID no cambia mientras no se atraviese entero el UL,
+    #: y en contra sigue mandando la línea de donde arranca el ID. La zona en
+    #: contra se sigue clasificando y dibujando —de ella cuelgan el toque y la
+    #: cascada—, pero no mata al ID.
+    break_against_by_zone: bool = True
     #: FASE 2.1, **parámetro abierto**. Qué lado se evalúa primero cuando una
     #: misma vela cumple las dos condiciones de rotura, que sólo puede pasar con
     #: las dos zonas solapadas en precio. Con `break_by_zone: false` no cambia
@@ -428,6 +436,12 @@ class ImpulseConfig:
         if not self.rules.break_by_zone:
             del rules["break_by_zone"]
             del rules["overlap_priority"]
+        # Lo mismo con el lado en contra: `true` es lo que hacía la fase 2.1
+        # antes de que el parámetro existiera, así que se omite del hash y los
+        # hashes archivados de esa fase se conservan. La regla de la fase 3.0
+        # —el ancla manda en contra— sí cambia el resultado y entra en el hash.
+        if self.rules.break_against_by_zone:
+            rules.pop("break_against_by_zone", None)
         payload = {
             "symbol": self.symbol,
             "structure_side": self.structure_side,
@@ -469,6 +483,10 @@ class ImpulseConfig:
             "(fase 2.1: false = rotura por línea, la línea base; true = manda la zona)",
         ]
         if self.rules.break_by_zone:
+            decisions.append(
+                f"BREAK_AGAINST_BY_ZONE = {str(self.rules.break_against_by_zone).lower()} "
+                "(fase 3.0: false = el UL manda a favor y el ANCLA en contra)"
+            )
             decisions.append(
                 f"OVERLAP_PRIORITY = {self.rules.overlap_priority.value} "
                 "(fase 2.1 §2: qué lado se evalúa primero con las dos zonas solapadas)"

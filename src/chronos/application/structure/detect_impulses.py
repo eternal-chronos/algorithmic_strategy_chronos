@@ -204,6 +204,7 @@ class DetectDominantImpulses:
             leg_start_mode=rules.leg_start_mode,
             warmup_bars=rules.warmup_bars,
             break_by_zone=rules.break_by_zone,
+            break_against_by_zone=rules.break_against_by_zone,
             overlap_priority=rules.overlap_priority,
             zone_levels=zone_levels,
         )

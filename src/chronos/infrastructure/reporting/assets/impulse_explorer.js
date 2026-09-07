@@ -73,19 +73,22 @@
       visible: "current",
       limbo: false, marks: true, contacts: false, mid: false, wrong: false,
       frame: true, zones: true,
-      signals: true, cascade: true, avoided: false, steps: false
+      signals: false, cascade: false, avoided: false, steps: false,
+      entries: true, regime: true
     },
     normal: {
       visible: "pair",
       limbo: true, marks: true, contacts: false, mid: false, wrong: true,
       frame: true, zones: true,
-      signals: true, cascade: true, avoided: true, steps: true
+      signals: true, cascade: true, avoided: true, steps: true,
+      entries: true, regime: true
     },
     all: {
       visible: "all",
       limbo: true, marks: true, contacts: true, mid: true, wrong: true,
       frame: true, zones: true,
-      signals: true, cascade: true, avoided: true, steps: true
+      signals: true, cascade: true, avoided: true, steps: true,
+      entries: true, regime: true
     }
   };
 
@@ -136,6 +139,14 @@
      * niveles de ruido: es lo que se está auditando en esta fase. Son SEÑALES,
      * no entradas: el proyecto sigue sin abrir ni cerrar nada. */
     cascade: true,
+    /* Fase 3.1. Las OPERACIONES: el límite, el stop y el objetivo de cada
+     * entrada, con lo que hizo el precio después. Nace encendida en los tres
+     * niveles de ruido: es lo que se está auditando en esta fase, y es lo
+     * ÚNICO del explorador que abre y cierra posiciones. */
+    entries: true,
+    /* Y el fondo sobre el que se leen: hacia dónde se buscaba en cada tramo,
+     * según dónde estaba el precio dentro del ID de H4. */
+    regime: true,
     /* Fase 2.1. Las roturas evitadas son lo primero que hay que auditar de la
      * regla nueva, así que la capa nace encendida cuando la corrida trae alguna.
      * Con `break_by_zone: false` no hay ninguna y la casilla ni se enseña. */
@@ -200,11 +211,25 @@
     account: {
       initial: 50,
       mode: "percent",   // percent | cash
+      // El valor de salida de la herramienta de mano. La corrida puede traer
+      // otro en `DATA.account` —la fase 3.1 la abre con 50 $ al 17 %, que es
+      // con lo que el propietario mira sus entradas— y ése manda.
       risk: 2,
       trades: [],
       copied: null       // resultado del último «Copiar», para poder decirlo
     }
   };
+
+  /* La corrida puede traer con qué cuenta se mira —capital y riesgo por
+   * operación—: es una decisión de la fase que se está auditando, no del
+   * explorador, y por eso viene en el payload en vez de estar escrita aquí. Sin
+   * ella la cuenta arranca donde arrancaba y sigue siendo una herramienta de
+   * mano. El propietario la puede cambiar igual: esto es el valor de salida. */
+  if (DATA.account) {
+    Object.keys(DATA.account).forEach(function (key) {
+      state.account[key] = DATA.account[key];
+    });
+  }
 
   var timer = null;    // temporizador de la reproducción automática
 
@@ -865,7 +890,8 @@
    * El resto de los ID siguen enseñando su MARCO, que no es la zona.
    *
    * Cada zona va en dos tramos, con la misma convención que las líneas del ID en
-   * B.1: relleno sólido desde que la zona NACE —la constitución del ID— hasta
+   * B.1 (el UL continuo, el PUL a rayas y el APUL punteado): relleno sólido
+   * desde que la zona NACE —la constitución del ID— hasta
    * que el ID muere, que es exactamente cuando existe, y contorno atenuado desde
    * la vela que la define hasta ese nacimiento. La zona en contra cuelga de una
    * vela anterior al ID —el extremo de un ID previo—, así que ese tramo
@@ -898,8 +924,8 @@
    * hay zonas de dos —las de H4 sobre H1, las de H1 sobre M15— y lo primero que
    * hay que poder decir es de quién es cada caja. Qué zona es se lee en el trazo
    * del borde y en el globo: el UL continuo y el PUL a rayas. */
-  var ZONE_ALPHA = { UL: 0.26, PUL: 0.14 };
-  var ZONE_DASH = { UL: "solid", PUL: "dash" };
+  var ZONE_ALPHA = { UL: 0.26, PUL: 0.14, APUL: 0.14 };
+  var ZONE_DASH = { UL: "solid", PUL: "dash", APUL: "dot" };
 
   /* Un polígono por zona dentro de una sola traza por (temporalidad, tipo): con
    * `fill: toself` y separadores nulos, Plotly las dibuja todas sin multiplicar
@@ -957,19 +983,41 @@
     bucket.text.push(caption, caption, caption, caption, caption, "");
   }
 
-  /* Qué es cada zona. El PUL tiene dos lecturas y las dos son la MISMA regla
-   * —el extremo del ID anterior— con distinta geometría: la zona es el tramo de
-   * aquella vela que MIRA a este ID, y cuál es lo dice `wick`, que viene
-   * calculado del motor. */
+  /* Qué es cada zona. Las tres son tramos de MECHA: el UL de un ID, del borde
+   * del cuerpo a la punta. Lo que cambia es de qué ID sale. El APUL tiene TRES
+   * historias y el motor dice cuál con `apu`: la zona que le prestó el ID
+   * anterior —porque aquél iba al revés y su extremo es el ancla de éste—, el UL
+   * de ese mismo ID contrario cuando su extremo sí quedó por detrás del ancla, o
+   * la del último ID INTERIOR del retroceso cuando en medio se abortó una
+   * constitución. */
   var ZONE_WHAT = {
     UL: "el extremo de ESTE ID: el tramo de mecha de la vela que lo fijó, del " +
       "borde del cuerpo a la punta",
-    PUL: "el lado EN CONTRA: la vela que fijó el extremo del ID ANTERIOR",
-    PUL_BODY: "el CUERPO de esa vela, porque aquel ID iba AL REVÉS que éste y " +
-      "su mecha apunta al otro lado",
-    PUL_WICK: "su MECHA —el UL viejo tal cual—, porque aquel ID iba en el MISMO " +
-      "sentido: murió por rotura a favor y éste nació más allá"
+    PUL: "el lado EN CONTRA: el UL del ID ANTERIOR, que iba en el MISMO sentido " +
+      "—murió por rotura a favor y éste nació más allá, así que su extremo " +
+      "quedó por detrás—",
+    APUL: "el lado EN CONTRA de un ID que no tiene PUL",
+    APUL_HEREDADO: "el ID anterior iba AL REVÉS, así que su extremo es el ANCLA " +
+      "de éste y no un nivel al que volver: este ID HEREDA la zona en contra " +
+      "que llevaba aquél, con los mismos dos precios",
+    APUL_EXTREMO_CONTRARIO: "el ID anterior iba AL REVÉS pero su extremo quedó " +
+      "POR DETRÁS del ancla de éste —no murió de un giro sino por rotura a " +
+      "favor, y el giro lo trajo después una CONSTITUCIÓN ABORTADA—, así que el " +
+      "nivel es el UL de aquel ID",
+    APUL_RETROCESO: "nació tras una CONSTITUCIÓN ABORTADA: el ID que tenía que " +
+      "dar este nivel iba a nacer ahí y una vela lo mató antes, así que el " +
+      "nivel se fue a buscar DENTRO del retroceso del ID anterior",
+    CONTRA_MECHA: "la punta se estira a la mecha más lejana que alcanzó aquel " +
+      "ID en toda su vida, no sólo a la de su vela del extremo"
   };
+
+  /* Cuál de los tres APUL es. Los payloads viejos no traen `apu` y ahí se dice
+   * el del retroceso, que es lo que el motor sabía cuando se generaron. */
+  function anteWhat(origin) {
+    if (origin === "heredado") { return ZONE_WHAT.APUL_HEREDADO; }
+    if (origin === "extremo_contrario") { return ZONE_WHAT.APUL_EXTREMO_CONTRARIO; }
+    return ZONE_WHAT.APUL_RETROCESO;
+  }
 
   function zoneCaption(zone, timeframe, before) {
     var head = before
@@ -979,9 +1027,8 @@
     var body = "Zona " + zone.k + " del ID " + timeframe + " nº " + zone.id +
       " · " + zone.d +
       "<br>" + ZONE_WHAT[zone.k] +
-      (zone.k === "PUL"
-        ? "<br>" + (zone.wick ? ZONE_WHAT.PUL_WICK : ZONE_WHAT.PUL_BODY)
-        : "") +
+      (zone.k === "APUL" ? "<br>" + anteWhat(zone.apu) : "") +
+      (zone.k === "UL" ? "" : "<br>" + ZONE_WHAT.CONTRA_MECHA) +
       "<br>interior " + price(zone.i) + " · exterior " + price(zone.o) +
       "<br>altura " + price(zone.hi - zone.lo) +
       "<br>la define la vela de " + stamp(zone.xd) +
@@ -1113,6 +1160,10 @@
       return "<br>en contra: SIN ZONA, no hay ningún ID anterior del que salga " +
         "la vela" +
         "<br>rompe por la línea del ancla";
+    }
+    if (impulse.az === "APUL") {
+      return "<br>en contra: APUL" + manda +
+        "<br>NO tiene PUL: " + anteWhat(impulse.ah);
     }
     return "<br>en contra: PUL" + manda;
   }
@@ -1265,11 +1316,15 @@
     traces.push(breakTrace(breaks, "favor", "UL", "ROTURA_A_FAVOR", "triangle-up-open", COLORS.ink));
     traces.push(breakTrace(breaks, "contra", "linea", "ROTURA_EN_CONTRA", "x", COLORS.muted));
     traces.push(breakTrace(breaks, "contra", "PUL", "ROTURA_EN_CONTRA", "x-open", COLORS.muted));
+    /* El APUL lleva SÍMBOLO PROPIO. Es otra regla —el ID nació tras una
+     * constitución abortada y su nivel sale del retroceso anterior— y meterla en
+     * la misma traza que el PUL diría que el motor rompió por donde no rompió. */
+    traces.push(breakTrace(breaks, "contra", "APUL", "ROTURA_EN_CONTRA", "x-dot", COLORS.muted));
     return traces.filter(Boolean);
   }
 
   /* `source` es el ORIGEN EXACTO del nivel que rompió, tal como lo escribió el
-   * motor: `linea` es la regla de la fase 1 y `UL` o `PUL` la de la 2.1.
+   * motor: `linea` es la regla de la fase 1 y `UL`, `PUL` o `APUL` la de la 2.1.
    * Con `break_by_zone` apagado todas caen en `linea` y las demás salen
    * vacías. */
   function breakTrace(breaks, kind, source, name, symbol, color) {
@@ -1292,6 +1347,11 @@
               "histórico no tienen PUL)"
             : "")
           : "<br>por ZONA " + item.src + ": la atravesó entera" +
+            (item.src === "APUL"
+              ? "<br>este ID no tenía PUL: nació tras una constitución abortada, " +
+                "así que su lado en contra lo llevaba el APUL, dentro del " +
+                "retroceso del ID anterior"
+              : "") +
             "<br>línea del ID en " + price(item.ln);
         return name + " (" + primary() + ")<br>" + stamp(item.x) +
           "<br>ID roto: " + item.id + " (" + item.d + ")" +
@@ -1666,6 +1726,17 @@
    * lo que había cuando se generaron. */
   function zoneName(item) { return item.zk || "PUL"; }
 
+  /* Por qué esa zona se llama APUL y no PUL. Se dice en la marca porque cambia
+   * de dónde sale el nivel; cuál de los tres APUL es lo dice el globo de la
+   * propia zona, que es quien lleva ese dato. */
+  function anteNote(item) {
+    return item.zk === "APUL"
+      ? "<br>es un APUL, no un PUL: el ID anterior no iba en su mismo sentido, o " +
+        "entre los dos se abortó una constitución, así que el nivel no es el UL " +
+        "de aquél sin más (el globo de la zona dice de cuál de los tres sale)"
+      : "";
+  }
+
   function cascadeCaption(item) {
     var style = CASCADE_STYLE[item.k];
     var text = style.title + "<br>" + stamp(item.x) +
@@ -1679,7 +1750,8 @@
         item.k === "H4_DESCARTADO" || item.k === "TOQUE_PUL_H1") {
       text += "<br>zona " + zoneName(item) + " [" + price(item.lo) + ", " +
         price(item.hi) + "] · borde interior " + price(item.lvl) +
-        "<br>la mecha llegó a " + price(item.r) + " · cierre " + price(item.c);
+        "<br>la mecha llegó a " + price(item.r) + " · cierre " + price(item.c) +
+        anteNote(item);
     }
     if (item.k === "H4_DESCARTADO") {
       text += "<br>va EN CONTRA de la zona diaria vigente: mientras el precio no " +
@@ -1716,6 +1788,497 @@
         "hay señal, viva o no la zona de H1";
     }
     return text + "<br>SÓLO SEÑAL: no abre ni cierra ninguna operación";
+  }
+
+  // --- Entradas (fase 3.1) ---------------------------------------------------
+
+  /* Las OPERACIONES. Es lo primero del proyecto que abre algo: hay un límite, un
+   * stop y un objetivo, y una vela decide cómo acaba. Todo viene CALCULADO del
+   * motor —precios, fechas y resultado—; aquí sólo se elige cómo se pinta.
+   *
+   * Cada operación se dibuja en tres tiempos, que son los tres que se auditan:
+   *   1. el LÍMITE puesto: una raya punteada al precio de entrada, desde la vela
+   *      en que se armó hasta que se llenó o se quitó, con el patrón de M15 del
+   *      que sale dibujado como recuadro;
+   *   2. la OPERACIÓN viva: el rectángulo rojo del riesgo (entrada -> stop) y el
+   *      verde del objetivo (entrada -> objetivo), desde que entró hasta que
+   *      salió;
+   *   3. el FINAL: un punto en el objetivo o en el stop.
+   *
+   * El dinero de cada rectángulo lo pone la CUENTA SIMULADA de la barra —capital
+   * y riesgo por operación—, no el motor: el mismo dibujo con otro capital dice
+   * otras cifras y no cambia ni una operación. */
+  function hasEntries() { return DATA.hasEntries === true; }
+
+  function entriesOf() { return DATA.entries || []; }
+
+  function regimesOf() { return DATA.regimes || []; }
+
+  function riskReward() { return DATA.riskReward || 3; }
+
+  /* La temporalidad en la que se miden las entradas: la más fina de la corrida,
+   * M15 en el reparto. Es la que dice cuándo se supo cada cosa, y por eso el
+   * replay no puede dibujar un límite antes de que cierre su vela de M15. */
+  function entrySource() { return DATA.charts[DATA.charts.length - 1]; }
+
+  /* Hasta cuándo ocupa sitio en el gráfico: lo último que le pasó. `null`
+   * mientras siga puesta o abierta al final del histórico. */
+  function entryEnd(item) {
+    if (item.xe !== undefined) { return item.xe; }
+    if (item.xc !== undefined) { return item.xc; }
+    return null;
+  }
+
+  /* Una operación que ENTRA Y SALE dentro de la misma vela de M15 —una de cada
+   * cuatro lo hace— no tiene ancho: sus rectángulos medirían cero y la
+   * operación desaparecería del gráfico justo cuando más importa. */
+  function sameBar(item) {
+    return item.xf !== undefined && item.xe !== undefined && item.xe === item.xf;
+  }
+
+  /* Hasta dónde llega el dibujo de la operación viva, o `null` si seguía abierta
+   * al acabarse el histórico. La de una sola vela ocupa ESA vela entera, y su
+   * borde va punteado para decir que ese ancho es dibujo y no tiempo vivido:
+   * dentro del cuarto de hora no se sabe en qué orden se movió el precio. */
+  function entryLive(item) {
+    if (item.xe === undefined) { return null; }
+    return sameBar(item) ? item.xe + span(entrySource()) : item.xe;
+  }
+
+  function visibleEntries(edges) {
+    if (blindfolded() || !state.entries || !hasEntries()) { return []; }
+    if (!zonesAvailable()) { return []; }
+    var source = entrySource();
+    return entriesOf().filter(function (item) {
+      // El límite se pone al CERRAR su vela de M15: antes no existe.
+      if (pending(item.x, source, edges)) { return false; }
+      var end = entryEnd(item);
+      return (end === null ? edges.hi : end) >= edges.lo && item.x <= edges.hi;
+    });
+  }
+
+  /* Con pocas operaciones a la vista cada una lleva su etiqueta escrita; con
+   * muchas, sólo el globo. Es la diferencia entre auditar una entrada y mirar
+   * ocho años de rectángulos: el número tapa el precio en cuanto se acumulan. */
+  var ENTRY_LABELS = 12;
+
+  function entryTraces(range) {
+    var edges = window_(range);
+    var visible = visibleEntries(edges);
+    if (!visible.length) { return []; }
+    var named = visible.length <= ENTRY_LABELS;
+    // Las que se resolvieron dentro de una sola vela van en trazas propias:
+    // mismo color, borde punteado y su entrada en la leyenda. No es un adorno,
+    // es la diferencia entre una operación que se vio venir y una que no.
+    var vividas = visible.filter(function (item) { return !sameBar(item); });
+    var relampago = visible.filter(function (item) { return sameBar(item); });
+    return [
+      entryPatternTrace(visible, edges),
+      entryBoxTrace(vividas, edges, "objetivo", "t", COLORS.bullish, false),
+      entryBoxTrace(vividas, edges, "riesgo", "s", COLORS.bearish, false),
+      entryBoxTrace(relampago, edges, "objetivo", "t", COLORS.bullish, true),
+      entryBoxTrace(relampago, edges, "riesgo", "s", COLORS.bearish, true),
+      entryLimitTrace(visible, edges),
+      entryLineTrace(visible, edges, named),
+      entryMarkerTrace(visible, "fill"),
+      entryMarkerTrace(visible, "OBJETIVO"),
+      entryMarkerTrace(visible, "STOP"),
+      entryMarkerTrace(visible, "CIERRE_SEMANAL"),
+      entryMarkerTrace(visible, "cancel")
+    ].filter(Boolean);
+  }
+
+  /* El patrón de M15 que afina la entrada: el OB o el FVG, del que sale el
+   * precio del límite. Se dibuja desde la vela que lo define —que queda por
+   * detrás— hasta que la operación entra o el límite se quita. */
+  function entryPatternTrace(entries, edges) {
+    var bucket = { x: [], y: [], text: [] };
+    entries.forEach(function (item) {
+      var end = entryEnd(item);
+      var a = iso(item.xp);
+      var b = iso(clip(end === null ? edges.hi : end, edges));
+      var caption = entryCaption(item);
+      bucket.x.push(a, b, b, a, a, null);
+      bucket.y.push(item.plo, item.plo, item.phi, item.phi, item.plo, null);
+      bucket.text.push(caption, caption, caption, caption, caption, "");
+    });
+    if (!bucket.x.length) { return null; }
+    return {
+      type: "scatter", mode: "lines", name: "Patrón M15 de la entrada",
+      x: bucket.x, y: bucket.y, text: bucket.text,
+      hoverinfo: "text", hoverlabel: { align: "left" }, connectgaps: false,
+      fill: "toself", fillcolor: rgba(COLORS.muted, 0.12),
+      line: { color: COLORS.muted, width: 1, dash: "dot" }
+    };
+  }
+
+  /* El rectángulo del riesgo o el del objetivo, de la entrada al nivel que
+   * toque, desde que la operación entra hasta que sale. Sin entrada no hay
+   * rectángulo: un límite que no se llenó no arriesgó nada. */
+  function entryBoxTrace(entries, edges, name, level, colour, flash) {
+    var bucket = { x: [], y: [], text: [] };
+    var source = entrySource();
+    entries.forEach(function (item) {
+      if (item.xf === undefined || pending(item.xf, source, edges)) { return; }
+      var end = entryLive(item);
+      var stop = end === null ? edges.hi : end;
+      var a = iso(item.xf);
+      var b = iso(clip(stop, edges));
+      var caption = entryCaption(item);
+      bucket.x.push(a, b, b, a, a, null);
+      bucket.y.push(item.e, item.e, item[level], item[level], item.e, null);
+      bucket.text.push(caption, caption, caption, caption, caption, "");
+    });
+    if (!bucket.x.length) { return null; }
+    return {
+      type: "scatter", mode: "lines",
+      name: "Operación · " + name + (flash ? " · en una vela" : ""),
+      x: bucket.x, y: bucket.y, text: bucket.text,
+      hoverinfo: "text", hoverlabel: { align: "left" }, connectgaps: false,
+      fill: "toself", fillcolor: rgba(colour, 0.18),
+      line: { color: rgba(colour, 0.55), width: 1, dash: flash ? "dot" : "solid" }
+    };
+  }
+
+  /* El LÍMITE mientras estuvo puesto y sin llenarse: de la vela en que se armó a
+   * la que lo llenó o lo quitó. Es la raya que hay que poder ver desaparecer. */
+  function entryLimitTrace(entries, edges) {
+    var x = [], y = [], text = [];
+    entries.forEach(function (item) {
+      var stop = item.xf !== undefined ? item.xf : entryEnd(item);
+      var b = clip(stop === null ? edges.hi : stop, edges);
+      if (b <= item.x) { return; }
+      var caption = entryCaption(item);
+      x.push(iso(item.x), iso(b), null);
+      y.push(item.e, item.e, null);
+      text.push(caption, caption, "");
+    });
+    if (!x.length) { return null; }
+    return {
+      type: "scatter", mode: "lines", name: "Límite puesto",
+      x: x, y: y, text: text, hoverinfo: "text", hoverlabel: { align: "left" },
+      connectgaps: false,
+      line: { color: COLORS.ink, width: 1.2, dash: "dot" }
+    };
+  }
+
+  /* La línea de la entrada mientras la operación está viva, con su etiqueta
+   * cuando hay pocas a la vista. */
+  function entryLineTrace(entries, edges, named) {
+    var x = [], y = [], text = [], labels = [];
+    var source = entrySource();
+    entries.forEach(function (item) {
+      if (item.xf === undefined || pending(item.xf, source, edges)) { return; }
+      var end = entryLive(item);
+      var b = clip(end === null ? edges.hi : end, edges);
+      var caption = entryCaption(item);
+      x.push(iso(item.xf), iso(b), null);
+      y.push(item.e, item.e, null);
+      text.push(caption, caption, "");
+      labels.push(named ? entryTag(item) : "", "", "");
+    });
+    if (!x.length) { return null; }
+    // `text` es lo que se escribe sobre la línea y `hovertext` lo que dice el
+    // globo: con pocas operaciones a la vista se ven las dos cosas, y con
+    // muchas sólo el globo.
+    return {
+      type: "scatter", mode: named ? "lines+text" : "lines", name: "Entrada",
+      x: x, y: y, text: named ? labels : text, hovertext: text,
+      hoverinfo: "text", hoverlabel: { align: "left" }, connectgaps: false,
+      textposition: "top right",
+      textfont: { size: 10, color: COLORS.ink },
+      line: { color: COLORS.ink, width: 1.6 }
+    };
+  }
+
+  var ENTRY_MARKS = {
+    fill: {
+      field: "xf", price: "e", symbol: "triangle-right", size: 12,
+      name: "Entrada ejecutada",
+      title: "EL PRECIO LLEGA AL LÍMITE: la operación entra"
+    },
+    OBJETIVO: {
+      field: "xe", price: "px", symbol: "star-diamond", size: 13,
+      name: "Objetivo", colour: "bullish", outcome: true,
+      title: "OBJETIVO: la operación se cierra en ganancia"
+    },
+    STOP: {
+      field: "xe", price: "px", symbol: "x", size: 12,
+      name: "Stop", colour: "bearish", outcome: true,
+      title: "STOP: la operación se cierra en pérdida"
+    },
+    CIERRE_SEMANAL: {
+      field: "xe", price: "px", symbol: "hourglass", size: 12,
+      name: "Cierre del viernes", colour: "ink", outcome: true,
+      title: "CIERRE DEL VIERNES: cierra el mercado y la posición se cierra al " +
+        "precio de esa vela, sin haber llegado al stop ni al objetivo"
+    },
+    cancel: {
+      field: "xc", price: "e", symbol: "line-ew", size: 11, muted: true,
+      name: "Límite quitado",
+      title: "SE QUITA EL LÍMITE sin haber entrado"
+    }
+  };
+
+  function entryMarkerTrace(entries, kind) {
+    var style = ENTRY_MARKS[kind];
+    var items = entries.filter(function (item) {
+      if (item[style.field] === undefined) { return false; }
+      if (style.outcome) { return item.o === kind; }
+      return true;
+    });
+    if (!items.length) { return null; }
+    return {
+      type: "scatter", mode: "markers", name: style.name,
+      x: items.map(function (item) { return iso(item[style.field]); }),
+      y: items.map(function (item) { return item[style.price]; }),
+      text: items.map(entryCaption),
+      hoverinfo: "text", hoverlabel: { align: "left" },
+      marker: {
+        symbol: style.symbol, size: style.size,
+        color: items.map(function (item) {
+          if (style.muted) { return COLORS.muted; }
+          if (style.colour) { return COLORS[style.colour]; }
+          return item.d === "alcista" ? COLORS.bullish : COLORS.bearish;
+        }),
+        line: { color: COLORS.surface, width: 1.2 }
+      }
+    };
+  }
+
+  function entrySide(item) { return item.d === "alcista" ? "LARGO" : "CORTO"; }
+
+  /* La etiqueta corta que va escrita sobre la línea de la entrada: quién es,
+   * hacia dónde iba y CÓMO ACABÓ. El resultado va escrito y no sólo en el globo:
+   * es lo que se audita, y una operación que se resuelve dentro de su vela no
+   * deja ni rastro que mirar si hay que pasarle el ratón por encima. El R:R no
+   * se escribe porque es el mismo en todas: lo dice el estado de abajo. */
+  function entryTag(item) {
+    var stake = entryStake();
+    var head = "#" + item.n + " " + entrySide(item);
+    // Sin salida no hay resultado que escribir: la que sigue viva al acabarse el
+    // histórico dice lo que se juega, que es lo único que se sabe de ella.
+    if (item.o === undefined || item.o === "ABIERTA") {
+      return head + " · ABIERTA al acabarse el histórico · " +
+        signedMoney(-stake.risk) + " / " + signedMoney(stake.reward);
+    }
+    return head + " · " + item.o + " " + iso(item.xe).slice(0, 16) +
+      (sameBar(item) ? " (misma vela)" : "") + " · " +
+      signedMoney(stake.risk * entryR(item));
+  }
+
+  /* Lo que se llevó la operación, en R. Sale de los PRECIOS y no del resultado:
+   * el objetivo son 3 R y el stop -1 R siempre, pero el cierre del viernes es lo
+   * que diera el precio de esa vela, y escribirlo como una pérdida entera sería
+   * mentir sobre el dibujo. */
+  function entryR(item) {
+    if (item.px === undefined || item.o === undefined) { return 0; }
+    var risk = Math.abs(item.e - item.s);
+    if (!risk) { return 0; }
+    return (item.d === "bajista" ? item.e - item.px : item.px - item.e) / risk;
+  }
+
+  /* Lo que se juega cada operación con el capital que hay puesto en la barra.
+   * Todas arriesgan lo mismo —es el riesgo por operación de la cuenta—, así que
+   * no hace falta mirarlo operación a operación. */
+  function entryStake() {
+    var risk = riskFor();
+    return { risk: risk, reward: round2(risk * riskReward()) };
+  }
+
+  var ORDER_END = {
+    MUERTE_ID_H1: "murió el ID de H1 del que colgaba",
+    FIN_REGIMEN: "cambió el régimen de H4: ya no se busca eso",
+    CIERRE_SEMANAL: "cerró el mercado el viernes: no se deja ninguna orden " +
+      "puesta el fin de semana",
+    FIN_HISTORICO: "se acabó el histórico con el límite puesto"
+  };
+
+  /* Cómo acabó la operación, escrito. El cierre del viernes no es ni ganancia ni
+   * pérdida: es el reloj, y se dice así para que no se lea como un stop raro. */
+  var TRADE_OUTCOME = {
+    OBJETIVO: "OBJETIVO",
+    STOP: "STOP",
+    CIERRE_SEMANAL: "el CIERRE DEL VIERNES"
+  };
+
+  /* La hora a la que cierra la semana, tal como vino de la corrida. */
+  function marketWeek() {
+    var week = DATA.marketWeek;
+    if (!week || !week.at) { return null; }
+    return "viernes a las " + week.at + " de " + week.tz;
+  }
+
+  var ENTRY_FORM = {
+    ZONA: "el ID de H1 va en la dirección que se busca: se mira su zona en contra",
+    RECHAZO_UL: "el ID de H1 va al revés pero RECHAZÓ SU UL: se mira ese UL"
+  };
+
+  var ENTRY_PATTERN = {
+    OB: "OB: la última vela contraria antes de que el precio se fuera",
+    FVG: "FVG: el hueco de tres velas que el precio dejó atrás"
+  };
+
+  /* De dónde sale el precio del límite. En el rechazo afinado con un OB NO es el
+   * borde del patrón —el límite cae fuera del recuadro dibujado, y sin decirlo se
+   * lee como un fallo—: sale del cierre de la vela que crea el OB, separado la
+   * holgura que declara la corrida. */
+  function entryLimitRule(item) {
+    if (item.f !== "RECHAZO_UL" || item.pat !== "OB") {
+      return "<br>el límite va en el borde cercano del patrón, el primero que el " +
+        "precio encuentra al volver";
+    }
+    var offset = DATA.rejectionOffset;
+    return "<br>EL LÍMITE NO VA EN EL OB: sale del cierre de la vela que lo crea (" +
+      stamp(item.xk) + ")" +
+      (offset === null || offset === undefined
+        ? ""
+        : ", " + price(offset) + " por " +
+          (item.d === "bajista" ? "encima" : "debajo") + " de ese cierre") +
+      " · por eso el límite queda fuera del recuadro del patrón";
+  }
+
+  /* Dónde va el stop. En el rechazo afinado con un OB NO va al borde exterior de
+   * la zona: va al INTERIOR, donde arranca la mecha del UL, porque la punta
+   * quedaba a demasiada distancia. Se dice en el globo porque es lo que se
+   * audita: el mismo dibujo con el stop en el otro borde es otra operación. */
+  function entryStopRule(item) {
+    if (item.f !== "RECHAZO_UL" || item.pat !== "OB") {
+      return " · el stop va a su borde exterior";
+    }
+    return " · EL STOP VA A SU BORDE INTERIOR, donde arranca la mecha: en el " +
+      "rechazo esperando el OB, la punta del UL queda a demasiada distancia";
+  }
+
+  function entryCaption(item) {
+    var stake = entryStake();
+    var text = "OPERACIÓN nº " + item.n + " · " + entrySide(item) +
+      " · R:R 1:" + decimal(riskReward()) +
+      "<br>límite en " + price(item.e) + " · stop " + price(item.s) +
+      " · objetivo " + price(item.t) +
+      "<br>se juega " + money(stake.risk) + " para ganar " + money(stake.reward) +
+      " (con el capital de la barra)" +
+      "<br>límite puesto al cerrar la vela de " + stamp(item.x) +
+      "<br>" + (ENTRY_FORM[item.f] || item.f) +
+      "<br>zona " + item.zk + " de H1 (ID nº " + item.h1 + ") [" + price(item.zlo) +
+      ", " + price(item.zhi) + "]" + entryStopRule(item) +
+      "<br>afinada en M15 con un " + (ENTRY_PATTERN[item.pat] || item.pat) +
+      " [" + price(item.plo) + ", " + price(item.phi) + "], vela de " + stamp(item.xp) +
+      entryLimitRule(item) +
+      "<br>régimen del ID nº " + item.h4 + " de H4";
+    if (item.xf !== undefined) {
+      text += "<br>ENTRA en " + stamp(item.xf);
+      if (item.xe !== undefined) {
+        text += " · sale en " + stamp(item.xe) + " por " +
+          (TRADE_OUTCOME[item.o] || item.o) + " en " + price(item.px);
+        if (item.o === "CIERRE_SEMANAL") {
+          text += "<br>NO LLEGÓ AL STOP NI AL OBJETIVO: cerró el mercado" +
+            (marketWeek() === null ? "" : " (" + marketWeek() + ")") +
+            " y la posición se cierra al precio de esa vela · se lleva " +
+            signedR(entryR(item));
+        }
+        if (sameBar(item)) {
+          text += "<br>ENTRA Y SALE EN LA MISMA VELA de M15" + (
+            item.o === "STOP"
+              ? ": si esa vela llegó también al objetivo no se sabe en qué orden " +
+                "y se cuenta el STOP"
+              : item.o === "CIERRE_SEMANAL"
+                ? ": entró y el mercado cerró en esa misma vela"
+                : ": esa vela llegó al objetivo sin tocar el stop"
+          ) + " · el rectángulo ocupa esa vela para poder verse, no es tiempo vivido";
+        }
+      } else {
+        text += " · seguía abierta al acabarse el histórico";
+      }
+    } else if (item.why !== undefined) {
+      text += "<br>NO LLEGÓ A ENTRAR: el límite se quitó en " + stamp(item.xc) +
+        " porque " + (ORDER_END[item.why] || item.why);
+    }
+    return text + "<br>una operación por ID de H1 y nunca más de una viva a la vez";
+  }
+
+  /* El RÉGIMEN de H4: hacia dónde se busca en cada tramo. Va de fondo, como el
+   * limbo, porque es el sitio y no el suceso: una compra en un tramo en el que
+   * se buscaban ventas es un error, y sin el fondo no hay forma de verlo. */
+  function regimeShapes(range) {
+    if (!state.regime || blindfolded() || !hasEntries()) { return []; }
+    var edges = window_(range);
+    var source = entrySource();
+    return regimesOf().filter(function (item) {
+      var end = item.x1 === undefined ? edges.hi : item.x1;
+      return end >= edges.lo && item.x0 <= edges.hi &&
+        !pending(item.x0, source, edges);
+    }).map(function (item) {
+      var colour = item.d === undefined
+        ? COLORS.muted
+        : (item.d === "alcista" ? COLORS.bullish : COLORS.bearish);
+      return {
+        type: "rect", xref: "x", yref: "paper", name: "regimen-" + item.seq,
+        x0: iso(item.x0),
+        x1: iso(clip(item.x1 === undefined ? edges.hi : item.x1, edges)),
+        y0: 0, y1: 1,
+        fillcolor: rgba(colour, item.d === undefined ? 0.05 : 0.07),
+        line: { width: 0 }, layer: "below"
+      };
+    });
+  }
+
+  var REGIME_KIND = {
+    HACIA_ZONA: "se busca EN CONTRA del ID de H4: el precio va hacia su zona en contra",
+    HACIA_UL: "se busca A FAVOR del ID de H4: el precio va hacia su UL",
+    EN_UL: "el precio está en el UL de H4 y se espera al cierre de esa vela: no se busca nada"
+  };
+
+  /* Qué régimen está puesto en el borde derecho de la ventana, para el estado de
+   * abajo: un gráfico sin operaciones no dice si es que no había setup o es que
+   * ahí no se buscaba nada. */
+  function regimeCaption(range) {
+    if (!hasEntries()) { return null; }
+    var edges = window_(range);
+    var current = null;
+    regimesOf().forEach(function (item) {
+      var end = item.x1 === undefined ? edges.hi : item.x1;
+      if (item.x0 <= edges.hi && end >= edges.hi) { current = item; }
+    });
+    if (!current) { return "RÉGIMEN DE H4: ninguno en el borde de la ventana"; }
+    return "RÉGIMEN DE H4 en el borde de la ventana: " +
+      (REGIME_KIND[current.k] || current.k) +
+      " (ID nº " + current.h4 + " de H4, " + current.h4d + ")";
+  }
+
+  /* Cuántas operaciones se ven y en qué estado. Se declara siempre que la capa
+   * pueda dibujar algo: son lo único del explorador que ABRE Y CIERRA
+   * posiciones, y no se puede confundir con las cajas que planta el propietario. */
+  function entriesCaption(range) {
+    if (!hasEntries()) { return null; }
+    var visible = visibleEntries(window_(range));
+    var stake = entryStake();
+    var counts = { fill: 0, win: 0, loss: 0, week: 0, off: 0, offWeek: 0, flash: 0 };
+    visible.forEach(function (item) {
+      if (item.xf === undefined) {
+        counts.off += 1;
+        if (item.why === "CIERRE_SEMANAL") { counts.offWeek += 1; }
+        return;
+      }
+      counts.fill += 1;
+      if (item.o === "OBJETIVO") { counts.win += 1; }
+      if (item.o === "STOP") { counts.loss += 1; }
+      if (item.o === "CIERRE_SEMANAL") { counts.week += 1; }
+      if (sameBar(item)) { counts.flash += 1; }
+    });
+    return "ENTRADAS (fase 3.1): " + plural(visible.length, "límite", "límites") +
+      " a la vista · " + counts.fill + " entraron (" + counts.win + " al objetivo, " +
+      counts.loss + " al stop, " + counts.week + " cerradas el viernes) · " +
+      counts.off + " se quitaron sin entrar (" + counts.offWeek + " el viernes)" +
+      " · " + counts.flash + " entraron y salieron en la misma vela (rectángulo " +
+      "punteado: ocupa esa vela para poder verse)" +
+      " · todas 1:" + decimal(riskReward()) + ", una por ID de H1 y nunca dos vivas" +
+      " · cada una se juega " + money(stake.risk) + " para ganar " +
+      money(stake.reward) + " con el capital de la barra" +
+      (marketWeek() === null
+        ? ""
+        : " · el " + marketWeek() + " cierra el mercado y no queda nada vivo: la " +
+          "posición se cierra al precio de esa vela y el límite se quita");
   }
 
   /* El sombreado es el del impulso principal: dos capas de limbo superpuestas
@@ -3145,7 +3708,7 @@
       dragmode: "pan",
       showlegend: true,
       legend: { orientation: "h", y: 1.04, x: 0, font: { size: 11 } },
-      shapes: rectShapes_(simShapes_(limboShapes(range))),
+      shapes: rectShapes_(simShapes_(regimeShapes(range).concat(limboShapes(range)))),
       xaxis: {
         type: "date", gridcolor: COLORS.grid, rangeslider: { visible: false },
         // El rango va siempre con su `autorange`: si se diera uno sin apagar el
@@ -3183,6 +3746,9 @@
       .concat(avoidedTraces(range))
       .concat(signalTraces(range))
       .concat(cascadeTraces(range))
+      // Las entradas van encima de todo lo que las produjo: son el resultado, y
+      // lo que se mira en esta fase.
+      .concat(entryTraces(range))
       .concat(contactTraces(range))
       .concat(wrongExtremeTraces(range));
 
@@ -3211,9 +3777,11 @@
     ["mid", "nivel 50 %", function () { return true; }],
     ["wrong", "extremo de color contrario", function () { return true; }],
     ["frame", "marco del ID", function () { return true; }],
-    ["zones", "zonas del ID (UL y PUL)", hasZones],
+    ["zones", "zonas del ID (UL, PUL y APUL)", hasZones],
     ["signals", "señales de zona", hasSignals],
     ["cascade", "cascada de entrada", hasCascade],
+    ["entries", "entradas (límite, stop y objetivo)", hasEntries],
+    ["regime", "régimen de H4", hasEntries],
     ["avoided", "roturas evitadas", hasAvoided],
     ["steps", "escalera del extremo", hasSteps]
   ];
@@ -3350,13 +3918,18 @@
         " · el UL es el extremo de ESTE ID y el PUL el del ID ANTERIOR: su " +
         "cuerpo si aquel ID iba al revés, su MECHA —el UL viejo tal cual— si iba " +
         "en el mismo sentido" +
+        " · cuando ese extremo no sirve el ID no lleva PUL sino APUL, punteado, " +
+        "en sus tres casos: la zona HEREDADA del ID anterior que iba al revés, el " +
+        "UL de ese mismo ID cuando su EXTREMO quedó por detrás del ancla, o el " +
+        "extremo del último ID interior del RETROCESO anterior. El globo de la " +
+        "zona dice cuál" +
         (DATA.meta.breakByZone
           ? " (fase 2.1: su borde exterior es el nivel de rotura en contra)"
           : "");
     } else if (zonesAvailable()) {
       // Apagada a mano: quien viene de la fase 2.0 leería la ausencia de las
       // cajas como un fallo del motor.
-      text += " · las zonas UL y PUL no se están dibujando (capa apagada): " +
+      text += " · las zonas UL, PUL y APUL no se están dibujando (capa apagada): " +
         "siguen en los datos, en los informes y bajo las señales y la cascada";
     }
     if (hasSignals() && state.signals && zonesAvailable()) {
@@ -3393,6 +3966,19 @@
         (state.visible === "all"
           ? ""
           : " · obedecen el filtro de ID visibles, igual que las señales de zona");
+    }
+    if (hasEntries() && zonesAvailable()) {
+      // Lo que abre y cierra posiciones tiene que declararse SIEMPRE, encendido
+      // o apagado: un gráfico sin rectángulos de operación se lee como que ahí
+      // no había ninguna, y puede ser que la capa esté apagada.
+      var operaciones = entriesCaption(range);
+      var regimen = regimeCaption(range);
+      if (state.entries && operaciones) { text += " · " + operaciones; }
+      else if (operaciones) {
+        text += " · las ENTRADAS no se están dibujando (capa apagada): siguen " +
+          "calculadas, con su límite, su stop y su objetivo";
+      }
+      if (state.regime && regimen) { text += " · " + regimen; }
     }
     if (hasAvoided() && state.avoided && isVisible(primary())) {
       var allowedAvoided = visibleIds(primary(), edges);
@@ -3716,6 +4302,13 @@
 
   /* Fase 2.1, mismo criterio: con `break_by_zone: false` no hay ni una rotura
    * evitada, y una casilla que no puede dibujar nada sólo hace dudar. */
+  /* Fase 3.1, mismo criterio: sin operaciones calculadas no hay ni un límite
+   * que dibujar, y una casilla que no puede pintar nada sólo hace dudar. */
+  function buildEntryLayers() {
+    if (hasEntries()) { return; }
+    hide("entry-layers");
+  }
+
   function buildBreakLayers() {
     // Las dos casillas se apagan por separado: puede haber roturas evitadas en
     // contra —que no mueven el extremo— sin una sola extensión, y al revés.
@@ -3932,6 +4525,13 @@
       document.getElementById("layer-cascade").disabled = !zonesAvailable();
       document.getElementById("layer-cascade").checked = state.cascade;
     }
+    if (hasEntries()) {
+      // Se calcularon sobre las zonas del modo activo, igual que la cascada.
+      document.getElementById("layer-entries").disabled = !zonesAvailable();
+      document.getElementById("layer-entries").checked = state.entries;
+      document.getElementById("layer-regime").disabled = !zonesAvailable();
+      document.getElementById("layer-regime").checked = state.regime;
+    }
     if (hasAvoided()) {
       document.getElementById("layer-avoided").checked = state.avoided;
     }
@@ -4002,6 +4602,8 @@
       ["layer-zones", "zones"],
       ["layer-signals", "signals"],
       ["layer-cascade", "cascade"],
+      ["layer-entries", "entries"],
+      ["layer-regime", "regime"],
       ["layer-avoided", "avoided"],
       ["layer-steps", "steps"]
     ].forEach(function (pair) {
@@ -4107,6 +4709,7 @@
   buildZoneLayers();
   buildSignalLayers();
   buildCascadeLayers();
+  buildEntryLayers();
   buildBreakLayers();
   buildNoiseButtons();
   // El nivel de salida se aplica aquí, con el payload ya leído: así lo que no

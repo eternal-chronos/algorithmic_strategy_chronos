@@ -85,13 +85,13 @@ def test_los_tres_tipos_aparecen_en_el_historico(signals: ZoneSignalsRun) -> Non
 
 
 def test_cada_senal_va_con_la_zona_que_le_toca(signals: ZoneSignalsRun) -> None:
+    """El toque es de la zona EN CONTRA, que puede ser el PUL o el APUL."""
+    en_contra = {ZoneKind.PENULTIMATE, ZoneKind.ANTE_PENULTIMATE}
     for item in signals.per_timeframe[H4].items:
-        esperada = (
-            ZoneKind.PENULTIMATE
-            if item.kind is ZoneSignalKind.TOQUE_PUL
-            else ZoneKind.LAST
-        )
-        assert item.zone is esperada
+        if item.kind is ZoneSignalKind.TOQUE_PUL:
+            assert item.zone in en_contra
+        else:
+            assert item.zone is ZoneKind.LAST
 
 
 def test_ninguna_senal_se_adelanta_a_su_zona(

@@ -12,6 +12,10 @@ criterio que el ancla de sesión del corte diario (`NY_17:00`).
 
 La franja es **semiabierta**: a las 03:00 en punto ya se opera, a las 12:00 en
 punto ya no.
+
+Aquí vive también el otro reloj del mercado, el que no es del propietario sino
+del oro: **el cierre del viernes**. `MarketWeek` dice cuál es la última vela de
+cada semana, que es donde se cierra todo lo que quede vivo.
 """
 
 from __future__ import annotations
@@ -72,8 +76,64 @@ class TradingWindow:
         return np.asarray((minutes >= first) & (minutes < last))
 
 
+@dataclass(frozen=True, slots=True)
+class MarketWeek:
+    """El cierre del viernes: cuando el mercado cierra, no queda nada vivo.
+
+    El oro no cotiza el fin de semana. Dejar una posición abierta o un límite
+    puesto de viernes a domingo es apostar al hueco de la apertura, que no lo
+    decide ninguna regla de esta estrategia: el propietario **cierra todo** al
+    cerrar el mercado.
+
+    La hora es la de la plaza, igual que la franja de operativa y que el ancla
+    de sesión del corte diario: el viernes a las 17:00 de Nueva York.
+    """
+
+    #: Zona IANA con la que se resuelve el horario de verano de verdad.
+    timezone: str = "America/New_York"
+    #: Hora local del viernes a la que se acaba la semana de mercado.
+    close: time = time(17, 0)
+
+    @property
+    def label(self) -> str:
+        """Cómo se escribe allí donde se lee: informes y explorador."""
+        return (
+            f"viernes a las {self.close.hour:02d}:{self.close.minute:02d}"
+            f" de {self.timezone}"
+        )
+
+    def closes(self, timestamps: pd.DatetimeIndex) -> np.ndarray:
+        """Máscara con la ÚLTIMA vela de cada semana de mercado.
+
+        No se busca la vela de las 17:00 en punto —el mercado ya está cerrado y
+        esa vela no existe— sino **la última que hay antes del corte**: así el
+        cierre cae donde el histórico dice que cayó, festivos y huecos incluidos.
+
+        La última vela del histórico entero **no** cuenta como cierre semanal
+        aunque caiga en viernes: ahí lo que se ha acabado son los datos, y eso ya
+        tiene su propio motivo (`FIN_HISTORICO`, `ABIERTA`).
+        """
+        index = pd.DatetimeIndex(timestamps)
+        if not len(index):
+            return np.zeros(0, dtype=bool)
+        local = index.tz_convert(self.timezone) - pd.Timedelta(
+            hours=self.close.hour, minutes=self.close.minute
+        )
+        # Desplazado el reloj, el corte cae en la medianoche del viernes. Los
+        # días se cuentan desde el 1970-01-02, que fue viernes: al dividir entre
+        # siete cada semana de mercado queda en un bloque propio.
+        days = local.tz_localize(None).to_numpy().astype("datetime64[D]").astype(np.int64)
+        week = (days - 1) // 7
+        mask = np.zeros(len(week), dtype=bool)
+        mask[:-1] = week[1:] != week[:-1]
+        return mask
+
+
 #: La franja decidida por el propietario: Londres y la media sesión de Nueva York.
 TRADING_WINDOW = TradingWindow()
 
+#: El cierre de la semana de mercado: viernes a las 17:00 de Nueva York.
+MARKET_WEEK = MarketWeek()
 
-__all__ = ["TRADING_WINDOW", "TradingWindow"]
+
+__all__ = ["MARKET_WEEK", "TRADING_WINDOW", "MarketWeek", "TradingWindow"]

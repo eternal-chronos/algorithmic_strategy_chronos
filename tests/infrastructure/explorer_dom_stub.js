@@ -63,6 +63,7 @@ function declare(id) {
  'zone-layers', 'layer-zones',
  'signal-layers', 'layer-signals',
  'cascade-layers', 'layer-cascade',
+ 'entry-layers', 'layer-entries', 'layer-regime',
  'break-layers', 'avoided-layer', 'layer-avoided', 'steps-layer', 'layer-steps',
  'blind-seed', 'blind-start', 'blind-reveal', 'blind-exit',
  'sim-group', 'sim-buttons', 'sim-ratio', 'sim-clear',
@@ -304,7 +305,8 @@ function snapshot(label) {
     // el control se separan, el explorador miente sobre lo que se está viendo.
     boxes: ['layer-limbo', 'layer-marks', 'layer-contacts', 'layer-mid', 'layer-wrong',
       'layer-frame', 'layer-zones', 'layer-signals',
-      'layer-cascade', 'layer-avoided', 'layer-steps']
+      'layer-cascade', 'layer-entries', 'layer-regime',
+      'layer-avoided', 'layer-steps']
       .reduce(function (state, id) {
         state[id] = elements[id].checked === true;
         return state;
@@ -315,7 +317,8 @@ function snapshot(label) {
 global.window = global;
 eval(fs.readFileSync(scriptPath, 'utf8'));
 
-const payloadMeta = JSON.parse(elements['explorer-data'].textContent).meta;
+const payloadData = JSON.parse(elements['explorer-data'].textContent);
+const payloadMeta = payloadData.meta;
 const steps = [];
 const tabs = elements['tf-buttons'].children;
 const presets = elements['preset-buttons'].children;
@@ -448,6 +451,10 @@ visiblesMarco.filter(function (button) { return button.dataset.visible === 'pair
 // Cada gráfico lleva su marco y el de la temporalidad que le toca: el del Diario
 // sobre H4, el de H4 sobre H1 y el de H1 sobre M15. Se retrata cada gráfico con
 // el periodo completo para poder comprobarlo.
+// El paso del DIARIO es además el que audita el APUL: la zona en contra de un ID
+// nacido tras una constitución abortada. Las cajas son sólo las del ID que se
+// mira, así que ese caso se prueba con un histórico cortado mientras ese ID
+// sigue vivo (ver `test_impulse_explorer.py`).
 tabs.forEach(function (tab) {
   tab.fire('click');
   steps.push(snapshot('marco-de-' + tab.dataset.tf));
@@ -558,6 +565,66 @@ tabs.forEach(function (tab) {
   elements['layer-cascade'].fire('change', { target: { checked: true } });
 });
 tabs[0].fire('click');
+
+// Fase 3.1 — las ENTRADAS y el régimen de H4. Se recorren los cuatro gráficos:
+// una operación es un tramo de precio y de tiempo y se dibuja igual en todos, así
+// que apagarla tiene que quitar sus trazas en cualquiera de ellos. Sin entradas en
+// el payload los dos pasos salen iguales, que es lo que comprueba el test de la
+// corrida sin ellas.
+tabs.forEach(function (tab) {
+  tab.fire('click');
+  steps.push(snapshot('entradas-' + tab.dataset.tf));
+  elements['layer-entries'].fire('change', { target: { checked: false } });
+  steps.push(snapshot('entradas-apagadas-' + tab.dataset.tf));
+  elements['layer-entries'].fire('change', { target: { checked: true } });
+});
+
+// La ETIQUETA escrita de cada operación: sólo se escribe con pocas a la vista, así
+// que se encoge la ventana a un día en M15. Se elige el día de una que entró y
+// salió en la MISMA vela —el caso que sin ancho no se veía—, y si no hubiera
+// ninguna, el de la primera que se llenó.
+const operaciones = payloadData.entries || [];
+const relampago = operaciones.filter(function (item) {
+  return item.xf !== undefined && item.xe === item.xf;
+})[0] || operaciones.filter(function (item) { return item.xf !== undefined; })[0];
+function unDia(item, minuto, etiqueta) {
+  if (!item) { return; }
+  const dia = new Date(minuto * 60000).toISOString().slice(0, 10);
+  tabs.filter(function (tab) { return tab.dataset.tf === 'M15'; })
+    .forEach(function (tab) { tab.fire('click'); });
+  elements['from'].fire('change', { target: { value: dia } });
+  elements['to'].fire('change', { target: { value: dia } });
+  steps.push(snapshot(etiqueta));
+  presets[0].fire('click');
+}
+
+unDia(relampago, relampago && relampago.xf, 'entradas-un-dia');
+
+// El RECHAZO_UL afinado con un OB: su límite cae fuera del recuadro del patrón, y
+// el globo tiene que decir de dónde sale. Se retrata el día en que se armó.
+const rechazo = operaciones.filter(function (item) {
+  return item.f === 'RECHAZO_UL' && item.pat === 'OB';
+})[0];
+unDia(rechazo, rechazo && rechazo.x, 'entradas-rechazo-ob');
+
+// El CIERRE DEL VIERNES: la posición que no llegó ni al stop ni al objetivo
+// porque cerró el mercado, y el límite que se quitó por lo mismo. Son lo único
+// que sale del gráfico sin que el precio haya llegado a ningún sitio.
+const cierreViernes = operaciones.filter(function (item) {
+  return item.o === 'CIERRE_SEMANAL';
+})[0];
+unDia(cierreViernes, cierreViernes && cierreViernes.xe, 'entradas-cierre-viernes');
+
+const quitadoViernes = operaciones.filter(function (item) {
+  return item.why === 'CIERRE_SEMANAL';
+})[0];
+unDia(quitadoViernes, quitadoViernes && quitadoViernes.xc, 'entradas-limite-viernes');
+
+tabs[0].fire('click');
+elements['layer-regime'].fire('change', { target: { checked: false } });
+steps.push(snapshot('regimen-apagado'));
+elements['layer-regime'].fire('change', { target: { checked: true } });
+steps.push(snapshot('regimen-encendido'));
 
 // R-36 — alternar los tres LEG_START_MODE sobre las mismas velas, y apagar la
 // capa que marca los extremos de color contrario.

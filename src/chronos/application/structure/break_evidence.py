@@ -30,21 +30,26 @@ from chronos.domain.structure.body import BodyBar
 from chronos.domain.structure.detector import DominantImpulseDetector
 from chronos.domain.structure.enums import (
     AnchorMode,
+    BreakLevelSource,
     ImpulseDirection,
     OverlapPriority,
     SeedMode,
 )
 from chronos.domain.structure.errors import LookaheadError
+from chronos.domain.structure.impulse import DominantImpulse
 from chronos.domain.structure.synthetic_break import (
     MIRROR_CENTRE,
+    SYNTHETIC_ABORTED_UP,
     SYNTHETIC_BREAK_DOWN,
     SYNTHETIC_BREAK_START,
     SYNTHETIC_BREAK_UP,
+    SYNTHETIC_COUNTER_EXTREME_UP,
+    SYNTHETIC_INHERITED_UP,
     SYNTHETIC_OVERLAP_UP,
     SYNTHETIC_PENULTIMATE_UP,
 )
 from chronos.domain.structure.synthetic_zones import Candle
-from chronos.domain.structure.zone_break import ZoneBreakLevels
+from chronos.domain.structure.zone_break import AgainstZone, ZoneBreakLevels
 from chronos.domain.structure.zones import CandleSeries
 
 STEP = pd.Timedelta(hours=4)
@@ -57,6 +62,8 @@ def collect(config: ImpulseConfig, series: Mapping[str, pd.DataFrame]) -> Eviden
         groups=(
             _last_zone_cases(),
             _penultimate_cases(),
+            _ante_penultimate_cases(),
+            _counter_extreme_cases(),
             _overlap_case(),
             _mirror_case(),
             _lookahead(),
@@ -180,71 +187,245 @@ def _last_zone_cases() -> CheckGroup:
 
 
 def _penultimate_cases() -> CheckGroup:
-    """El lado en contra: el PUL manda si el ID tiene uno, y si no manda la línea."""
-    _, run = _run(SYNTHETIC_PENULTIMATE_UP)
-    first, second = run.impulses[0], run.impulses[1]
-    avoided = [item for item in run.avoided_breaks if item.id_num == second.id_num]
+    """El lado en contra: el PUL, la cadena vacía y el APUL heredado."""
+    _, vacia = _run(SYNTHETIC_PENULTIMATE_UP)
+    sin_zona, heredero_vacio = vacia.impulses[0], vacia.impulses[1]
+
+    _, cadena = _run(SYNTHETIC_INHERITED_UP)
+    primero, segundo, tercero = cadena.impulses
 
     return CheckGroup(
-        title="R.2 El lado en contra · el PUL (casos 4, 5 y 6 del §5)",
+        title="R.2 El lado en contra · el PUL y el APUL heredado (casos 4 a 6 y 17 a 20)",
         note=(
-            "Una sola serie con los dos estados. El ID#1 es el primero del histórico y "
-            "no tiene ID anterior del que sacar su PUL, así que muere por línea; el "
-            "ID#2 hereda como PUL el cuerpo de e2 —la vela del extremo del ID#1, la de "
-            "su UL— y ese cuerpo cubre la línea de su propio ancla."
+            "Dos series. En la primera la cadena está VACÍA: el ID#1 es el primero del "
+            "histórico y no tiene nada detrás, y el ID#2 nace de su rotura EN CONTRA, "
+            "así que el extremo del #1 es su ancla y tampoco lleva PUL; como el #1 no "
+            "tenía zona que prestarle, los dos mueren por línea. En la segunda el ID#2 "
+            "CONTINÚA al #1 —lleva su UL como PUL, con la punta estirada a la mecha de "
+            "g4— y el ID#3 nace del revés y HEREDA esa misma zona como APUL."
         ),
         checks=(
             Check(
-                "el PUL del ID#2 es el cuerpo de la vela del extremo del ID#1",
-                "vela b2, zona [1976.00, 1986.00]",
-                f"vela b{second.index_penultimate}, "
-                f"zona [{avoided[0].zone_outer:.2f}, {avoided[0].zone_inner:.2f}]",
+                "5. sin ninguna zona detrás, el ID#1 muere por línea contra su ancla",
+                "sin zona, muere en b5 por ROTURA_EN_CONTRA con nivel linea",
+                f"{'sin zona' if not sin_zona.has_penultimate else 'con PUL'}, "
+                f"muere en b{sin_zona.index_end} por {_exit(sin_zona)}",
             ),
             Check(
-                "4b. e8 cierra dentro del PUL",
-                "cierre 1977.00 bajo la línea 1978.00, dentro de [1976.00, 1986.00]",
-                f"cierre {avoided[0].close:.2f} bajo la línea {avoided[0].line:.2f}, "
-                f"dentro de [{avoided[0].zone_outer:.2f}, {avoided[0].zone_inner:.2f}]",
+                "4. el ID#2 viene del revés, así que no tiene PUL",
+                "el extremo anterior está en b2 y su lado en contra es linea",
+                f"el extremo anterior está en b{heredero_vacio.index_penultimate} y su "
+                f"lado en contra es {heredero_vacio.against_source.value}",
             ),
             Check(
-                "4a. e9 perfora el PUL con mecha y cierra dentro",
-                "sobrevive en b9, sin mover el extremo",
-                f"sobrevive en b{avoided[1].index}, "
-                f"{'sin mover' if not avoided[1].extended_extreme else 'moviendo'} el extremo",
+                "6. y sin zona heredada muere en su propia línea del ancla",
+                "muere en b8 por ROTURA_EN_CONTRA con nivel linea, 0 roturas evitadas",
+                f"muere en b{heredero_vacio.index_end} por {_exit(heredero_vacio)}, "
+                f"{len(vacia.avoided_breaks)} roturas evitadas",
             ),
             Check(
-                "4c. e10 atraviesa el PUL entero",
-                "muere en b10 por ROTURA_EN_CONTRA con nivel PUL",
-                f"muere en b{second.index_end} por {_exit(second)}",
+                "11. el ID#2 de la otra serie continúa al #1, así que lleva su UL",
+                "PUL sobre la vela b2, ventana de mecha (1, 4)",
+                f"{segundo.against_source.value} sobre la vela b{segundo.index_against}, "
+                f"ventana de mecha {segundo.against_tip_window}",
             ),
             Check(
-                "6. con PUL, dos velas que la fase 1 habría matado no matan",
-                "2 roturas evitadas en el ID#2",
-                f"{len(avoided)} roturas evitadas en el ID#{second.id_num}",
+                "17. y la punta se estira más allá de la mecha de esa vela",
+                "el UL del ID#1 llegaba a 1975.00 y el PUL del #2, a 1974.00",
+                f"el UL del ID#1 llegaba a {cadena.events[0].level:.2f} y el PUL del "
+                f"#2, a {_zone_tip(segundo):.2f}",
             ),
             Check(
-                "5. sin PUL, el ID#1 muere por línea contra su ancla",
-                "sin PUL, muere en b5 por ROTURA_EN_CONTRA con nivel linea",
-                f"{'sin PUL' if first.index_penultimate is None else 'con PUL'}, "
-                f"muere en b{first.index_end} por {_exit(first)}",
+                "18. el ID#3 nace del revés y hereda esa zona como APUL",
+                "APUL sobre la vela b2, ventana de mecha (1, 4)",
+                f"{tercero.against_source.value} sobre la vela b{tercero.index_against}, "
+                f"ventana de mecha {tercero.against_tip_window}",
             ),
             Check(
-                "y es el único de la serie sin PUL",
-                "1 de 2",
-                f"{sum(1 for item in run.impulses if item.index_penultimate is None)} "
-                f"de {len(run.impulses)}",
+                "y son la misma zona, con los papeles de los bordes cambiados",
+                "misma vela y misma ventana que el PUL del ID#2",
+                "misma vela y misma ventana que el PUL del ID#2"
+                if (
+                    tercero.index_against == segundo.index_against
+                    and tercero.against_tip_window == segundo.against_tip_window
+                )
+                else "otra vela u otra ventana",
             ),
             Check(
-                "el ancla no se mueve al salvarse",
-                "0 extensiones de extremo en toda la serie",
-                f"{run.diagnostics['extremos_extendidos']} extensiones de extremo "
-                "en toda la serie",
+                "19 y 20. g12 la perfora con mecha y cierra dentro; g13 la atraviesa",
+                "muere en b13 por ROTURA_EN_CONTRA con nivel APUL",
+                f"muere en b{tercero.index_end} por {_exit(tercero)}",
+            ),
+            Check(
+                "y esa rotura ADELANTA a la de la línea del ancla",
+                "cierre 1973.00 más allá del nivel 1974.00, con el ancla en 1967.00",
+                f"cierre {cadena.events[-1].close:.2f} más allá del nivel "
+                f"{cadena.events[-1].level:.2f}, con el ancla en "
+                f"{cadena.events[-1].line:.2f}",
+            ),
+            Check(
+                "el primero de esa serie tampoco tiene zona, y muere A FAVOR por su UL",
+                "sin zona, muere en b5 por ROTURA_A_FAVOR con nivel UL",
+                f"{'sin zona' if not primero.has_penultimate else 'con PUL'}, "
+                f"muere en b{primero.index_end} por {_exit(primero)}",
             ),
         ),
     )
 
 
+def _zone_tip(impulse: DominantImpulse) -> float:
+    """El borde INTERIOR de la zona en contra de un ID: su punta.
+
+    Se lee por la misma puerta que la máquina —`ZoneBreakLevels`— y no se
+    recalcula aquí: la evidencia enseña lo que el motor usó.
+    """
+    series = _series(SYNTHETIC_INHERITED_UP)
+    levels = ZoneBreakLevels(series, timeframe="H4")
+    levels.advance(len(series) - 1)
+    level = levels.against_level(
+        direction=impulse.direction,
+        anchor=impulse.anchor,
+        against=AgainstZone(
+            source=impulse.against_source,
+            index=impulse.index_against,
+            direction=impulse.against_direction,
+            tip_window=impulse.against_tip_window,
+        ),
+        through=len(series) - 1,
+    )
+    return level.inner
+
+
 # --- Caso 8 -----------------------------------------------------------------
+
+
+def _ante_penultimate_cases() -> CheckGroup:
+    """El APUL: el lado en contra del ID nacido tras una constitución abortada."""
+    _, run = _run(SYNTHETIC_ABORTED_UP)
+    first, second = run.impulses[0], run.impulses[1]
+    aborted = run.aborted_constitutions
+
+    return CheckGroup(
+        title="R.3 El lado en contra · el APUL (casos 14, 15 y 16 del §5)",
+        note=(
+            "El ID#1 muere por rotura EN CONTRA y el ID bajista que tenía que nacer de "
+            "esa rotura no nace: f8 llega con fuerza y cierra ya más allá de su nivel, "
+            "así que la constitución se ABORTA y la pierna gira otra vez. El ID#2 nace "
+            "en el mismo sentido que el #1 sin que eso sea una continuación, y su PUL "
+            "apuntaría al lado a FAVOR. El nivel se va a buscar donde estaba el ID que "
+            "faltó: dentro del retroceso del ID#1, corriendo la misma máquina sobre las "
+            "mismas velas. Ahí el último ID interior contrario fijó su extremo en f5, y "
+            "su mecha es el APUL."
+        ),
+        checks=(
+            Check(
+                "14. la constitución del ID bajista se aborta en f8",
+                "1 abortada, en b8",
+                f"{len(aborted)} abortada, "
+                + (f"en b{aborted[0].index}" if aborted else "ninguna"),
+            ),
+            Check(
+                "los dos ID de la serie van en el mismo sentido",
+                "alcista y alcista",
+                f"{first.direction.value} y {second.direction.value}",
+            ),
+            Check(
+                "14. el ID#2 lleva APUL y no PUL",
+                "APUL, sobre la vela b5",
+                f"{second.against_source.value}, sobre la vela "
+                f"b{second.index_ante_penultimate}",
+            ),
+            Check(
+                "y esa vela no es la del extremo del ID#1",
+                "el extremo del ID#1 está en b2",
+                f"el extremo del ID#1 está en b{first.index_extreme_at_constitution}",
+            ),
+            Check(
+                "15. f11 perfora el APUL con mecha y cierra dentro",
+                "sobrevive en b11",
+                "sobrevive en b11"
+                if second.index_end != 11
+                else f"muere en b{second.index_end}",
+            ),
+            Check(
+                "16. f12 atraviesa el APUL entero",
+                "muere en b12 por ROTURA_EN_CONTRA con nivel APUL",
+                f"muere en b{second.index_end} por {_exit(second)}",
+            ),
+            Check(
+                "y muere ANTES de llegar a la línea de su ancla",
+                "cierre 2006.00 sobre el ancla 1991.00",
+                f"cierre {run.events[-1].close:.2f} sobre el ancla "
+                f"{run.events[-1].line:.2f}",
+            ),
+            Check(
+                "el recuento del lado en contra cuadra",
+                "1 con APUL, 0 con PUL, 1 sin zona",
+                f"{run.diagnostics['impulsos_con_apul']} con APUL, "
+                f"{run.diagnostics['impulsos_con_pul']} con PUL, "
+                f"{run.diagnostics['impulsos_sin_zona_en_contra']} sin zona",
+            ),
+        ),
+    )
+
+
+def _counter_extreme_cases() -> CheckGroup:
+    """El APUL del extremo del ID contrario que quedó por detrás del ancla."""
+    _, run = _run(SYNTHETIC_COUNTER_EXTREME_UP)
+    first, second = run.impulses[0], run.impulses[1]
+
+    return CheckGroup(
+        title="R.4 El lado en contra · el APUL del extremo contrario (casos 21 a 23)",
+        note=(
+            "El ID#1 bajista NO muere de un giro: muere por rotura A FAVOR, el precio "
+            "sigue bajando y la constitución del ID bajista que venía se aborta en h6. "
+            "El ID#2 nace alcista con el ancla en 1971 —el cuerpo bajo de h5—, o sea "
+            "POR DEBAJO del extremo del ID#1 (1977). Ese extremo, entonces, sí quedó "
+            "por detrás: no hay nada que heredar y el nivel en contra es el UL del "
+            "ID#1, leído desde este lado —interior el cuerpo, exterior la punta—."
+        ),
+        checks=(
+            Check(
+                "21. el ID#1 muere A FAVOR y el ID#2 nace del revés",
+                "bajista muerto por ROTURA_A_FAVOR con nivel UL y alcista detrás",
+                f"{first.direction.value} muerto por {_exit(first)} "
+                f"y {second.direction.value} detrás",
+            ),
+            Check(
+                "y el ancla del ID#2 queda por detrás del extremo del ID#1",
+                "ancla 1971.00 por debajo del extremo 1977.00",
+                f"ancla {second.anchor:.2f} por debajo del extremo {first.extreme:.2f}"
+                if second.anchor < first.extreme
+                else f"ancla {second.anchor:.2f} sobre el extremo {first.extreme:.2f}",
+            ),
+            Check(
+                "21. así que su APUL es el UL del ID#1 y no se hereda nada",
+                "APUL sobre la vela b2, ventana de mecha (1, 3), heredado: no",
+                f"{second.against_source.value} sobre la vela b{second.index_against}, "
+                f"ventana de mecha {second.against_tip_window}, heredado: "
+                f"{'sí' if second.against_inherited else 'no'}",
+            ),
+            Check(
+                "22. h9 perfora ese APUL con mecha y cierra dentro",
+                "sobrevive en b9",
+                "sobrevive en b9"
+                if second.index_end != 9
+                else f"muere en b{second.index_end}",
+            ),
+            Check(
+                "23. h10 lo atraviesa entero",
+                "muere en b10 por ROTURA_EN_CONTRA con nivel APUL",
+                f"muere en b{second.index_end} por {_exit(second)}",
+            ),
+            Check(
+                "el recuento separa los dos APUL del ID contrario",
+                "1 del extremo contrario, 0 heredados",
+                f"{run.diagnostics['impulsos_con_apul_del_extremo_contrario']} del "
+                f"extremo contrario, {run.diagnostics['impulsos_con_apul_heredado']} "
+                "heredados",
+            ),
+        ),
+    )
 
 
 def _overlap_case() -> CheckGroup:
@@ -380,11 +561,15 @@ def _lookahead() -> CheckGroup:
         levels = ZoneBreakLevels(series, timeframe="H4")
         levels.advance(4)
         return _raises(
-            lambda: levels.penultimate_level(
+            lambda: levels.against_level(
                 direction=up,
                 anchor=1995.00,
-                index_penultimate=4,
-                previous_direction=up.opposite(),
+                against=AgainstZone(
+                    source=BreakLevelSource.PENULTIMATE,
+                    index=4,
+                    direction=up,
+                    tip_window=(4, 4),
+                ),
                 through=3,
             )
         )

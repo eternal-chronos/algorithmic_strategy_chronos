@@ -140,7 +140,8 @@ CONSTITUYE y la que lo MATA en las dos verticales, y su ANCLA y su EXTREMO en la
 horizontales. Lo lleva CADA ID dibujado; las cajas de las zonas, sólo el que se está
 mirando.
 El globo dice además QUÉ lleva el ID en su lado EN CONTRA: su PUL —el extremo del ID
-inmediatamente anterior— o la línea del ancla, que es lo único que tienen los primeros ID
+inmediatamente anterior, que iba en su mismo sentido—, su APUL en los tres casos en que
+ese extremo no le sirve, o la línea del ancla, que es lo único que tienen los primeros ID
 de cada temporalidad.
 El COLOR lo pone la TEMPORALIDAD —violeta el Diario, naranja H4, azul H1—, no la
 dirección: en el mismo gráfico hay marcos de dos (el de H4 sobre H1, el de H1 sobre M15)
@@ -152,13 +153,22 @@ Obedece el selector de ID visibles.">
           <input type="checkbox" id="layer-frame" checked> Marco del ID</label>
         <span id="zone-layers" style="display:flex; gap:16px; flex-wrap:wrap;">
           <label class="toggle" title="Las ZONAS del ID, dibujadas como recuadros: el UL a favor
-y el PUL en contra.
+y, en contra, el PUL o el APUL —nunca las dos—.
   UL  el extremo de ESTE ID: el tramo de mecha de la vela que lo fijó, del borde del
       cuerpo a la punta. Borde continuo;
   PUL el lado en contra: la vela que fijó el extremo del ID INMEDIATAMENTE ANTERIOR,
       por el tramo que MIRA a este ID. Borde a rayas. Si aquel ID iba AL REVÉS es el
       CUERPO de la vela; si iba en el MISMO SENTIDO —murió por rotura a favor y éste
-      nació más allá— es su MECHA, o sea el UL viejo tal cual. El globo dice cuál.
+      nació más allá— es su MECHA, o sea el UL viejo tal cual. El globo dice cuál;
+ APUL el lado en contra de un ID que no tiene PUL, y son TRES casos. HEREDADO: el ID
+      anterior iba AL REVÉS y su extremo es el ANCLA de éste, así que se hereda la zona
+      en contra que llevaba aquél. EXTREMO CONTRARIO: el ID anterior iba al revés pero
+      su extremo quedó POR DETRÁS del ancla —murió por rotura a favor y el giro lo trajo
+      después una constitución abortada—, así que el nivel es el UL de aquel ID. DEL
+      RETROCESO: el ID anterior va en el mismo sentido pero en medio había un ID
+      contrario que iba a nacer y una vela lo mató antes; el nivel se va a buscar donde
+      estaba, corriendo la máquina DENTRO del retroceso de aquel ID. Borde PUNTEADO, y
+      el globo dice cuál de los tres es.
 Con break_by_zone el borde EXTERIOR de la zona en contra es el nivel de rotura en contra
 del ID.
 SÓLO SE DIBUJAN LAS DEL ID QUE SE ESTÁ MIRANDO: el actual, y su anterior con el selector
@@ -168,12 +178,12 @@ ID siguen enseñando su marco.
 El COLOR lo pone la TEMPORALIDAD, igual que el marco: violeta el Diario, naranja H4, azul
 H1. El tramo ATENUADO va de la vela que define la zona a la constitución del ID: ahí la
 zona todavía no existía.">
-            <input type="checkbox" id="layer-zones" checked> Zonas del ID (UL / PUL)</label>
+            <input type="checkbox" id="layer-zones" checked> Zonas del ID (UL / PUL / APUL)</label>
         </span>
         <span id="signal-layers" style="display:flex; gap:16px; flex-wrap:wrap;">
           <label class="toggle" title="Las tres señales sobre las zonas de los ID, en Diario y H4:
-pentágono = el precio TOCA la ZONA EN CONTRA (el PUL) DESDE FUERA; hexagrama = LLEGA
-al UL DESDE FUERA y lo
+pentágono = el precio TOCA la ZONA EN CONTRA (el PUL o el APUL) DESDE FUERA; hexagrama =
+LLEGA al UL DESDE FUERA y lo
 RECHAZA (no pasa de su borde exterior); rombo-estrella = ROMPE el UL (cierra más allá del
 borde exterior).
 Venir de fuera es parte de la señal: mientras el precio no haya salido de la zona —la vela
@@ -210,9 +220,11 @@ un paso, sólo veta. Cada marca va en el gráfico en el que se mira:
      ninguna búsqueda: mientras dure, prohíbe todo lo que vaya en contra de esa dirección;
   ✕ fino (H4, gris) toque de una zona de H4 EN CONTRA de una zona diaria vigente: se
      desecha hasta que el precio salga de esa zona diaria.
-LA ZONA EN CONTRA ES EL PUL: el extremo del ID inmediatamente anterior, por el tramo de su
-vela que mira al ID —el cuerpo si aquél iba al revés, la mecha si iba en el mismo sentido—.
-El globo de cada marca dice cuál es.
+LA ZONA EN CONTRA ES EL PUL —el extremo del ID inmediatamente anterior, por el tramo de su
+vela que mira al ID: el cuerpo si aquél iba al revés, la mecha si iba en el mismo sentido—
+o el APUL, cuando ese extremo no sirve: se hereda la zona de aquel ID, se toma su UL si
+quedó por detrás del ancla, o sale del retroceso anterior. El globo de cada marca dice
+cuál es.
 El UL de H1 no interviene: el ID de H1 trae sus dos zonas, pero la cascada sólo lee la de
 en contra. Las dos se dibujan en la capa «Zonas del ID», y sólo las del ID que se mira.
 Una confirmación por ventana y ni una más: la primera cierra la búsqueda, así que lo que
@@ -230,6 +242,55 @@ SON SEÑALES, NO ENTRADAS: no hay orden, ni stop, ni target, ni resultado detrá
 ninguna de estas marcas.
 Obedecen el selector de ID visibles, igual que las señales de zona.">
             <input type="checkbox" id="layer-cascade" checked> Cascada de entrada</label>
+        </span>
+        <span id="entry-layers" style="display:flex; gap:16px; flex-wrap:wrap;">
+          <label class="toggle" title="FASE 3.1 — LAS OPERACIONES. Es lo único del explorador que
+ABRE Y CIERRA posiciones: todo lo demás son marcas.
+Cómo se arma cada una:
+  · H4 dice HACIA DÓNDE se busca. Recién constituido su ID, el precio todavía no ha
+    vuelto: se busca EN CONTRA, hasta que toque su zona en contra (PUL o APUL). Tocada,
+    se busca A FAVOR hasta llegar a su UL. Llegado al UL se espera al CIERRE de esa vela
+    de H4: si lo rechaza se vuelve a buscar en contra, y si lo atraviesa se acabó el ID.
+  · H1 arma el setup de dos maneras y sólo dos: su ZONA EN CONTRA cuando su ID va en la
+    dirección que se busca, o su UL cuando va al revés y lo ha RECHAZADO (mecha dentro,
+    cuerpo fuera).
+  · M15 afina: dentro de esa zona se busca un OB o un FVG y el límite se pone en su borde
+    CERCANO. El stop va al borde EXTERIOR de la zona de H1 y el objetivo, siempre a 1:3.
+  · EXCEPCIÓN del rechazo del UL afinado con un OB: ahí el límite NO va en el borde del
+    OB, sino un poco por delante del CIERRE DE LA VELA QUE LO CREA —la que se va y
+    convierte a la anterior en bloque—. El límite queda entonces FUERA del recuadro del
+    patrón, y el globo dice de qué cierre sale y con cuánta holgura. Y EL STOP TAMPOCO VA
+    DONDE VA SIEMPRE: en ese setup va al borde INTERIOR de la zona, donde arranca la
+    mecha del UL, porque la punta queda a demasiada distancia.
+Qué se dibuja:
+  ⋯ la raya punteada al precio del límite, mientras estuvo puesto;
+  ▷ el punto en que el precio llegó al límite y la operación entró;
+  ▭ el rectángulo ROJO del riesgo y el VERDE del objetivo, de la entrada a la salida;
+  ⬚ el mismo rectángulo con el borde PUNTEADO = la operación entró y salió DENTRO DE LA
+    MISMA VELA de M15: ocupa esa vela para poder verse, no es tiempo vivido. Cuando esa
+    vela llega al stop y al objetivo no se sabe en qué orden y se cuenta el STOP;
+  ✦ / ✕ el final: objetivo o stop;
+  ⧗ el reloj de arena: EL CIERRE DEL VIERNES. La posición no llegó al stop ni al
+    objetivo: cerró el mercado y se cierra al precio de esa vela, y el globo dice cuántas
+    R se llevó.
+Con pocas operaciones a la vista cada una lleva escrito CÓMO ACABÓ —objetivo, stop o
+viernes, la hora de salida y lo que movió—; con muchas, eso lo dice el globo.
+Una operación por ID de H1 y nunca más de una viva a la vez. El límite se quita cuando
+muere el ID de H1 del que cuelga, cuando cambia el régimen de H4 o cuando CIERRA EL
+MERCADO EL VIERNES: el fin de semana no se aguanta ni una posición ni un límite.
+El DINERO de cada operación lo pone la CUENTA SIMULADA de esta barra (capital y riesgo por
+operación): cambiarlo cambia las cifras y no cambia ni una operación.
+Sólo se arma límite de 03:00 a 12:00 hora de Nueva York; uno ya puesto se llena a
+cualquier hora.">
+            <input type="checkbox" id="layer-entries" checked> Entradas (fase 3.1)</label>
+          <label class="toggle" title="El FONDO sobre el que se leen las entradas: hacia dónde
+se estaba buscando en cada tramo, según dónde estaba el precio dentro del ID de H4.
+  · fondo VERDE: se buscan compras;
+  · fondo ROJO: se buscan ventas;
+  · fondo GRIS: el precio está en el UL de H4 y se espera al cierre de esa vela. Ahí no se
+    busca nada.
+Una compra dibujada sobre fondo rojo es un error, y sin el fondo no hay forma de verlo.">
+            <input type="checkbox" id="layer-regime" checked> Régimen de H4</label>
         </span>
         <span id="break-layers" style="display:flex; gap:16px; flex-wrap:wrap;">
           <span id="avoided-layer">
@@ -426,18 +487,22 @@ configuración, el historial y las estadísticas, en texto">Copiar</button>
       color de su TEMPORALIDAD y el trazo de su tipo: <b>UL</b> continuo (el extremo de
       ESTE ID, tramo de mecha de la vela que lo fijó), <b>PUL</b> a rayas (el lado en
       contra: la vela del extremo del ID ANTERIOR, por el tramo que mira a este ID —su
-      cuerpo si aquél iba al revés, su MECHA si iba en el mismo sentido—)</span>
+      cuerpo si aquél iba al revés, su MECHA si iba en el mismo sentido—) y <b>APUL</b>
+      punteado (el lado en contra de un ID sin PUL, en sus tres casos: la zona HEREDADA
+      del ID anterior que iba al revés, el UL de ese mismo ID cuando su EXTREMO quedó
+      por detrás del ancla, o la mecha del extremo del último ID interior del RETROCESO
+      anterior). El PUL y el APUL nunca están los dos</span>
     <span>sólo se dibujan las zonas DEL ID QUE SE ESTÁ MIRANDO —el actual, y su anterior
       con el selector en «actual + anterior»—: una caja por ID tapaba el precio. Con
       «Todos» se quedan en el ID actual y los demás siguen enseñando su marco</span>
     <span>el recuadro ATENUADO de una zona va de la vela que la define a la constitución
       del ID: durante ese tramo el nivel ya estaba en el precio pero la zona todavía no
       existía</span>
-    <span>✦ el precio toca la zona en contra (el PUL) de un ID de H4: se baja a H1. La cascada empieza AQUÍ,
+    <span>✦ el precio toca la zona en contra (el PUL o el APUL) de un ID de H4: se baja a H1. La cascada empieza AQUÍ,
       sin pedirle nada al Diario</span>
     <span>⋈ = el ID de H1 va ya como el de H4 y tiene zona en contra: se marca esa zona de H1</span>
-    <span>caja punteada gris en H1 = la zona en contra del ID de H1: su PUL, sobre la vela
-      que fijó el extremo del ID anterior, desde esa vela hasta aquella en la que se
+    <span>caja punteada gris en H1 = la zona en contra del ID de H1: su PUL —o su APUL—,
+      sobre la vela que fijó aquel extremo, desde esa vela hasta aquella en la que se
       marcó</span>
     <span>⬢ = el precio TOCA esa zona de H1: aquí salta la SEÑAL. Fechada en la vela fina
       (M15) del toque, sin esperar al cierre de la vela de H1, igual que el toque de la zona
@@ -455,6 +520,13 @@ configuración, el historial y las estadísticas, en texto">Copiar</button>
       el veto del Diario sí sigue corriendo a todas horas</span>
     <span>la cascada son SEÑALES y nada más: no hay entradas, ni stops, ni targets, ni
       resultados en el proyecto</span>
+    <span>rectángulo de operación con el borde <b>punteado</b> = entró y salió dentro de
+      la misma vela de M15: se le da el ancho de esa vela para que pueda verse, y el
+      final —objetivo o stop— va escrito en su etiqueta. Con ancho real mediría cero y la
+      operación desaparecería del gráfico</span>
+    <span>⧗ = <b>cierre del viernes</b>: cerró el mercado con la posición viva y se cierra
+      al precio de esa vela, sin haber llegado al stop ni al objetivo. El límite que
+      quedara puesto se quita ahí mismo. El fin de semana no se aguanta nada</span>
     <span>✕ grueso = extremo fijado por una vela del color contrario al impulso (R-36),
       sobre la vela que lo fijó</span>
     <span>«Ruido» es un preset de las casillas de Capas: <b>Limpio</b> —el de salida—

@@ -14,6 +14,7 @@ Los casos del §6 y dónde se comprueban:
   6. ID sin PUL ........................... `test_el_primer_id_no_tiene_pul`
   7. UL y PUL sobre la misma vela ......... `test_el_ul_y_el_pul_se_reparten_la_vela`
   8. Los mismos casos en bajista .......... `test_la_serie_bajista_es_el_espejo_exacto`
+  9. APUL en vez de PUL ................... `test_el_apul_sale_del_ultimo_id_interior*`
 """
 
 from __future__ import annotations
@@ -21,6 +22,10 @@ from __future__ import annotations
 import pytest
 
 from chronos.domain.structure.enums import BodyDirection, ImpulseDirection
+from chronos.domain.structure.synthetic_break import (
+    SYNTHETIC_ABORTED_DOWN,
+    SYNTHETIC_ABORTED_UP,
+)
 from chronos.domain.structure.synthetic_zones import (
     MIRROR_CENTRE,
     SYNTHETIC_ZONES_DOWN,
@@ -193,12 +198,20 @@ def test_el_pul_es_la_mecha_del_extremo_anterior_cuando_iba_igual(
 
 
 def test_cada_pul_hereda_la_vela_del_ul_anterior(alcista: list[ZonedImpulse]) -> None:
-    """La cadena entera, escrita a mano leyendo la serie."""
+    """La cadena entera, escrita a mano leyendo la serie.
+
+    El borde del cuerpo sale siempre de la vela del extremo de aquel ID. La punta
+    no: es la mecha más lejana que el precio alcanzó mientras aquel ID estuvo
+    vivo, y por eso en tres de los cuatro casos la fija otra vela.
+    """
     esperado = [
-        (2, 2012.00, 2010.00),  # ID#2 <- extremo del ID#1 en b2
-        (5, 2020.00, 2019.00),  # ID#3 <- extremo del ID#2 en b5
-        (8, 2026.00, 2026.00),  # ID#4 <- extremo del ID#3 en b8: sin mecha, altura cero
-        (12, 2035.00, 2034.00),  # ID#5 <- extremo del ID#4 en b12
+        # vela del cuerpo, punta (la mecha más lejana de la vida de aquel ID) y
+        # borde del cuerpo, que no se mueve nunca.
+        (2, 2012.00, 2010.00),  # ID#2 <- extremo del ID#1 en b2; su punta es la suya
+        (5, 2023.00, 2019.00),  # ID#3 <- extremo del ID#2 en b5, con la mecha de b6
+        (8, 2045.00, 2026.00),  # ID#4 <- extremo del ID#3 en b8, con la mecha de b10:
+        #                         la vela del extremo no dejó mecha, pero el ID sí
+        (12, 2200.00, 2034.00),  # ID#5 <- extremo del ID#4 en b12, con la mecha de b16
     ]
     for item, (vela, interior, exterior) in zip(alcista[1:], esperado, strict=True):
         zona = item.penultimate
@@ -335,3 +348,54 @@ def test_los_casos_del_enunciado_caen_tambien_en_bajista(
     pul = bajista[3].penultimate
     assert pul is not None and pul.index_defining == 8
     assert bajista[0].penultimate is None
+
+
+# --- La zona APUL: la del ID nacido tras una constitución abortada -----------
+#
+# La serie no es la de esta fase: `SYNTHETIC_ZONES_UP` no tiene ninguna abortada
+# dentro. Se usa la de la 2.1, que se diseñó justo para eso, y aquí se comprueba
+# la ZONA —qué vela la define, dónde nace y cuáles son sus dos bordes—, no la
+# rotura.
+
+
+def test_el_apul_sale_del_ultimo_id_interior_del_retroceso_anterior() -> None:
+    """ID#2 de `SYNTHETIC_ABORTED_UP`: su zona en contra es la mecha de f5."""
+    _, aborted = run_zones(SYNTHETIC_ABORTED_UP)
+    item = aborted[1]
+
+    assert item.penultimate is None, "el APUL sustituye al PUL, no lo acompaña"
+    zona = item.ante_penultimate
+    assert zona is not None
+    assert zona.kind is ZoneKind.ANTE_PENULTIMATE
+    assert zona.index_defining == 5
+    assert zona.inner == pytest.approx(2010.00)  # base del cuerpo de f5
+    assert zona.outer == pytest.approx(2009.00)  # punta de su mecha
+    assert zona.height == pytest.approx(1.00)
+    assert zona.defining_body is BodyDirection.BEARISH
+
+
+def test_el_apul_nace_con_su_id_y_no_con_su_vela() -> None:
+    """La vela cerró mucho antes; la zona no existe hasta la constitución."""
+    _, aborted = run_zones(SYNTHETIC_ABORTED_UP)
+    zona = aborted[1].ante_penultimate
+
+    assert zona is not None
+    assert zona.ts_defining < zona.ts_birth
+    assert zona.ts_birth == aborted[1].impulse.ts_constitution
+    # No espera a ninguna vela de margen: no es el extremo recién fijado.
+    assert zona.ts_outer_known == zona.ts_defining
+    assert zona.extended is False
+
+
+def test_el_apul_bajista_es_el_espejo_del_alcista() -> None:
+    _, arriba = run_zones(SYNTHETIC_ABORTED_UP)
+    _, abajo = run_zones(SYNTHETIC_ABORTED_DOWN)
+
+    def reflejo(price: float) -> float:
+        return 2 * MIRROR_CENTRE - price
+
+    alta, baja = arriba[1].ante_penultimate, abajo[1].ante_penultimate
+    assert alta is not None and baja is not None
+    assert baja.inner == pytest.approx(reflejo(alta.inner))
+    assert baja.outer == pytest.approx(reflejo(alta.outer))
+    assert baja.index_defining == alta.index_defining

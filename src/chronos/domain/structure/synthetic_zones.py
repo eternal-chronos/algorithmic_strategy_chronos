@@ -24,7 +24,8 @@ Los casos del §6 y dónde caen:
     2. UL que se extiende a la siguiente .. ID#2 (b6 llega a 2023 > 2020)
     3. UL que NO se extiende .............. ID#1 (2011 < 2012) y ID#3 (empate exacto)
     4. UL de altura cero .................. ID#3 (b8 cierra en su propio máximo)
-    5. PUL = el UL anterior hecho cuerpo .. ID#2 (b2), ID#3 (b5), ID#4 (b8), ID#5 (b12)
+    5. PUL = el UL anterior ............... ID#2 (b2), ID#3 (b5), ID#4 (b8), ID#5 (b12)
+    5b. la punta del PUL se estira ........ ID#3 (b6), ID#4 (b10), ID#5 (b16)
     6. ID sin PUL ......................... ID#1, el primero del histórico
     7. UL y PUL sobre la MISMA vela ....... b2: UL [2010, 2012] y PUL#2 [2005, 2010]
 
@@ -33,10 +34,11 @@ anterior, así que el único impulso que puede quedarse sin él es el que no tie
 ID anterior. En el histórico real es un caso por temporalidad, y el informe lo
 cuenta para que se vea que es exactamente uno.
 
-**Caso 7 — las dos zonas se reparten la misma vela sin tocarse.** El UL toma el
-tramo de mecha, del borde del cuerpo a la punta; el PUL del ID siguiente toma el
-cuerpo de esa misma vela. Comparten el borde —2010 en b2— y no se solapan en
-ningún otro precio.
+**Caso 7 — el UL de un ID es el PUL del siguiente.** Los dos toman el tramo de
+mecha de la misma vela, del borde del cuerpo a la punta, y por eso el PUL del ID#2
+cubre exactamente el UL del ID#1: los mismos dos precios recorridos al revés. Sólo
+se separan cuando el ID viejo dejó una mecha más lejana en otra vela de su vida, y
+entonces el PUL es más alto que el UL —nunca más bajo—.
 """
 
 from __future__ import annotations
@@ -64,15 +66,18 @@ SYNTHETIC_ZONES_UP: tuple[Candle, ...] = (
     (2023.00, 2026.00, 2022.00, 2026.00),  # b8  verde · cierra en su máximo: sin mecha superior
     (2026.00, 2026.00, 2023.00, 2024.00),  # b9  roja · CONSTITUYE ID#3; empate en 2026, no extiende
     # --- ID#4: PUL en el cuerpo de b8, que es plano por arriba ----------------
-    (2024.00, 2045.00, 2023.00, 2023.50),  # b10 roja · retroceso con mecha alta que no define nada
+    (2024.00, 2045.00, 2023.00, 2023.50),  # b10 roja · retroceso con mecha alta: no mueve el extremo
+    #                                             del ID#3 —eso es cosa del cuerpo— pero SÍ es la punta
+    #                                             del PUL que ese ID le dejará al #4
     (2023.50, 2031.00, 2023.00, 2030.00),  # b11 verde · ROTURA_A_FAVOR de ID#3
     (2030.00, 2035.00, 2029.00, 2034.00),  # b12 verde · extremo del ID#4
     (2034.00, 2034.50, 2033.00, 2033.50),  # b13 roja · CONSTITUYE ID#4
     (2033.50, 2040.00, 2033.00, 2034.00),  # b14 verde · cierra en el extremo, y "más allá" es
     #                                             estricto: no rompe
-    (2033.80, 2046.00, 2033.50, 2034.00),  # b15 verde · mecha larga que tampoco define nada
+    (2033.80, 2046.00, 2033.50, 2034.00),  # b15 verde · otra mecha larga dentro de la vida del ID#4
     # --- ID#5: muere por rotura en contra --------------------------------------
-    (2034.00, 2200.00, 2033.00, 2033.60),  # b16 roja · retroceso con una mecha enorme en 2200
+    (2034.00, 2200.00, 2033.00, 2033.60),  # b16 roja · retroceso con una mecha enorme en 2200: el
+    #                                             extremo del ID#4 sigue en 2034, y su PUL llega ahí
     (2033.60, 2040.00, 2033.00, 2039.00),  # b17 verde · ROTURA_A_FAVOR de ID#4
     (2039.00, 2039.50, 2035.00, 2036.00),  # b18 roja · CONSTITUYE ID#5
     (2036.00, 2037.00, 2030.00, 2031.00),  # b19 roja · ROTURA_EN_CONTRA: mata al ID#5

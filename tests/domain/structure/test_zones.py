@@ -17,10 +17,12 @@ from chronos.domain.structure.errors import LookaheadError, StructureError
 from chronos.domain.structure.synthetic_zones import SYNTHETIC_ZONES_UP
 from chronos.domain.structure.zones import (
     CandleSeries,
+    Zone,
     ZoneBook,
     ZoneKind,
+    against_zone,
+    furthest_wick_index,
     last_zone,
-    penultimate_zone,
 )
 from tests.domain.structure.conftest import make_series, run_zones
 
@@ -172,99 +174,182 @@ def test_la_zona_ul_nunca_cubre_el_cuerpo() -> None:
     assert zona.contains(110.0)
 
 
-def test_el_pul_alcista_es_el_cuerpo_de_la_vela_del_minimo_anterior() -> None:
-    """Vela roja: el precio baja y encuentra primero el borde alto del cuerpo."""
-    series = make_series(
-        [
-            (100.0, 102.0, 90.0, 92.0),  # roja: cuerpo [92, 100], mechas fuera
-            (92.0, 99.0, 91.0, 98.0),
-        ]
-    )
-    zona = penultimate_zone(
+def _contra(
+    series: CandleSeries,
+    *,
+    kind: ZoneKind = ZoneKind.PENULTIMATE,
+    direction: ImpulseDirection,
+    zone_direction: ImpulseDirection,
+    index_body: int | None,
+    tip_window: tuple[int, int] | None,
+    ts_index: int = -1,
+) -> Zone | None:
+    return against_zone(
         series,
+        kind=kind,
         id_num=2,
         timeframe="H4",
-        direction=ImpulseDirection.ALCISTA,
-        previous_direction=ImpulseDirection.BAJISTA,
-        index_previous_extreme=0,
-        ts_constitution=series.at(1),
+        direction=direction,
+        index_body=index_body,
+        tip_window=tip_window,
+        zone_direction=zone_direction,
+        ts_constitution=series.at(ts_index if ts_index >= 0 else len(series) - 1),
     )
 
-    assert zona is not None
-    assert zona.inner == pytest.approx(100.0)  # max(open, close)
-    assert zona.outer == pytest.approx(92.0)  # min(open, close)
-    assert zona.height == pytest.approx(8.0)
 
+def test_el_pul_alcista_es_la_mecha_del_extremo_anterior() -> None:
+    """El ID anterior iba en el mismo sentido: su extremo quedó por detrás.
 
-def test_el_pul_bajista_es_el_cuerpo_de_la_vela_del_maximo_anterior() -> None:
-    """Vela verde: el precio sube y encuentra primero el borde bajo del cuerpo."""
+    El precio vuelve hacia abajo, así que lo primero que encuentra es la PUNTA
+    de aquella mecha y lo último el borde del cuerpo.
+    """
     series = make_series(
         [
-            (92.0, 102.0, 90.0, 100.0),  # verde: cuerpo [92, 100]
+            (92.0, 102.0, 90.0, 100.0),  # verde: cuerpo hasta 100, mecha hasta 102
             (100.0, 101.0, 93.0, 94.0),
         ]
     )
-    zona = penultimate_zone(
+    zona = _contra(
         series,
-        id_num=2,
-        timeframe="H4",
-        direction=ImpulseDirection.BAJISTA,
-        previous_direction=ImpulseDirection.ALCISTA,
-        index_previous_extreme=0,
-        ts_constitution=series.at(1),
-    )
-
-    assert zona is not None
-    assert zona.inner == pytest.approx(92.0)
-    assert zona.outer == pytest.approx(100.0)
-
-
-def test_el_pul_no_cubre_ninguna_mecha() -> None:
-    """El UL toma la punta y el PUL la base: juntos, del `open` a la mecha."""
-    series = make_series([(100.0, 102.0, 90.0, 92.0), (92.0, 99.0, 91.0, 98.0)])
-    zona = penultimate_zone(
-        series,
-        id_num=2,
-        timeframe="H4",
         direction=ImpulseDirection.ALCISTA,
-        previous_direction=ImpulseDirection.BAJISTA,
-        index_previous_extreme=0,
-        ts_constitution=series.at(1),
+        zone_direction=ImpulseDirection.ALCISTA,
+        index_body=0,
+        tip_window=(0, 0),
     )
 
     assert zona is not None
-    assert zona.contains(96.0)  # el cuerpo SÍ entra, al revés que en el UL
-    assert not zona.contains(101.0)  # la mecha de arriba, no
-    assert not zona.contains(91.0)  # la de abajo, tampoco
+    assert zona.inner == pytest.approx(102.0)  # la punta
+    assert zona.outer == pytest.approx(100.0)  # el borde del cuerpo
+    assert zona.height == pytest.approx(2.0)
 
 
-def test_sin_id_anterior_no_hay_pul() -> None:
-    """El primero del histórico: no es un fallo, es que no hay de dónde sacarlo."""
+def test_el_apul_del_retroceso_se_lee_del_otro_lado() -> None:
+    """La mecha de aquel ID interior apunta al lado por el que éste rompe en contra.
+
+    Entonces lo primero que encuentra el precio es el borde del cuerpo y lo que
+    hay que cruzar para dejar la zona atrás es la punta.
+    """
+    series = make_series(
+        [
+            (100.0, 102.0, 90.0, 92.0),  # roja: cuerpo hasta 92, mecha hasta 90
+            (92.0, 99.0, 91.0, 98.0),
+        ]
+    )
+    zona = _contra(
+        series,
+        kind=ZoneKind.ANTE_PENULTIMATE,
+        direction=ImpulseDirection.ALCISTA,
+        zone_direction=ImpulseDirection.BAJISTA,
+        index_body=0,
+        tip_window=(0, 0),
+    )
+
+    assert zona is not None
+    assert zona.inner == pytest.approx(92.0)  # el borde del cuerpo
+    assert zona.outer == pytest.approx(90.0)  # la punta
+    assert zona.contains(91.0)
+    assert not zona.contains(93.0)  # el cuerpo no entra: la zona es sólo mecha
+
+
+def test_la_punta_se_estira_a_la_mecha_mas_lejana_de_la_ventana() -> None:
+    """Toda la vida del ID que la fijó, no sólo su vela del extremo."""
+    series = make_series(
+        [
+            (92.0, 102.0, 90.0, 100.0),  # el extremo por cuerpo: 100
+            (100.0, 104.0, 99.0, 101.0),  # una mecha que llegó más arriba
+            (101.0, 103.0, 100.5, 102.0),
+        ]
+    )
+    zona = _contra(
+        series,
+        direction=ImpulseDirection.ALCISTA,
+        zone_direction=ImpulseDirection.ALCISTA,
+        index_body=0,
+        tip_window=(0, 2),
+    )
+
+    assert zona is not None
+    assert zona.inner == pytest.approx(104.0)  # la mecha más alta de la ventana
+    assert zona.outer == pytest.approx(100.0)  # el borde del cuerpo no se mueve
+    # Y la vela que fija el borde exterior sigue siendo la del cuerpo.
+    assert zona.ts_outer_known == series.at(0)
+
+
+def test_la_mecha_de_la_izquierda_tambien_cuenta() -> None:
+    """La ventana empieza en el arranque de la pierna, antes del extremo."""
+    series = make_series(
+        [
+            (92.0, 106.0, 90.0, 95.0),  # mecha alta, ANTES de la vela del extremo
+            (95.0, 101.0, 94.0, 100.0),
+            (100.0, 103.0, 99.0, 102.0),  # la vela del extremo por cuerpo
+        ]
+    )
+    zona = _contra(
+        series,
+        direction=ImpulseDirection.ALCISTA,
+        zone_direction=ImpulseDirection.ALCISTA,
+        index_body=2,
+        tip_window=(0, 2),
+    )
+
+    assert zona is not None
+    assert zona.inner == pytest.approx(106.0)
+    assert zona.outer == pytest.approx(102.0)
+    # La punta la fija otra vela, y el borde exterior lo sigue fijando la suya.
+    assert furthest_wick_index(series, (0, 2), ImpulseDirection.ALCISTA) == 0
+
+
+def test_en_el_apul_la_vela_de_la_punta_fija_el_borde_exterior() -> None:
+    """Ahí el exterior ES la punta, así que la garantía cuelga de esa vela."""
+    series = make_series(
+        [
+            (100.0, 102.0, 95.0, 96.0),  # la vela del cuerpo: base 96
+            (96.0, 97.0, 90.0, 94.0),  # la mecha más baja de la ventana
+        ]
+    )
+    zona = _contra(
+        series,
+        kind=ZoneKind.ANTE_PENULTIMATE,
+        direction=ImpulseDirection.ALCISTA,
+        zone_direction=ImpulseDirection.BAJISTA,
+        index_body=0,
+        tip_window=(0, 1),
+    )
+
+    assert zona is not None
+    assert zona.outer == pytest.approx(90.0)
+    assert zona.ts_outer_known == series.at(1)
+
+
+def test_sin_id_anterior_no_hay_zona_en_contra() -> None:
+    """El primero del histórico: no es un fallo, es que no hay de dónde sacarla."""
     series = make_series([(100.0, 102.0, 90.0, 92.0)])
-    zona = penultimate_zone(
+    zona = _contra(
         series,
-        id_num=1,
-        timeframe="H4",
         direction=ImpulseDirection.ALCISTA,
-        previous_direction=ImpulseDirection.BAJISTA,
-        index_previous_extreme=None,
-        ts_constitution=series.at(0),
+        zone_direction=ImpulseDirection.BAJISTA,
+        index_body=None,
+        tip_window=None,
+        ts_index=0,
     )
 
     assert zona is None
 
 
-def test_un_pul_de_altura_cero_se_conserva_como_zona_degenerada() -> None:
-    """La vela abrió y cerró en el mismo precio: la zona existe y mide cero."""
-    series = make_series([(100.0, 105.0, 95.0, 100.0), (100.0, 104.0, 99.0, 103.0)])
-    zona = penultimate_zone(
+def test_una_zona_en_contra_de_altura_cero_se_conserva_como_degenerada() -> None:
+    """Ninguna vela de la ventana dejó mecha por ese lado: existe y mide cero."""
+    series = make_series(
+        [
+            (95.0, 100.0, 95.0, 100.0),  # cierra en su propio máximo
+            (100.0, 100.0, 96.0, 97.0),  # y ninguna posterior sube más
+        ]
+    )
+    zona = _contra(
         series,
-        id_num=2,
-        timeframe="H4",
         direction=ImpulseDirection.ALCISTA,
-        previous_direction=ImpulseDirection.BAJISTA,
-        index_previous_extreme=0,
-        ts_constitution=series.at(1),
+        zone_direction=ImpulseDirection.ALCISTA,
+        index_body=0,
+        tip_window=(0, 1),
     )
 
     assert zona is not None
@@ -272,22 +357,27 @@ def test_un_pul_de_altura_cero_se_conserva_como_zona_degenerada() -> None:
     assert zona.height == pytest.approx(0.0)
 
 
-def test_el_pul_no_espera_a_ninguna_confirmacion() -> None:
-    """Su vela cerró antes de que el ID naciera: nace con él y ahí se queda."""
+def test_la_zona_en_contra_no_espera_a_ninguna_confirmacion() -> None:
+    """Sus velas cerraron antes de que el ID naciera: nace con él y ahí se queda."""
     series = make_series([(100.0, 102.0, 90.0, 92.0), (92.0, 99.0, 91.0, 98.0)])
-    zona = penultimate_zone(
+    zona = _contra(
         series,
-        id_num=2,
-        timeframe="H4",
+        kind=ZoneKind.ANTE_PENULTIMATE,
         direction=ImpulseDirection.ALCISTA,
-        previous_direction=ImpulseDirection.BAJISTA,
-        index_previous_extreme=0,
-        ts_constitution=series.at(1),
+        zone_direction=ImpulseDirection.BAJISTA,
+        index_body=0,
+        tip_window=(0, 0),
     )
 
     assert zona is not None
     assert zona.ts_birth == series.at(1)
     assert zona.ts_outer_known == series.at(0)
+
+
+def test_una_ventana_fuera_de_la_serie_se_rechaza() -> None:
+    series = make_series([(100.0, 102.0, 90.0, 92.0)])
+    with pytest.raises(StructureError, match="Ventana de mecha"):
+        furthest_wick_index(series, (0, 5), ImpulseDirection.ALCISTA)
 
 
 def test_el_ultimo_extremo_de_la_serie_no_tiene_vela_de_margen() -> None:

@@ -341,7 +341,8 @@ def test_las_confirmaciones_cuelgan_de_una_busqueda_y_hablan_del_id_de_h1(
 def test_el_ob_marcado_es_el_del_id_de_h1_alineado(
     cascade: CascadeRun, zones: ZonesRun
 ) -> None:
-    """Lo que se marca no es un patrón de velas: es el PUL del ID de H1, con sus
+    """Lo que se marca no es un patrón de velas: es la zona EN CONTRA del ID de
+    H1 —su PUL, o su APUL si nació tras una constitución abortada—, con sus
     bordes y su vela definitoria, y el ID va en la dirección del de H4."""
     por_id = {item.id_num: item for item in zones.per_timeframe[H1].items}
 
@@ -349,7 +350,7 @@ def test_el_ob_marcado_es_el_del_id_de_h1_alineado(
     assert marcas
     for mark in marcas:
         zoned = por_id[mark.id_num]
-        block = zoned.penultimate
+        block = zoned.against
         assert block is not None
         assert zoned.direction is mark.direction
         assert (mark.low, mark.high, mark.level) == (block.low, block.high, block.inner)
@@ -361,14 +362,16 @@ def test_el_ob_de_h1_no_se_marca_antes_de_existir(
     cascade: CascadeRun, zones: ZonesRun, run: ImpulseRun
 ) -> None:
     """La zona nace con lo último que llegue: la constitución del ID de H1 o la
-    confirmación de su PUL. Marcarla antes sería mirar al futuro."""
+    confirmación de su zona en contra. Marcarla antes sería mirar al futuro."""
     por_id = {item.id_num: item for item in zones.per_timeframe[H1].items}
     hourly = run.analyses[H1].bars.index
 
     for mark in _of(cascade, CascadeStep.CONFIRMA_PUL_H1):
         zoned = por_id[mark.id_num]
+        against = zoned.against
+        assert against is not None
         assert mark.timestamp >= zoned.ts_constitution
-        assert mark.timestamp >= zoned.penultimate.ts_birth
+        assert mark.timestamp >= against.ts_birth
         # Y el ID seguía vivo: la marca cae en su tramo, no después de morir.
         assert zoned.ts_end is None or mark.timestamp <= zoned.ts_end
         assert pd.Timestamp(mark.timestamp) in hourly
@@ -431,8 +434,8 @@ def test_el_toque_muere_con_la_ventana_de_h4(
 
     Por abajo el límite es la vela de H1 que MATA al ID, no su etiqueta: el toque
     va fechado en la vela fina y mientras esa vela de H1 no cierra el ID sigue
-    vivo. Con el PUL dentro del rango del ID —el ID anterior iba en el mismo
-    sentido— entrar en la zona y morir caen a menudo en la misma vela.
+    vivo. Con la zona en contra dentro del rango del ID —le pasa igual al PUL que
+    al APUL heredado— entrar en la zona y morir caen a menudo en la misma vela.
     """
     span = timedelta(hours=1)
     por_id = {item.id_num: item for item in zones.per_timeframe[H1].items}
@@ -440,7 +443,9 @@ def test_el_toque_muere_con_la_ventana_de_h4(
 
     for mark in _of(cascade, CascadeStep.TOQUE_PUL_H1):
         zoned = por_id[mark.id_num]
-        assert mark.timestamp >= zoned.penultimate.ts_birth
+        contra = zoned.against
+        assert contra is not None
+        assert mark.timestamp >= contra.ts_birth
         assert zoned.ts_end is None or mark.timestamp < zoned.ts_end + span
         busqueda = padres[padres[mark.parent].parent]
         assert busqueda.window_end is None or mark.timestamp < busqueda.window_end

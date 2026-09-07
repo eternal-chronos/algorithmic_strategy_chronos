@@ -95,14 +95,19 @@ def test_nadie_del_motor_lee_las_senales_de_zona() -> None:
     detector: la promesa hecha al propietario es que encenderlas no mueve un
     impulso, ni una zona, ni una rotura.
 
-    La cascada de `entries/` las lee y está permitida por la misma razón por la
-    que lo están ellas: tampoco decide nada. Que eso siga siendo cierto lo fija
-    el test de abajo, que prohíbe el camino de vuelta.
+    `entries/` las lee y está permitido: la cascada porque tampoco decide nada, y
+    las entradas de la fase 3.1 porque lo que deciden es una ORDEN y no una pieza
+    de estructura —el rechazo del UL de H1 es una señal de la fase 2.0 leída tal
+    cual, sin redefinirla—. Lo que la promesa protege es el motor: el ID, las
+    zonas y la rotura salen iguales con las señales encendidas que apagadas. Que
+    eso siga siendo cierto lo fija el test de abajo, que prohíbe el camino de
+    vuelta: de `structure/` no se puede llegar a `entries/`.
     """
     permitido = {
         SRC / "domain" / "structure" / "zone_signals.py",
         SRC / "application" / "structure" / "zone_signals.py",
         SRC / "application" / "entries" / "cascade.py",
+        SRC / "application" / "entries" / "trades.py",
     }
     for layer in ("domain", "application"):
         for path in _modules(layer):

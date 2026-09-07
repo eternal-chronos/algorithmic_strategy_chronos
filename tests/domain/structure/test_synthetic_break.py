@@ -25,8 +25,14 @@ from chronos.domain.structure.enums import (
 from chronos.domain.structure.errors import LookaheadError
 from chronos.domain.structure.synthetic_break import (
     MIRROR_CENTRE,
+    SYNTHETIC_ABORTED_DOWN,
+    SYNTHETIC_ABORTED_UP,
     SYNTHETIC_BREAK_DOWN,
     SYNTHETIC_BREAK_UP,
+    SYNTHETIC_COUNTER_EXTREME_DOWN,
+    SYNTHETIC_COUNTER_EXTREME_UP,
+    SYNTHETIC_INHERITED_DOWN,
+    SYNTHETIC_INHERITED_UP,
     SYNTHETIC_OVERLAP_DOWN,
     SYNTHETIC_OVERLAP_UP,
     SYNTHETIC_PENULTIMATE_DOWN,
@@ -34,7 +40,7 @@ from chronos.domain.structure.synthetic_break import (
     SYNTHETIC_SAME_DOWN,
     SYNTHETIC_SAME_UP,
 )
-from chronos.domain.structure.zone_break import ZoneBreakLevels
+from chronos.domain.structure.zone_break import AgainstZone, ZoneBreakLevels
 from chronos.domain.structure.zones import ZoneKind
 from tests.domain.structure.conftest import run_break
 
@@ -168,78 +174,76 @@ def test_con_la_regla_vieja_el_primer_id_muere_dos_barras_antes() -> None:
     assert old.impulses[1].extreme == pytest.approx(2018.00)
 
 
-# --- Casos 4, 5 y 6: el lado en contra y el PUL ------------------------------
+# --- Casos 4, 5 y 6: el lado en contra sin zona ------------------------------
 
 
-def test_caso_4_las_tres_velas_contra_el_pul() -> None:
-    """e8 cierra dentro, e9 perfora con mecha y cierra dentro, e10 atraviesa."""
-    _, detector = run_break(SYNTHETIC_PENULTIMATE_UP)
-    second = detector.impulses[1]
-    avoided = [item for item in detector.avoided_breaks if item.id_num == second.id_num]
-
-    assert [item.index for item in avoided] == [8, 9]
-    assert all(item.kind is BreakKind.EN_CONTRA for item in avoided)
-    assert all(item.zone is ZoneKind.PENULTIMATE for item in avoided)
-    assert avoided[0].line == pytest.approx(1978.00)
-    assert avoided[0].zone_inner == pytest.approx(1986.00)
-    assert avoided[0].zone_outer == pytest.approx(1976.00)
-    # Salvarse por el lado en contra no mueve nada: el ancla la fija la vela del
-    # arranque de la pierna y esa vela no cambia.
-    assert all(item.extended_extreme is False for item in avoided)
-    assert second.extreme_extensions == 0
-
-    assert second.index_end == 10
-    assert second.exit_break_kind is BreakKind.EN_CONTRA
-    assert second.exit_level_source is BreakLevelSource.PENULTIMATE
-
-
-def test_el_pul_es_el_cuerpo_de_la_vela_del_extremo_anterior() -> None:
-    """La vela del PUL del ID#2 es e2, la misma que llevaba el UL del ID#1."""
-    _, detector = run_break(SYNTHETIC_PENULTIMATE_UP)
-    first, second = detector.impulses[0], detector.impulses[1]
-
-    assert second.index_penultimate == 2 == first.index_extreme_at_constitution
-    assert first.index_penultimate is None
-
-
-def test_caso_6_con_el_pul_el_id_ya_no_muere_por_linea() -> None:
-    """e8 cierra en 1977, bajo la línea 1978, pero dentro del PUL [1976, 1986]."""
-    _, detector = run_break(SYNTHETIC_PENULTIMATE_UP)
-    second = detector.impulses[1]
-    saved = detector.avoided_breaks[0]
-
-    assert second.direction is ImpulseDirection.ALCISTA
-    assert second.anchor == pytest.approx(1978.00)
-    assert second.index_constitution == 7
-
-    assert saved.index == 8
-    assert saved.id_num == second.id_num
-    assert saved.kind is BreakKind.EN_CONTRA
-    assert saved.close == pytest.approx(1977.00)
-    assert saved.line == pytest.approx(1978.00)
-    # Con la regla de la fase 1 esta vela habría matado al ID.
-    assert saved.close < saved.line
-
-
-def test_caso_5_sin_pul_el_primer_id_muere_por_linea() -> None:
+def test_caso_5_sin_zona_en_contra_el_primer_id_muere_por_linea() -> None:
     """El ID#1 no tiene ID anterior del que sacar zona: ese lado es la línea."""
     _, detector = run_break(SYNTHETIC_PENULTIMATE_UP)
     first = detector.impulses[0]
 
     assert first.index_penultimate is None
+    assert first.against_source is BreakLevelSource.LINE
     assert first.index_end == 5
     assert first.exit_break_kind is BreakKind.EN_CONTRA
     assert first.exit_level_source is BreakLevelSource.LINE
-    assert detector.diagnostics["roturas_en_contra_por_linea"] == 1
-    assert detector.diagnostics["roturas_en_contra_por_zona"] == 1
 
 
-def test_solo_el_primer_id_se_queda_sin_pul() -> None:
-    """Todos los demás heredan el UL del que murió antes."""
+def test_caso_4_el_id_que_viene_del_reves_no_tiene_pul() -> None:
+    """El ID#2 nace de la rotura EN CONTRA del #1, que iba al revés que él.
+
+    Entonces el extremo del ID#1 no queda por detrás sino delante —es el ancla
+    del #2— y no hay PUL. Lo que habría es el APUL heredado, pero el ID#1 no
+    llevaba ninguna zona que prestar, así que este lado también se rompe por
+    línea: la cadena se hereda vacía.
+    """
     _, detector = run_break(SYNTHETIC_PENULTIMATE_UP)
+    first, second = detector.impulses[0], detector.impulses[1]
 
-    sin_pul = [item.id_num for item in detector.impulses if item.index_penultimate is None]
-    assert sin_pul == [detector.impulses[0].id_num]
+    assert second.direction is ImpulseDirection.ALCISTA
+    assert first.direction is ImpulseDirection.BAJISTA
+    # La vela del extremo anterior sigue apuntada: es el dato que explica por qué
+    # este ID no lleva PUL, no un nivel.
+    assert second.index_penultimate == 2 == first.index_extreme_at_constitution
+    assert second.penultimate_direction is ImpulseDirection.BAJISTA
+    assert not second.has_penultimate
+    assert not second.has_ante_penultimate
+    assert second.against_source is BreakLevelSource.LINE
+
+
+def test_caso_6_sin_zona_heredada_el_id_muere_en_su_linea_del_ancla() -> None:
+    """e8 cierra en 1977, bajo la línea 1978, y sin zona detrás eso lo mata."""
+    _, detector = run_break(SYNTHETIC_PENULTIMATE_UP)
+    second = detector.impulses[1]
+
+    assert second.anchor == pytest.approx(1978.00)
+    assert second.index_constitution == 7
+    assert second.index_end == 8
+    assert second.exit_break_kind is BreakKind.EN_CONTRA
+    assert second.exit_level_source is BreakLevelSource.LINE
+    assert detector.avoided_breaks == ()
+    assert detector.diagnostics["roturas_en_contra_por_linea"] == 2
+    assert detector.diagnostics["roturas_en_contra_por_zona"] == 0
+
+
+def test_solo_lleva_pul_el_que_viene_de_un_id_del_mismo_sentido() -> None:
+    """La regla en una línea, sobre las cuatro series que tienen ID encadenados."""
+    for serie in (
+        SYNTHETIC_PENULTIMATE_UP,
+        SYNTHETIC_SAME_UP,
+        SYNTHETIC_INHERITED_UP,
+        SYNTHETIC_BREAK_UP,
+    ):
+        _, detector = run_break(serie)
+        previos = [None, *detector.impulses[:-1]]
+        for previo, impulso in zip(previos, detector.impulses, strict=True):
+            mismo_sentido = previo is not None and previo.direction is impulso.direction
+            assert impulso.has_penultimate is mismo_sentido or (
+                # salvo cuando el retroceso de aquel ID trae un APUL propio
+                impulso.has_ante_penultimate
+            )
+            if not mismo_sentido:
+                assert not impulso.has_penultimate
 
 
 # --- Caso 8: la vela que cumple las dos condiciones a la vez -----------------
@@ -424,11 +428,35 @@ def test_lookahead_el_pul_antes_de_que_su_vela_cierre() -> None:
     levels.advance(4)
 
     with pytest.raises(LookaheadError, match="la vela del PUL"):
-        levels.penultimate_level(
+        levels.against_level(
             direction=ImpulseDirection.ALCISTA,
             anchor=1978.00,
-            index_penultimate=4,
-            previous_direction=ImpulseDirection.BAJISTA,
+            against=AgainstZone(
+                source=BreakLevelSource.PENULTIMATE,
+                index=4,
+                direction=ImpulseDirection.ALCISTA,
+                tip_window=(4, 4),
+            ),
+            through=3,
+        )
+
+
+def test_lookahead_la_mecha_de_la_zona_antes_de_que_cierre_su_vela() -> None:
+    """La punta se busca en una ventana, y la ventana tampoco puede ir por delante."""
+    series, _ = run_break(SYNTHETIC_PENULTIMATE_UP)
+    levels = ZoneBreakLevels(series, timeframe="H4")
+    levels.advance(4)
+
+    with pytest.raises(LookaheadError, match="la mecha de la vela del PUL"):
+        levels.against_level(
+            direction=ImpulseDirection.ALCISTA,
+            anchor=1978.00,
+            against=AgainstZone(
+                source=BreakLevelSource.PENULTIMATE,
+                index=2,
+                direction=ImpulseDirection.ALCISTA,
+                tip_window=(2, 4),
+            ),
             through=3,
         )
 
@@ -452,66 +480,56 @@ def test_el_doji_no_rompe_ni_estira_el_extremo() -> None:
 
 # --- Nadie nace roto, también con la regla nueva ------------------------------
 
-#: La contraria cierra ENTRE la línea del ancla y el borde exterior del PUL. Con
-#: la línea el ID nacería roto y no llega a nacer; con la zona el PUL lo salva y
-#: nace igual que cualquier otro. Escrito a mano:
-#:   f0 (1990, 1996, 1989, 1995) verde · semilla; ancla del ID#1 = 1995
-#:   f1 (1995, 1996, 1985, 1986) roja  · abre la pierna bajista
-#:   f2 (1986, 1987, 1975, 1976) roja  · extremo del ID#1; su cuerpo será el PUL#2
-#:   f3 (1976, 1981, 1975, 1980) verde · CONSTITUYE ID#1 bajista
-#:   f4 (1980, 1981, 1977, 1978) roja  · retroceso; ancla A1 del ID#2 = 1978
-#:   f5 (1978, 1998, 1977, 1997) verde · mata al ID#1 por línea y abre la alcista
-#:   f6 (1997, 2000, 1996, 1999) verde · extremo del ID#2
-#:   f7 (1999, 2000, 1976.50, 1977) roja · contraria: 1977 < 1978 (línea) y
-#:                                         > 1976 (borde exterior del PUL)
-BORN_BROKEN_ONLY_BY_LINE: tuple[tuple[float, float, float, float], ...] = (
-    (1990.00, 1996.00, 1989.00, 1995.00),
-    (1995.00, 1996.00, 1985.00, 1986.00),
-    (1986.00, 1987.00, 1975.00, 1976.00),
-    (1976.00, 1981.00, 1975.00, 1980.00),
-    (1980.00, 1981.00, 1977.00, 1978.00),
-    (1978.00, 1998.00, 1977.00, 1997.00),
-    (1997.00, 2000.00, 1996.00, 1999.00),
-    (1999.00, 2000.00, 1976.50, 1977.00),
+#: La contraria que constituiría el ID#3 cierra ENTRE el borde exterior de su PUL
+#: y la línea del ancla. Con la zona el ID nacería roto y no llega a nacer; con la
+#: línea nace igual que cualquier otro. Son las nueve primeras velas de
+#: `SYNTHETIC_SAME_UP` con otra vela contraria al final. Escrito a mano:
+#:   a0..a8   igual que en la serie del PUL de mecha; el ID#2 alcista muere A
+#:            FAVOR en a7 y la pierna sigue subiendo
+#:   a9 (2015, 2016, 2003.50, 2004) roja · contraria: constituiría el ID#3 con
+#:            ancla 2003 y extremo 2015, pero 2004 < 2005, que es el borde
+#:            exterior de su PUL —la mecha del extremo del ID#2, en a5—
+BORN_BROKEN_ONLY_BY_ZONE: tuple[tuple[float, float, float, float], ...] = (
+    *SYNTHETIC_SAME_UP[:9],
+    (2015.00, 2016.00, 2003.50, 2004.00),
 )
 
 
-def test_el_pul_deja_nacer_al_id_que_la_linea_habria_impedido() -> None:
-    _, detector = run_break(BORN_BROKEN_ONLY_BY_LINE)
+def test_la_zona_impide_nacer_al_id_que_la_linea_habria_dejado() -> None:
+    """El PUL de mecha cae DENTRO del rango, así que también adelanta esto."""
+    _, detector = run_break(BORN_BROKEN_ONLY_BY_ZONE)
 
-    assert detector.diagnostics["constituciones_abortadas_por_nacer_roto"] == 0
-    impulse = detector.impulses[1]
-    assert impulse.direction is ImpulseDirection.ALCISTA
-    assert impulse.index_constitution == 7
-    assert impulse.anchor == pytest.approx(1978.00)
-    assert impulse.index_penultimate == 2
-
-
-def test_sin_la_regla_nueva_esa_misma_vela_no_constituye() -> None:
-    """Las mismas velas por línea: 1977 ya está más allá del ancla, el ID#2 no nace."""
-    _, detector = run_break(BORN_BROKEN_ONLY_BY_LINE, break_by_zone=False)
-
-    assert len(detector.impulses) == 1  # sólo el ID#1, que sí nació
+    assert len(detector.impulses) == 2  # el ID#3 no llega a nacer
     assert detector.diagnostics["constituciones_abortadas_por_nacer_roto"] == 1
     fallida = detector.aborted_constitutions[0]
-    assert fallida.index == 7
+    assert fallida.index == 9
     assert fallida.aborted_direction is ImpulseDirection.ALCISTA
     assert fallida.new_leg_direction is ImpulseDirection.BAJISTA
-    assert fallida.level == pytest.approx(1978.00)
-    assert fallida.level_source is BreakLevelSource.LINE
+    assert fallida.level == pytest.approx(2005.00)
+    assert fallida.level_source is BreakLevelSource.PENULTIMATE
+
+
+def test_sin_la_regla_nueva_esa_misma_vela_si_constituye() -> None:
+    """Las mismas velas por línea: 2004 todavía no pasa del ancla (2003)."""
+    _, detector = run_break(BORN_BROKEN_ONLY_BY_ZONE, break_by_zone=False)
+
+    assert detector.diagnostics["constituciones_abortadas_por_nacer_roto"] == 0
+    impulse = detector.impulses[2]
+    assert impulse.direction is ImpulseDirection.ALCISTA
+    assert impulse.index_constitution == 9
+    assert impulse.anchor == pytest.approx(2003.00)
 
 
 # --- Casos 11, 12 y 13: el PUL de MECHA --------------------------------------
 
 
-def test_caso_11_el_id_que_continua_tendencia_lleva_el_pul_de_mecha() -> None:
-    """Los dos ID llevan PUL; lo que cambia es qué tramo de la vela es la zona.
+def test_caso_11_solo_el_id_que_continua_tendencia_lleva_pul() -> None:
+    """El PUL es el UL del ID anterior, y sólo vale si aquél iba igual.
 
-    El lado en contra es siempre el extremo del ID inmediatamente anterior. Para
-    el ID#2 alcista ése es el del ID#1 bajista, cuya mecha apunta hacia abajo:
-    lo que mira al ID#2 es el CUERPO. Para el ID#3 alcista el anterior es el ID#2,
-    también alcista: su mecha apunta hacia arriba, hacia este ID, así que la zona
-    es esa MECHA —el UL viejo tal cual—.
+    El ID#2 alcista nace de la rotura EN CONTRA del ID#1 bajista: aquel extremo
+    es su ancla, no un nivel detrás, así que no tiene PUL —y el ID#1 no llevaba
+    ninguna zona que prestarle—. El ID#3, en cambio, continúa al ID#2: su
+    extremo quedó por detrás y su MECHA es el PUL del #3.
     """
     _, detector = run_break(SYNTHETIC_SAME_UP)
     primero, segundo, tercero = detector.impulses
@@ -524,47 +542,50 @@ def test_caso_11_el_id_que_continua_tendencia_lleva_el_pul_de_mecha() -> None:
     assert primero.index_penultimate is None
     assert primero.penultimate_direction is None
 
-    assert segundo.against_source is BreakLevelSource.PENULTIMATE
+    assert segundo.against_source is BreakLevelSource.LINE
+    assert not segundo.has_penultimate
     assert segundo.index_penultimate == 2
     assert segundo.penultimate_direction is ImpulseDirection.BAJISTA
 
     assert tercero.against_source is BreakLevelSource.PENULTIMATE
-    # La vela del extremo del ID#2, no la de un ID más atrás: el nivel en contra
-    # es siempre el de al lado.
+    # La vela del extremo del ID#2, no la de un ID más atrás.
     assert tercero.index_penultimate == 5
     assert tercero.index_against == 5
     assert tercero.penultimate_direction is ImpulseDirection.ALCISTA
+    assert tercero.against_direction is ImpulseDirection.ALCISTA
 
 
-def test_caso_11_el_tramo_lo_decide_el_sentido_del_id_anterior() -> None:
-    """La misma función y dos geometrías: el cuerpo o la mecha."""
+def test_caso_11_el_borde_lo_decide_hacia_donde_mira_la_mecha() -> None:
+    """La misma geometría leída desde los dos lados: la punta o el cuerpo.
+
+    Es la mecha del extremo del ID#2 —a5, del cuerpo 2005 a la punta 2006—. Para
+    un ID alcista que viene detrás, el precio que vuelve en contra encuentra
+    antes la punta; para uno bajista, antes el cuerpo.
+    """
     series, detector = run_break(SYNTHETIC_SAME_UP)
     niveles = ZoneBreakLevels(series, timeframe="H4")
     niveles.advance(len(series) - 1)
-
-    cuerpo = niveles.penultimate_level(
+    zona = AgainstZone(
+        source=BreakLevelSource.PENULTIMATE,
+        index=5,
         direction=ImpulseDirection.ALCISTA,
-        anchor=1976.00,
-        index_penultimate=2,
-        previous_direction=ImpulseDirection.BAJISTA,
-        through=11,
+        tip_window=(5, 5),
     )
-    assert cuerpo.source is BreakLevelSource.PENULTIMATE
-    assert cuerpo.inner == pytest.approx(1986.00)  # cuerpo alto de a2
-    assert cuerpo.price == pytest.approx(1976.00)  # cuerpo bajo de a2
 
-    mecha = niveles.penultimate_level(
-        direction=ImpulseDirection.ALCISTA,
-        anchor=2003.00,
-        index_penultimate=5,
-        previous_direction=ImpulseDirection.ALCISTA,
-        through=11,
+    desde_arriba = niveles.against_level(
+        direction=ImpulseDirection.ALCISTA, anchor=2003.00, against=zona, through=11
     )
-    assert mecha.source is BreakLevelSource.PENULTIMATE
-    assert mecha.inner == pytest.approx(2006.00)  # punta de la mecha de a5
-    assert mecha.price == pytest.approx(2005.00)  # borde alto del cuerpo de a5
-    assert mecha.line == pytest.approx(2003.00)
-    assert not mecha.is_flat
+    assert desde_arriba.source is BreakLevelSource.PENULTIMATE
+    assert desde_arriba.inner == pytest.approx(2006.00)  # punta de la mecha de a5
+    assert desde_arriba.price == pytest.approx(2005.00)  # borde alto del cuerpo
+    assert desde_arriba.line == pytest.approx(2003.00)
+    assert not desde_arriba.is_flat
+
+    desde_abajo = niveles.against_level(
+        direction=ImpulseDirection.BAJISTA, anchor=2020.00, against=zona, through=11
+    )
+    assert desde_abajo.inner == pytest.approx(2005.00)
+    assert desde_abajo.price == pytest.approx(2006.00)
 
     assert detector.impulses[2].anchor == pytest.approx(2003.00)
 
@@ -613,10 +634,12 @@ def test_el_recuento_de_gobiernos_del_lado_en_contra_suma_los_impulsos() -> None
     _, detector = run_break(SYNTHETIC_SAME_UP)
     diagnostico = detector.diagnostics
 
-    assert diagnostico["impulsos_con_pul"] == 2
-    assert diagnostico["impulsos_sin_zona_en_contra"] == 1
+    assert diagnostico["impulsos_con_pul"] == 1
+    assert diagnostico["impulsos_con_apul"] == 0
+    assert diagnostico["impulsos_sin_zona_en_contra"] == 2
     total = (
         diagnostico["impulsos_con_pul"]
+        + diagnostico["impulsos_con_apul"]
         + diagnostico["impulsos_sin_zona_en_contra"]
     )
     assert total == len(detector.impulses)
@@ -639,6 +662,137 @@ def test_el_pul_no_se_clasifica_distinto_con_las_zonas_apagadas() -> None:
     )
 
 
+# --- Casos 14, 15 y 16: el APUL tras una constitución abortada ---------------
+
+
+def test_caso_14_el_id_nacido_tras_una_abortada_lleva_apul_y_no_pul() -> None:
+    """f8 aborta la constitución del ID bajista y el ID#2 nace en el mismo sentido.
+
+    El extremo del ID#1 queda entonces en el lado a FAVOR del #2, así que el PUL
+    no vale: el nivel sale del último ID INTERIOR contrario de aquel retroceso,
+    que fijó su extremo en f5.
+    """
+    _, detector = run_break(SYNTHETIC_ABORTED_UP)
+    primero, segundo = detector.impulses
+
+    assert primero.direction is ImpulseDirection.ALCISTA
+    assert segundo.direction is ImpulseDirection.ALCISTA
+    assert [item.index for item in detector.aborted_constitutions] == [8]
+
+    assert primero.against_source is BreakLevelSource.LINE
+    assert primero.index_ante_penultimate is None
+
+    assert segundo.against_source is BreakLevelSource.ANTE_PENULTIMATE
+    assert segundo.has_ante_penultimate
+    assert not segundo.has_penultimate
+    # La vela del extremo del ID interior bajista, no la del extremo del ID#1
+    # (f2), que va en el mismo sentido que éste.
+    assert segundo.index_ante_penultimate == 5
+    assert segundo.index_against == 5
+    assert segundo.against_direction is ImpulseDirection.BAJISTA
+    # El PUL sigue apuntado —es la vela del extremo del ID#1— pero no gobierna.
+    assert segundo.index_penultimate == 2
+
+
+def test_caso_14_la_geometria_del_apul_es_el_ul_leido_del_otro_lado() -> None:
+    """De la BASE DEL CUERPO a la PUNTA DE LA MECHA, hacia la rotura en contra."""
+    series, _ = run_break(SYNTHETIC_ABORTED_UP)
+    niveles = ZoneBreakLevels(series, timeframe="H4")
+    niveles.advance(len(series) - 1)
+
+    apul = niveles.against_level(
+        direction=ImpulseDirection.ALCISTA,
+        anchor=1991.00,
+        against=AgainstZone(
+            source=BreakLevelSource.ANTE_PENULTIMATE,
+            index=5,
+            direction=ImpulseDirection.BAJISTA,
+            tip_window=(3, 6),
+        ),
+        through=12,
+    )
+    assert apul.source is BreakLevelSource.ANTE_PENULTIMATE
+    assert apul.inner == pytest.approx(2010.00)  # cuerpo bajo de f5
+    assert apul.price == pytest.approx(2009.00)  # punta de su mecha
+    assert apul.line == pytest.approx(1991.00)
+    assert not apul.is_flat
+
+
+def test_caso_15_cierre_dentro_del_apul_no_rompe() -> None:
+    """f11 perfora el borde exterior con la mecha (2008) y cierra en 2009.50."""
+    _, detector = run_break(SYNTHETIC_ABORTED_UP)
+    segundo = detector.impulses[1]
+
+    assert segundo.index_end == 12
+    # Como el PUL de mecha, el APUL cae por encima de la línea del ancla (1991),
+    # así que un cierre dentro de la zona tampoco había pasado de la línea: aquí
+    # la zona no salva ninguna rotura, la adelanta.
+    assert not [item for item in detector.avoided_breaks if item.index == 11]
+
+
+def test_caso_16_cierre_mas_alla_del_apul_mata_el_id() -> None:
+    """f12 cierra en 2006: bajo el borde 2009 y muy por encima del ancla."""
+    _, detector = run_break(SYNTHETIC_ABORTED_UP)
+    segundo = detector.impulses[1]
+
+    assert segundo.exit_break_kind is BreakKind.EN_CONTRA
+    assert segundo.exit_level_source is BreakLevelSource.ANTE_PENULTIMATE
+
+    rotura = detector.events[-1]
+    assert rotura.broken_id_num == segundo.id_num
+    assert rotura.level_source is BreakLevelSource.ANTE_PENULTIMATE
+    assert rotura.level == pytest.approx(2009.00)
+    assert rotura.line == pytest.approx(1991.00)
+    assert rotura.close == pytest.approx(2006.00)
+    assert rotura.close > rotura.line
+
+
+def test_el_apul_no_se_clasifica_distinto_con_las_zonas_apagadas() -> None:
+    """La estructura interior se lee igual con el interruptor puesto o quitado."""
+    _, apagado = run_break(SYNTHETIC_ABORTED_UP, break_by_zone=False)
+    segundo = apagado.impulses[1]
+
+    assert segundo.against_source is BreakLevelSource.ANTE_PENULTIMATE
+    assert segundo.index_ante_penultimate == 5
+    # Y ahí la zona no manda: sin ella el ID sigue vivo al final de la serie.
+    assert segundo.index_end is None
+    assert apagado.diagnostics["impulsos_con_apul"] == 1
+
+
+def test_una_continuacion_limpia_no_lleva_apul() -> None:
+    """Sin abortada de por medio, dos ID del mismo sentido siguen con PUL.
+
+    Es la diferencia entre `SYNTHETIC_SAME_UP` —el ID#2 muere A FAVOR y el #3
+    nace más allá— y `SYNTHETIC_ABORTED_UP`, donde falta el ID de en medio.
+    """
+    _, detector = run_break(SYNTHETIC_SAME_UP)
+
+    assert not detector.aborted_constitutions
+    assert all(not impulse.has_ante_penultimate for impulse in detector.impulses)
+
+
+def test_el_apul_bajista_es_el_espejo_del_alcista() -> None:
+    """La reflexión invierte todas las desigualdades a la vez (§5.10)."""
+    _, alcista = run_break(SYNTHETIC_ABORTED_UP)
+    _, bajista = run_break(SYNTHETIC_ABORTED_DOWN)
+
+    assert [impulse.direction for impulse in bajista.impulses] == [
+        ImpulseDirection.BAJISTA,
+        ImpulseDirection.BAJISTA,
+    ]
+    assert [
+        impulse.against_source for impulse in bajista.impulses
+    ] == [impulse.against_source for impulse in alcista.impulses]
+    assert [
+        impulse.index_ante_penultimate for impulse in bajista.impulses
+    ] == [impulse.index_ante_penultimate for impulse in alcista.impulses]
+
+    espejo, original = bajista.events[-1], alcista.events[-1]
+    assert espejo.level == pytest.approx(_mirrored(original.level))
+    assert espejo.close == pytest.approx(_mirrored(original.close))
+    assert espejo.level_source is original.level_source
+
+
 def test_el_espejo_del_pul_de_mecha_produce_la_historia_reflejada() -> None:
     """La serie bajista no se escribe a mano: es la alcista en el espejo."""
     _, alcista = run_break(SYNTHETIC_SAME_UP)
@@ -653,3 +807,264 @@ def test_el_espejo_del_pul_de_mecha_produce_la_historia_reflejada() -> None:
         assert abajo.extreme == pytest.approx(_mirrored(arriba.extreme))
         assert abajo.index_end == arriba.index_end
         assert abajo.exit_level_source is arriba.exit_level_source
+
+
+# --- Casos 17 a 20: el APUL HEREDADO y la punta de toda la vida --------------
+
+
+def test_caso_17_la_punta_del_pul_se_lleva_la_mecha_de_toda_la_vida() -> None:
+    """El UL#1 mide [1977, 1975]; su PUL, [1977, 1974].
+
+    La diferencia es g4: una mecha que bajó a 1974 con el ID#1 todavía vivo y que
+    la vela del extremo, g2, no cubría. La vela que lo rompió —g5, con su mecha
+    en 1973— queda fuera: ésa ya no es mecha de este ID.
+    """
+    series, detector = run_break(SYNTHETIC_INHERITED_UP)
+    primero, segundo = detector.impulses[0], detector.impulses[1]
+    abajo = ImpulseDirection.BAJISTA
+
+    # El UL del ID#1, que es el que juzgó su rotura a favor: sólo su vela.
+    assert series.body_edge_towards(2, abajo) == pytest.approx(1977.00)
+    assert series.wick_tip_towards(2, abajo) == pytest.approx(1975.00)
+    assert primero.exit_break_kind is BreakKind.A_FAVOR
+    assert detector.events[0].level == pytest.approx(1975.00)
+
+    # Y la misma zona vista como PUL del ID#2: la ventana es la vida del ID#1.
+    assert segundo.against_source is BreakLevelSource.PENULTIMATE
+    assert segundo.index_against == 2
+    assert segundo.against_tip_window == (1, 4)
+
+    niveles = ZoneBreakLevels(series, timeframe="H4")
+    niveles.advance(len(series) - 1)
+    pul = niveles.against_level(
+        direction=ImpulseDirection.BAJISTA,
+        anchor=segundo.anchor,
+        against=AgainstZone(
+            source=BreakLevelSource.PENULTIMATE,
+            index=2,
+            direction=abajo,
+            tip_window=(1, 4),
+        ),
+        through=13,
+    )
+    assert pul.inner == pytest.approx(1974.00)  # la mecha de g4
+    assert pul.price == pytest.approx(1977.00)  # el borde del cuerpo no se mueve
+
+
+def test_caso_18_el_id_que_viene_del_reves_hereda_la_zona_como_apul() -> None:
+    """El ID#3 nace de la rotura EN CONTRA del #2: sin PUL, con el APUL de aquél."""
+    _, detector = run_break(SYNTHETIC_INHERITED_UP)
+    segundo, tercero = detector.impulses[1], detector.impulses[2]
+
+    assert tercero.direction is ImpulseDirection.ALCISTA
+    assert segundo.direction is ImpulseDirection.BAJISTA
+    assert not tercero.has_penultimate
+    assert tercero.has_ante_penultimate
+    assert tercero.against_source is BreakLevelSource.ANTE_PENULTIMATE
+    # Los mismos dos precios sobre las mismas velas que llevaba el ID#2.
+    assert tercero.index_against == segundo.index_against == 2
+    assert tercero.against_tip_window == segundo.against_tip_window == (1, 4)
+    assert tercero.against_direction is ImpulseDirection.BAJISTA
+    assert detector.diagnostics["impulsos_con_apul_heredado"] == 1
+
+
+def test_caso_18_la_zona_heredada_se_lee_desde_el_otro_lado() -> None:
+    """Los papeles se cambian: lo que era la punta pasa a ser el borde exterior."""
+    series, detector = run_break(SYNTHETIC_INHERITED_UP)
+    niveles = ZoneBreakLevels(series, timeframe="H4")
+    niveles.advance(len(series) - 1)
+    zona = AgainstZone(
+        source=BreakLevelSource.ANTE_PENULTIMATE,
+        index=2,
+        direction=ImpulseDirection.BAJISTA,
+        tip_window=(1, 4),
+    )
+
+    apul = niveles.against_level(
+        direction=ImpulseDirection.ALCISTA,
+        anchor=1967.00,
+        against=zona,
+        through=13,
+    )
+    assert apul.source is BreakLevelSource.ANTE_PENULTIMATE
+    assert apul.inner == pytest.approx(1977.00)  # el borde del cuerpo de g2
+    assert apul.price == pytest.approx(1974.00)  # la mecha de g4
+    assert apul.line == pytest.approx(1967.00)
+    assert detector.impulses[2].anchor == pytest.approx(1967.00)
+
+
+def test_caso_19_cierre_dentro_del_apul_heredado_no_rompe() -> None:
+    """g12 perfora el borde exterior con la mecha (1973.50) y cierra en 1975."""
+    _, detector = run_break(SYNTHETIC_INHERITED_UP)
+    tercero = detector.impulses[2]
+
+    assert tercero.index_end == 13  # muere una vela más tarde, no aquí
+    assert not [item for item in detector.avoided_breaks if item.index == 12]
+
+
+def test_caso_20_cierre_mas_alla_del_apul_heredado_mata_el_id() -> None:
+    """g13 cierra en 1973, bajo el borde 1974 y muy por encima del ancla."""
+    _, detector = run_break(SYNTHETIC_INHERITED_UP)
+    tercero = detector.impulses[2]
+
+    assert tercero.exit_break_kind is BreakKind.EN_CONTRA
+    assert tercero.exit_level_source is BreakLevelSource.ANTE_PENULTIMATE
+
+    rotura = detector.events[-1]
+    assert rotura.broken_id_num == tercero.id_num
+    assert rotura.level == pytest.approx(1974.00)
+    assert rotura.line == pytest.approx(1967.00)
+    assert rotura.close == pytest.approx(1973.00)
+    # Como el PUL de mecha: la zona heredada cae DENTRO del rango del ID, así que
+    # ADELANTA la rotura en contra en vez de evitarla.
+    assert rotura.close > rotura.line
+
+
+def test_con_la_regla_vieja_el_id_heredero_no_muere_ahi() -> None:
+    """El contraste sobre las mismas velas: por línea el ID#3 sigue vivo en g13."""
+    _, por_linea = run_break(SYNTHETIC_INHERITED_UP, break_by_zone=False)
+
+    assert por_linea.impulses[-1].index_end is None
+
+
+def test_el_espejo_de_la_zona_heredada_produce_la_historia_reflejada() -> None:
+    _, arriba = run_break(SYNTHETIC_INHERITED_UP)
+    _, abajo = run_break(SYNTHETIC_INHERITED_DOWN)
+
+    assert [item.index_end for item in abajo.impulses] == [
+        item.index_end for item in arriba.impulses
+    ]
+    assert [item.against_source for item in abajo.impulses] == [
+        item.against_source for item in arriba.impulses
+    ]
+    assert [item.against_tip_window for item in abajo.impulses] == [
+        item.against_tip_window for item in arriba.impulses
+    ]
+    for uno, otro in zip(arriba.events, abajo.events, strict=True):
+        assert otro.level == pytest.approx(_mirrored(uno.level), abs=TOLERANCE)
+        assert otro.line == pytest.approx(_mirrored(uno.line), abs=TOLERANCE)
+
+
+def test_el_lado_en_contra_por_ancla_no_toca_el_lado_a_favor() -> None:
+    """La regla de la fase 3.0: el UL manda a favor y el ancla en contra.
+
+    Sobre la misma serie, el ID#1 sigue muriendo A FAVOR en el borde exterior de
+    su UL —eso no cambia— y el ID#3 deja de morir por su APUL heredado: espera a
+    la línea del ancla, que en g13 todavía no ha llegado.
+    """
+    _, detector = run_break(SYNTHETIC_INHERITED_UP, break_against_by_zone=False)
+    primero, tercero = detector.impulses[0], detector.impulses[2]
+
+    assert primero.exit_break_kind is BreakKind.A_FAVOR
+    assert primero.exit_level_source is BreakLevelSource.LAST
+    assert detector.events[0].level == pytest.approx(1975.00)
+
+    # La zona se sigue clasificando aunque no gobierne: es la que se dibuja.
+    assert tercero.against_source is BreakLevelSource.ANTE_PENULTIMATE
+    assert tercero.index_end is None
+    assert all(
+        event.level_source is not BreakLevelSource.ANTE_PENULTIMATE
+        for event in detector.events
+    )
+
+
+# --- Casos 21, 22 y 23: el APUL del EXTREMO CONTRARIO -----------------------
+
+
+def test_caso_21_el_extremo_del_id_contrario_que_queda_detras_es_el_apul() -> None:
+    """El ID#2 no hereda: el extremo del ID#1 quedó por encima de su ancla."""
+    _, detector = run_break(SYNTHETIC_COUNTER_EXTREME_UP)
+    primero, segundo = detector.impulses[0], detector.impulses[1]
+
+    assert primero.direction is ImpulseDirection.BAJISTA
+    assert primero.exit_break_kind is BreakKind.A_FAVOR
+    assert primero.extreme == pytest.approx(1977.00)
+    assert segundo.direction is ImpulseDirection.ALCISTA
+    assert segundo.anchor == pytest.approx(1971.00)  # el cuerpo bajo de h5
+
+    assert not segundo.has_penultimate
+    assert segundo.has_ante_penultimate
+    assert not segundo.against_inherited
+    # La vela del extremo del ID#1, con la ventana de su vida: h1 a h3, que es
+    # hasta la anterior a la que lo rompió.
+    assert segundo.index_against == 2
+    assert segundo.against_tip_window == (1, 3)
+    assert segundo.against_direction is ImpulseDirection.BAJISTA
+    assert detector.diagnostics["impulsos_con_apul_del_extremo_contrario"] == 1
+    assert detector.diagnostics["impulsos_con_apul_heredado"] == 0
+
+
+def test_caso_21_ese_apul_se_lee_por_el_cuerpo_como_el_del_retroceso() -> None:
+    """La mecha apunta al lado de la rotura, así que el cuerpo es el interior."""
+    series, detector = run_break(SYNTHETIC_COUNTER_EXTREME_UP)
+    niveles = ZoneBreakLevels(series, timeframe="H4")
+    niveles.advance(len(series) - 1)
+
+    apul = niveles.against_level(
+        direction=ImpulseDirection.ALCISTA,
+        anchor=1971.00,
+        against=AgainstZone(
+            source=BreakLevelSource.ANTE_PENULTIMATE,
+            index=2,
+            direction=ImpulseDirection.BAJISTA,
+            tip_window=(1, 3),
+        ),
+        through=10,
+    )
+    assert apul.source is BreakLevelSource.ANTE_PENULTIMATE
+    assert apul.inner == pytest.approx(1977.00)  # el borde del cuerpo de h2
+    assert apul.price == pytest.approx(1975.00)  # su mecha, la más lejana del ID#1
+    assert apul.line == pytest.approx(1971.00)
+    assert detector.impulses[1].anchor == pytest.approx(1971.00)
+
+
+def test_caso_22_cierre_dentro_de_ese_apul_no_rompe() -> None:
+    """h9 perfora el borde exterior con la mecha (1974.50) y cierra en 1976."""
+    _, detector = run_break(SYNTHETIC_COUNTER_EXTREME_UP)
+
+    assert detector.impulses[1].index_end == 10  # muere una vela más tarde
+    assert not [item for item in detector.avoided_breaks if item.index == 9]
+
+
+def test_caso_23_cierre_mas_alla_de_ese_apul_mata_el_id() -> None:
+    """h10 cierra en 1974, bajo el borde 1975 y muy por encima del ancla."""
+    _, detector = run_break(SYNTHETIC_COUNTER_EXTREME_UP)
+    segundo = detector.impulses[1]
+
+    assert segundo.exit_break_kind is BreakKind.EN_CONTRA
+    assert segundo.exit_level_source is BreakLevelSource.ANTE_PENULTIMATE
+
+    rotura = detector.events[-1]
+    assert rotura.broken_id_num == segundo.id_num
+    assert rotura.level == pytest.approx(1975.00)
+    assert rotura.line == pytest.approx(1971.00)
+    assert rotura.close == pytest.approx(1974.00)
+
+
+def test_caso_21_el_espejo_bajista_dice_lo_mismo() -> None:
+    """Sin escribir una cifra: la reflexión invierte todas las desigualdades."""
+    _, arriba = run_break(SYNTHETIC_COUNTER_EXTREME_UP)
+    _, abajo = run_break(SYNTHETIC_COUNTER_EXTREME_DOWN)
+
+    assert len(abajo.impulses) == len(arriba.impulses)
+    for uno, otro in zip(arriba.impulses, abajo.impulses, strict=True):
+        assert otro.direction is uno.direction.opposite()
+        assert otro.against_source is uno.against_source
+        assert otro.against_inherited == uno.against_inherited
+        assert otro.index_against == uno.index_against
+        assert otro.against_tip_window == uno.against_tip_window
+        assert otro.anchor == pytest.approx(_mirrored(uno.anchor))
+        assert otro.extreme == pytest.approx(_mirrored(uno.extreme))
+
+
+def test_caso_21_la_zona_se_clasifica_igual_con_la_regla_de_la_fase_30() -> None:
+    """Con el lado en contra por ancla la zona no manda, pero es la misma."""
+    _, detector = run_break(
+        SYNTHETIC_COUNTER_EXTREME_UP, break_against_by_zone=False
+    )
+    segundo = detector.impulses[1]
+
+    assert segundo.has_ante_penultimate
+    assert not segundo.against_inherited
+    assert segundo.index_against == 2
+    assert segundo.against_tip_window == (1, 3)

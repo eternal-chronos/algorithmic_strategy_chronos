@@ -283,9 +283,11 @@ def test_el_hash_de_la_corrida_queda_en_el_csv_y_en_run_json(workspace: Path) ->
 # --- Fase 3.0 · con qué regla de rotura corre la cascada ---------------------
 
 
-def test_las_entradas_corren_con_la_rotura_por_linea(workspace: Path) -> None:
-    """El ID muere cuando una vela de su temporalidad CIERRA más allá de una de
-    sus dos líneas, no cuando el precio atraviesa el UL o el PUL.
+def test_las_entradas_corren_con_el_ul_a_favor_y_el_ancla_en_contra(
+    workspace: Path,
+) -> None:
+    """La regla del propietario desde la fase 3.0: el ID no cambia mientras una
+    vela no CIERRE más allá del UL entero, y en contra manda la línea del ancla.
 
     La regla la fija la corrida de la fase, no el YAML: el explorador la declara
     en su cabecera y es ahí donde se comprueba, porque es lo que lee quien audita.
@@ -304,9 +306,47 @@ def test_las_entradas_corren_con_la_rotura_por_linea(workspace: Path) -> None:
     )
 
     assert resultado.exit_code == 0, resultado.stdout
-    assert "rotura por LÍNEA" in resultado.stdout
+    assert "el UL mandando a favor, el ancla en contra" in resultado.stdout
     explorador = (salida / "explorador_entradas.html").read_text(encoding="utf-8")
-    assert "rotura por línea" in explorador
+    assert "rotura por el UL a favor y por línea del ancla en contra" in explorador
     assert "rotura por ZONA" not in explorador
+    assert '"breakAgainstByZone":false' in explorador
     # Y las zonas siguen encendidas: de ellas cuelgan el toque del PUL y el veto.
     assert '"hasZones":true' in explorador
+
+
+# --- Fase 3.1 · las operaciones ----------------------------------------------
+
+
+def test_las_operaciones_salen_dibujadas_y_sin_una_sola_metrica(
+    workspace: Path,
+) -> None:
+    """Lo que se entrega es el dibujo: ni R esperada, ni aciertos, ni curva.
+
+    Lo pidió el propietario y no es cosmético: hasta que las entradas estén
+    ajustadas, un número sólo diría lo buena que es una regla a medio escribir.
+    """
+    salida = workspace / "fase31"
+    resultado = runner.invoke(
+        app,
+        [
+            "structure",
+            "operaciones",
+            "--config",
+            str(workspace / "impulse.yaml"),
+            "--salida",
+            str(salida),
+        ],
+    )
+
+    assert resultado.exit_code == 0, resultado.stdout
+    assert "SIN MÉTRICAS" in resultado.stdout
+    # El cierre del viernes se declara: es la única regla que cierra una
+    # operación sin que el precio haya llegado a ningún sitio.
+    assert "cierra el mercado" in resultado.stdout
+    explorador = (salida / "explorador_operaciones.html").read_text(encoding="utf-8")
+    assert '"hasEntries":' in explorador
+    assert '"riskReward":3' in explorador
+    assert '"marketWeek":' in explorador
+    # La cuenta con la que se auditan viaja con la corrida, no con el explorador.
+    assert '"account":{"initial":50.0,"mode":"percent","risk":17.0}' in explorador

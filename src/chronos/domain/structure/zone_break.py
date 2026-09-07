@@ -1,19 +1,33 @@
-"""Los niveles con que la fase 2.1 sustituye a las dos líneas del ID.
+"""Los niveles con que las zonas sustituyen a las dos líneas del ID.
 
 La fase 1 mata un ID cuando una vela cierra más allá de una de sus dos líneas.
-A partir de la fase 2.1 la línea deja de ser el nivel de rotura **cuando existe
-una zona que la sustituya**: el UL en el lado a favor y el PUL en el lado en
-contra. Romper una zona es cerrar más allá de su borde **exterior**, es decir
-atravesarla entera; perforarla con mecha o cerrar dentro no rompe.
+Con `break_by_zone` la línea deja de ser el nivel de rotura **cuando existe una
+zona que la sustituya**. Romper una zona es cerrar más allá de su borde
+**exterior**, es decir atravesarla entera: perforarla con mecha o cerrar dentro
+no rompe.
 
     lado a favor (extremo) -> UL si existe, y existe siempre
-    lado en contra (ancla) -> PUL: el extremo del ID INMEDIATAMENTE ANTERIOR
+    lado en contra (ancla) -> PUL:  el UL del ID inmediatamente anterior cuando
+                                    iba en el MISMO sentido que éste
+                              APUL: la zona en contra que le prestó aquel ID —si
+                                    iba al revés—, o el extremo del último ID
+                                    interior contrario del retroceso cuando en
+                                    medio se abortó una constitución
                               la línea sólo si no hay ningún ID detrás
 
-Este módulo no decide nada: recibe sobre qué vela cuelga el lado en contra —y
-hacia dónde iba el ID que la fijó, que es lo que dice qué tramo de esa vela es la
-zona—, calcula los dos niveles vigentes en un instante y dice de dónde sale cada
-uno. Quién los compara con el cierre es el detector.
+En el lado en contra hay **dos** zonas posibles y nunca mandan las dos a la vez:
+cuál manda se decide al constituirse el ID y no se recalcula después.
+
+**El lado en contra puede no gobernarse por zona.** Con `against_by_zone`
+apagado —la regla del propietario desde la fase 3.0— el ID muere en ese lado
+cuando una vela cierra más allá del **ancla**, y la zona en contra se sigue
+clasificando y dibujando porque de ella cuelgan el toque y la cascada. El lado a
+favor lo manda el UL en las dos variantes.
+
+Este módulo no decide nada de eso: recibe qué zona gobierna, sobre qué velas
+cuelga y hacia dónde iba el ID que la fijó —que es lo que dice qué borde es el
+exterior—, calcula los dos niveles vigentes en un instante y dice de dónde sale
+cada uno. Quién los compara con el cierre es el detector.
 
 **Causalidad.** El nivel con el que se juzga la vela `t` sólo puede salir de
 velas cerradas **antes** de `t`. Por eso todo se pide con un `through`, que es el
@@ -26,11 +40,13 @@ velas cerradas **antes** de `t`. Por eso todo se pide con un `through`, que es e
   contra el que se juzga al ID es el mismo desde que nace hasta que muere. La
   comprobación de que la vela de margen ha cerrado se queda igual, porque la
   regla es que un borde no se lee antes de que lo fije su vela.
-- El PUL sale de una vela que cerró antes de que el ID naciera —la del extremo
-  del ID anterior, la misma que llevaba su UL—, así que gobierna desde la
-  primera vela que se juzga y no hay nada que esperar. Por lo mismo no hereda la
-  vela de margen del UL: aquella regla es la del extremo recién fijado, no la de
-  una vela que cerró antes de que este ID existiera.
+- La zona en contra sale de velas que cerraron antes de que el ID naciera —las de
+  un ID que ya había muerto, o las de uno que se quedó dentro de un retroceso—,
+  así que gobierna desde la primera vela que se juzga y no hay nada que esperar.
+  Su punta se busca en la ventana de la vida de aquel ID, que también está
+  entera en el pasado, y la comprobación se hace igual contra la última vela de
+  esa ventana. Por lo mismo no hereda la vela de margen del UL: aquella regla es
+  la del extremo recién fijado.
 """
 
 from __future__ import annotations
@@ -44,7 +60,12 @@ from chronos.domain.structure.enums import (
     ImpulseDirection,
 )
 from chronos.domain.structure.errors import LookaheadError, StructureError
-from chronos.domain.structure.zones import CandleSeries, ZoneKind, penultimate_edges
+from chronos.domain.structure.zones import (
+    CandleSeries,
+    ZoneKind,
+    against_edges,
+    furthest_wick_index,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,25 +102,44 @@ class SideLevel:
 
 @dataclass(frozen=True, slots=True)
 class AgainstZone:
-    """Qué gobierna el lado en contra de un ID, y sobre qué vela.
+    """Qué gobierna el lado en contra de un ID, y sobre qué velas.
 
     Se fija en la constitución y viaja con el impulso. No se re-deriva más tarde
-    a propósito: la vela es la del extremo del ID que acababa de morir, y en
-    cuanto nace otro detrás esa respuesta ya no se puede reconstruir mirando la
-    lista de impulsos.
+    a propósito: la vela es la del extremo de un ID que acababa de morir —o la de
+    un ID interior de su retroceso, que no está en ninguna lista, o la que le
+    prestó el ID anterior—, y en cuanto nace otro impulso detrás esa respuesta ya
+    no se puede reconstruir mirando la lista de impulsos.
     """
 
-    #: `PENULTIMATE` o `LINE`. Nunca `LAST`: ése es el otro lado del ID.
+    #: `PENULTIMATE`, `ANTE_PENULTIMATE` o `LINE`. Nunca `LAST`: ése es el otro
+    #: lado del ID.
     source: BreakLevelSource
-    #: Vela de la que sale la zona. `None` exactamente cuando manda la línea.
+    #: Vela del borde del cuerpo. `None` exactamente cuando manda la línea.
     index: int | None
-    #: Hacia dónde iba el ID que fijó esa vela. Decide qué tramo de la vela es la
-    #: zona —su cuerpo o su mecha— y por eso viaja con ella. `None` con la línea.
+    #: Hacia dónde iba el ID que fijó esa mecha. Decide qué borde de la zona es
+    #: el interior y cuál el exterior, y por eso viaja con ella. `None` con la
+    #: línea.
     direction: ImpulseDirection | None = None
+    #: Velas entre las que se busca la punta: la vida entera del ID que fijó la
+    #: zona, del arranque de su pierna a la vela anterior a la que lo rompió.
+    #: Quien lee la mecha es `ZoneBreakLevels`; el detector sólo apunta el tramo,
+    #: que sale de índices que ya tenía. `None` con la línea.
+    tip_window: tuple[int, int] | None = None
+    #: `True` sólo en el APUL **heredado**: la zona no sale de ningún extremo del
+    #: ID anterior sino del nivel que aquél llevaba en su propio lado en contra,
+    #: y puede venir de varios ID atrás. Los otros dos APUL —el UL del ID
+    #: anterior contrario que dejó su extremo detrás, y el del ID interior de un
+    #: retroceso— salen de un extremo, así que van con `False`. No se puede
+    #: deducir de los bordes y son tres historias distintas.
+    inherited: bool = False
 
     def __post_init__(self) -> None:
         if self.source is BreakLevelSource.LAST:
             raise StructureError("El UL no gobierna el lado en contra de un ID")
+        if self.inherited and self.source is not BreakLevelSource.ANTE_PENULTIMATE:
+            raise StructureError(
+                f"Sólo el APUL se hereda, y esta zona es {self.source.value}"
+            )
         if (self.source is BreakLevelSource.LINE) != (self.index is None):
             raise StructureError(
                 f"Lado en contra incoherente: {self.source.value} con vela {self.index}"
@@ -107,6 +147,10 @@ class AgainstZone:
         if (self.index is None) != (self.direction is None):
             raise StructureError(
                 "El lado en contra necesita la dirección del ID que fijó su vela"
+            )
+        if (self.index is None) != (self.tip_window is None):
+            raise StructureError(
+                "El lado en contra necesita la ventana en la que buscar su mecha"
             )
 
 
@@ -150,6 +194,13 @@ class AvoidedBreak:
     extended_extreme: bool
 
 
+def line_level(price: float) -> SideLevel:
+    """Un lado gobernado por su línea: no hay zona que la sustituya, o no manda."""
+    return SideLevel(
+        price=price, line=price, inner=price, source=BreakLevelSource.LINE
+    )
+
+
 def line_levels(
     *, extreme: float, anchor: float
 ) -> BreakLevels:
@@ -158,14 +209,7 @@ def line_levels(
     Es lo que devuelve `BREAK_BY_ZONE = false`, y por eso el interruptor apagado
     reproduce la línea base sin que el detector tenga dos caminos distintos.
     """
-    return BreakLevels(
-        favor=SideLevel(
-            price=extreme, line=extreme, inner=extreme, source=BreakLevelSource.LINE
-        ),
-        against=SideLevel(
-            price=anchor, line=anchor, inner=anchor, source=BreakLevelSource.LINE
-        ),
-    )
+    return BreakLevels(favor=line_level(extreme), against=line_level(anchor))
 
 
 class ZoneBreakLevels:
@@ -218,8 +262,15 @@ class ZoneBreakLevels:
         anchor: float,
         against: AgainstZone,
         through: int,
+        against_by_zone: bool = True,
     ) -> BreakLevels:
-        """Los niveles vigentes de un ID con la información cerrada en `through`."""
+        """Los niveles vigentes de un ID con la información cerrada en `through`.
+
+        `against_by_zone` apagado es la regla del propietario a partir de la fase
+        3.0: **el lado a favor lo manda el UL y el lado en contra el ancla**. La
+        zona en contra se sigue clasificando y dibujando —de ella cuelgan el
+        toque y la cascada—, pero no decide la vida del ID.
+        """
         return BreakLevels(
             favor=self.last_level(
                 direction=direction,
@@ -227,11 +278,15 @@ class ZoneBreakLevels:
                 index_extreme=index_extreme,
                 through=through,
             ),
-            against=self.against_level(
-                direction=direction,
-                anchor=anchor,
-                against=against,
-                through=through,
+            against=(
+                self.against_level(
+                    direction=direction,
+                    anchor=anchor,
+                    against=against,
+                    through=through,
+                )
+                if against_by_zone
+                else line_level(anchor)
             ),
         )
 
@@ -243,22 +298,39 @@ class ZoneBreakLevels:
         against: AgainstZone,
         through: int,
     ) -> SideLevel:
-        """Lado en contra: el PUL, o la línea del ancla si no hay ID detrás.
+        """Lado en contra: el PUL, el APUL, o la línea del ancla si no hay zona.
 
-        Cuál de los dos manda no se decide aquí —lo trae `against`, que fijó la
-        constitución del ID—: aquí sólo se lee la vela que se dice, con la
-        geometría que le toca.
+        Cuál de los tres manda no se decide aquí —lo trae `against`, que fijó la
+        constitución del ID—: aquí sólo se leen las velas que se dicen, con la
+        geometría que le toca a su zona.
+
+        Las dos son el UL de un ID que ya murió, así que se leen igual: el borde
+        del cuerpo de la vela de su extremo y la punta de la mecha más lejana que
+        alcanzó mientras vivía. Qué borde es el exterior lo dice hacia dónde
+        miraba aquel extremo, y de eso se encarga `against_edges`.
         """
-        if against.source is BreakLevelSource.PENULTIMATE:
-            return self.penultimate_level(
-                direction=direction,
-                anchor=anchor,
-                index_penultimate=against.index,
-                previous_direction=against.direction,
-                through=through,
-            )
+        if (
+            against.source is BreakLevelSource.LINE
+            or against.index is None
+            or against.direction is None
+            or against.tip_window is None
+        ):
+            return line_level(anchor)
+        what = "la vela del PUL" if against.source is BreakLevelSource.PENULTIMATE else "la vela del APUL"
+        self._require_visible(against.index, through, what)
+        self._require_visible(against.tip_window[1], through, f"la mecha de {what}")
+        index_tip = furthest_wick_index(
+            self._series, against.tip_window, against.direction
+        )
+        inner, outer = against_edges(
+            self._series,
+            index_body=against.index,
+            index_tip=index_tip,
+            zone_direction=against.direction,
+            direction=direction,
+        )
         return SideLevel(
-            price=anchor, line=anchor, inner=anchor, source=BreakLevelSource.LINE
+            price=outer, line=anchor, inner=inner, source=against.source
         )
 
     def last_level(
@@ -288,40 +360,6 @@ class ZoneBreakLevels:
                 outer = reach
         return SideLevel(
             price=outer, line=extreme, inner=inner, source=BreakLevelSource.LAST
-        )
-
-    def penultimate_level(
-        self,
-        *,
-        direction: ImpulseDirection,
-        anchor: float,
-        index_penultimate: int | None,
-        previous_direction: ImpulseDirection | None,
-        through: int,
-    ) -> SideLevel:
-        """Lado en contra: el PUL si el ID tiene uno, y si no la línea del ancla.
-
-        Sólo se queda sin PUL el primer ID del histórico, que no tiene ID
-        anterior del que sacar la vela: ése se rompe por línea en este lado, que
-        es un estado legítimo y no un fallo. El PUL no se confirma ni se estira:
-        su vela ya estaba cerrada cuando el ID nació, así que el borde contra el
-        que se juzga es el mismo desde la primera vela hasta la última.
-
-        La geometría es la de la fase 2.0 leída en un sitio y sólo en uno
-        —`penultimate_edges`—: el tramo de la vela que mira a este ID, que es su
-        cuerpo cuando aquel ID iba al revés y su mecha —el UL viejo— cuando iba
-        en el mismo sentido.
-        """
-        if index_penultimate is None or previous_direction is None:
-            return SideLevel(
-                price=anchor, line=anchor, inner=anchor, source=BreakLevelSource.LINE
-            )
-        self._require_visible(index_penultimate, through, "la vela del PUL")
-        inner, outer = penultimate_edges(
-            self._series, index_penultimate, direction, previous_direction
-        )
-        return SideLevel(
-            price=outer, line=anchor, inner=inner, source=BreakLevelSource.PENULTIMATE
         )
 
     # --- Interno ------------------------------------------------------------
@@ -356,5 +394,6 @@ __all__ = [
     "BreakLevels",
     "SideLevel",
     "ZoneBreakLevels",
+    "line_level",
     "line_levels",
 ]

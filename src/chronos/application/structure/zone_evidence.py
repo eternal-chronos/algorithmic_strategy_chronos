@@ -48,8 +48,8 @@ from chronos.domain.structure.zones import (
     Zone,
     ZoneBook,
     ZoneKind,
+    against_zone,
     last_zone,
-    penultimate_zone,
 )
 
 STEP = pd.Timedelta(hours=4)
@@ -110,13 +110,22 @@ def _zoned(
                 index_extreme=impulse.index_extreme_at_constitution,
                 ts_constitution=impulse.ts_constitution,
             ),
-            penultimate_zone(
+            against_zone(
                 series,
+                # De las tres ramas del lado en contra, esta serie sólo produce
+                # PUL: todos sus ID van encadenados en el mismo sentido y no hay
+                # ninguna constitución abortada.
+                kind=ZoneKind.PENULTIMATE,
                 id_num=impulse.id_num,
                 timeframe="H4",
                 direction=impulse.direction,
-                index_previous_extreme=impulse.index_penultimate,
-                previous_direction=impulse.penultimate_direction,
+                index_body=impulse.index_against if impulse.has_penultimate else None,
+                tip_window=(
+                    impulse.against_tip_window if impulse.has_penultimate else None
+                ),
+                zone_direction=(
+                    impulse.against_direction if impulse.has_penultimate else None
+                ),
                 ts_constitution=impulse.ts_constitution,
             ),
         )
@@ -176,8 +185,8 @@ def _synthetic_up() -> CheckGroup:
             f"altura {uls[2].height:.2f}, plana {uls[2].is_flat}",
         ),
         Check(
-            "5. PUL = la vela del UL anterior (ID#2, vela b2). Aquel ID iba en el "
-            "mismo sentido, así que la zona es su MECHA: el UL viejo tal cual",
+            "5. PUL = el UL del ID anterior (ID#2, vela b2), que iba en el mismo "
+            "sentido: su extremo quedó por detrás y la zona es su MECHA",
             "vela b2, interior 2012.00, exterior 2010.00, altura 2.00",
             f"vela b{puls[1].index_defining}, interior {puls[1].inner:.2f}, "  # type: ignore[union-attr]
             f"exterior {puls[1].outer:.2f}, altura {puls[1].height:.2f}",  # type: ignore[union-attr]
@@ -213,12 +222,19 @@ def _synthetic_up() -> CheckGroup:
             f"PUL#2 interior {puls[1].inner:.2f}",  # type: ignore[union-attr]
         ),
         Check(
-            "el PUL de mecha no cubre el cuerpo de su vela (ID#5, vela b12)",
-            "PUL [2034.00, 2035.00] no contiene 2032.00; UL [2039.00, 2040.00] no",
+            "el PUL no cubre el cuerpo de su vela (ID#5, vela b12)",
+            "PUL [2034.00, 2200.00] no contiene 2032.00; UL [2039.00, 2040.00] no",
             f"PUL [{puls[4].low:.2f}, {puls[4].high:.2f}] "  # type: ignore[union-attr]
             f"{'contiene' if puls[4].contains(2032.00) else 'no contiene'} 2032.00; "  # type: ignore[union-attr]
             f"UL [{uls[4].low:.2f}, {uls[4].high:.2f}] "
             f"{'contiene' if uls[4].contains(2032.00) else 'no'}",
+        ),
+        Check(
+            "8. la punta del PUL se estira a toda la vida de aquel ID (ID#4, vela b8)",
+            "el UL#3 no tenía mecha (altura 0.00) y su PUL llega a 2045.00, "
+            "que es la mecha de b10",
+            f"el UL#3 no tenía mecha (altura {uls[2].height:.2f}) y su PUL llega a "
+            f"{puls[3].inner:.2f}, que es la mecha de b10",  # type: ignore[union-attr]
         ),
     ]
     return CheckGroup(
