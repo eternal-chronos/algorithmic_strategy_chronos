@@ -5,9 +5,12 @@ Detecta el impulso dominante y **nada más**: sin último/penúltimo, sin RSI, s
 Fibonacci, sin patrones, sin zonas, sin señales, sin entradas, sin stops, sin
 targets y sin medición de rentabilidad.
 
-> **El ID vive sólo en el Diario y en H4.** H1 y M15 no llevan detector: no se
-> les marca ID, y sobre las dos se dibuja el de H4 como contexto. Las cifras de
-> H1 que aparecen más abajo son de cuando H1 llevaba detector y quedan como
+> **En este módulo el ID vive sólo en el Diario y en H4.** H1 y M15 no llevan
+> detector: no se les marca ID, y sobre las dos se dibuja el de H4 como contexto.
+> La fase 3.0 sí enciende el de H1 —su cascada lo necesita para confirmar— con el
+> mismo detector y las mismas reglas, y por eso corre con otro `config_hash`; el
+> reparto por defecto, que es el de este módulo, no se toca. Las cifras de H1 que
+> aparecen más abajo son de cuando H1 llevaba detector aquí y quedan como
 > registro histórico: ya no se comprueban. Los recuentos del Diario y de H4 no
 > se han movido —cada temporalidad se detecta por su cuenta, y hay una
 > comprobación que lo fija— pero el `config_hash` sí, porque las temporalidades
@@ -107,7 +110,9 @@ en el dataset —las usará el módulo 2— pero este módulo no las mira.
    vigente. Eso **mata** el ID anterior y no crea ninguno. Se entra en LIMBO.
 2. **Constitución.** Cierra la primera vela contraria a esa pierna. Ahí, y sólo
    ahí, nace el nuevo ID, con el extremo por cuerpo alcanzado **hasta la vela
-   anterior** a la contraria.
+   anterior** a la contraria. Salvo que esa misma vela cierre ya más allá del
+   nivel de rotura en contra del ID que crearía: entonces no constituye —el ID
+   nacería roto— y hace de vela de rotura, girando la pierna.
 
 El limbo es un estado legítimo y puede durar varias barras. De este ciclo sale
 gratis la inmunidad al lookahead: el extremo no se conoce hasta que cierra la
@@ -116,7 +121,7 @@ vela contraria, así que no hay nada que desplazar.
 > **Qué es «uno de los dos límites» depende de `break_by_zone` (fase 2.1).** Con
 > `false` —la línea base de esta fase— son las dos líneas del ID, el extremo y el
 > ancla. Con `true` la línea deja de mandar cuando existe una zona que la
-> sustituya: el UL en el lado a favor y el OB confirmado en el lado en contra, y
+> sustituya: el UL en el lado a favor y el PUL confirmado en el lado en contra, y
 > romper pasa a ser cerrar más allá de su borde **exterior**. El ciclo rotura →
 > limbo → constitución no cambia; lo único que cambia es **cuándo** se dispara la
 > rotura, y que un ID que sobrevive sigue extendiendo su extremo. Está en
@@ -136,6 +141,7 @@ Todas están cubiertas por tests en `tests/domain/structure/test_synthetic_day.p
 | Caso | Decisión | Por qué |
 |---|---|---|
 | Rotura vs. constitución en la misma barra | **Primero la rotura.** El estado se evalúa al principio de la barra, así que una barra que rompe sólo rompe; la constitución llega como muy pronto en la siguiente | Es el orden que pide §2.6 y evita que una misma vela cierre y abra impulso |
+| La contraria que se traga la pierna entera | **Nadie nace roto.** Si su cierre ya está más allá del nivel de rotura en contra del ID que iba a constituir —el ancla, o el borde exterior del PUL con `break_by_zone`— no constituye: rompe y gira la pierna, así que el ID que sale es el del sentido nuevo. Se cuenta en `constituciones_abortadas_por_nacer_roto` y se dibuja con reloj de arena | La regla anterior sólo protege al ID *anterior*. Sin ésta, el ID nacía muerto: la rotura no se juzgaba hasta la barra siguiente, así que sobrevivía apuntando al revés que el precio y bloqueaba al que debía nacer |
 | "Cerrar más allá" | **Desigualdad estricta.** Cerrar justo en el nivel no rompe | "Más allá" no incluye el propio nivel |
 | Arranque de la pierna | Primer elemento de la racha contigua en la dirección de la pierna que acaba en la barra de rotura; los dojis no cortan la racha. Si la barra de rotura ya es contraria a la pierna nueva, la pierna arranca en ella. **Ese último caso dejó de ser una decisión cerrada: es el parámetro abierto `leg_start_mode` (R-36)** | Es lo que hace falta para que el ancla salga "donde arrancó la pierna" (§2.5) |
 | Doji | Cuerpo nulo: ni constituye ni corta rachas. Sí extiende el extremo alcanzado | §2.2 |

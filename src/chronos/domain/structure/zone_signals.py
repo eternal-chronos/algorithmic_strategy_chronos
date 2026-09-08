@@ -1,4 +1,4 @@
-"""Señales de zona: toque del OB, rechazo del UL y rotura del UL. **Sólo dibujo.**
+"""Señales de zona: toque del PUL, rechazo del UL y rotura del UL. **Sólo dibujo.**
 
 Esto **mide**, no decide, exactamente igual que `contacts.py`: ninguna regla del
 módulo 1 ni de la fase 2.1 lee nada de aquí, ninguna zona se mueve por su
@@ -11,7 +11,8 @@ distingue tocar de atravesar*.
 Las tres, sobre las zonas que la fase 2.0 ya calculó y con la misma lectura de
 "más allá" que usa la rotura:
 
-- **TOQUE_OB** — el rango de la barra entra en la zona OB viniendo **de fuera**.
+- **TOQUE_PUL** — el rango de la barra entra en la zona del lado en contra —el
+  PUL— viniendo **de fuera**.
   Tocar es un asunto de mechas: basta con que `[low, high]` corte la zona,
   cierre donde cierre. No hace falta esperar a ningún cierre para saberlo, así
   que el toque se **re-fecha** con `moment_of_touch` en la vela fina en la que
@@ -28,16 +29,16 @@ Las tres, sobre las zonas que la fase 2.0 ya calculó y con la misma lectura de
 cierra dentro de la zona —el borde interior es su propio cuerpo—, así que el
 precio nace *dentro* del UL y todavía no lo ha abandonado: si la vela siguiente
 lo toca, no lo está rechazando, sigue ahí metida. Y una vela que **abre dentro**
-del OB tampoco lo está tocando: ya estaba. Para que un toque o un rechazo
+del PUL tampoco lo está tocando: ya estaba. Para que un toque o un rechazo
 cuenten, el cierre anterior tiene que estar **fuera de la zona y por el lado por
-el que el precio la busca** —el UL se busca hacia donde va el ID, el OB hacia el
-lado contrario, así que en un ID alcista se llega al UL desde abajo y al OB desde
-arriba—. Cerrar dentro de la zona desarma la señal hasta que el precio vuelva a
+el que el precio la busca** —el UL se busca hacia donde va el ID, el PUL hacia
+el lado contrario, así que en un ID alcista se llega al UL desde abajo y al PUL
+desde arriba—. Cerrar dentro de la zona desarma la señal hasta que el precio vuelva a
 salir, y volver desde el otro lado del borde exterior no la arma: eso es un nivel
 ya roto, no un rechazo.
 
 `RECHAZO_UL` y `ROTURA_UL` se excluyen: una barra que rompe no rechaza. Y no se
-inventa una señal de "rotura del OB": atravesar el OB es la rotura en contra que
+inventa una señal de "rotura del PUL": atravesar el PUL es la rotura en contra que
 el detector ya marca, y duplicarla aquí sería contar dos veces lo mismo.
 
 **Nada de esto se sabe antes de tiempo.** El tramo que se clasifica empieza en la
@@ -63,8 +64,8 @@ from chronos.domain.structure.zones import Zone, ZoneKind
 class ZoneSignalKind(StrEnum):
     """Las tres señales. Los valores salen al payload del explorador."""
 
-    #: El rango de la barra entra en la zona OB.
-    TOQUE_OB = "TOQUE_OB"
+    #: El rango de la barra entra en la zona del lado en contra: el PUL.
+    TOQUE_PUL = "TOQUE_PUL"
     #: El rango entra en la zona UL y el cierre no pasa de su borde exterior.
     RECHAZO_UL = "RECHAZO_UL"
     #: El cierre queda más allá del borde exterior del UL.
@@ -136,9 +137,9 @@ def classify_zone_signals(
         if zone.direction is ImpulseDirection.ALCISTA
         else closes < zone.outer
     )
-    # El UL se recorre en la dirección del ID; el OB, en la contraria. Es la
+    # El UL se recorre en la dirección del ID; el PUL, en la contraria. Es la
     # mecha con la que la barra va a buscar la zona, y también de dónde viene el
-    # precio: el UL se busca desde abajo en un ID alcista y el OB desde arriba.
+    # precio: el UL se busca desde abajo en un ID alcista y el PUL desde arriba.
     towards = zone.direction if zone.kind is ZoneKind.LAST else zone.direction.opposite()
     reach_of = highs if towards is ImpulseDirection.ALCISTA else lows
     # Cerrar fuera de la zona **por el lado desde el que el precio la busca** es lo
@@ -154,10 +155,10 @@ def classify_zone_signals(
     signals: list[ZoneSignal] = []
     counted: dict[ZoneSignalKind, int] = {}
     for position in range(len(closes)):
-        if zone.kind is ZoneKind.ORDER_BLOCK:
+        if zone.kind is not ZoneKind.LAST:
             if not (reaches[position] and arrived[position]):
                 continue
-            kind, level = ZoneSignalKind.TOQUE_OB, zone.inner
+            kind, level = ZoneSignalKind.TOQUE_PUL, zone.inner
         elif beyond[position]:
             kind, level = ZoneSignalKind.ROTURA_UL, zone.outer
         elif reaches[position] and arrived[position]:

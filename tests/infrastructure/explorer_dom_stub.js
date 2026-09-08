@@ -59,10 +59,17 @@ function declare(id) {
  'mode-group', 'impulse-layers', 'chart', 'zoom-reset', 'noise-buttons',
  'prev', 'next',
  'from', 'to', 'layer-limbo', 'layer-marks', 'layer-contacts', 'layer-mid', 'layer-wrong',
- 'zone-layers', 'layer-zones-ul', 'layer-zones-ob', 'layer-zones-context',
+ 'layer-frame',
+ 'zone-layers', 'layer-zones',
  'signal-layers', 'layer-signals',
+ 'cascade-layers', 'layer-cascade',
+ 'entry-layers', 'layer-entries', 'layer-regime',
  'break-layers', 'avoided-layer', 'layer-avoided', 'steps-layer', 'layer-steps',
  'blind-seed', 'blind-start', 'blind-reveal', 'blind-exit',
+ 'sim-group', 'sim-buttons', 'sim-ratio', 'sim-clear',
+ 'rect-group', 'rect-buttons', 'rect-undo', 'rect-clear',
+ 'account-group', 'account-initial', 'account-mode', 'account-risk',
+ 'account-buttons', 'account-undo', 'account-reset', 'account-copy', 'account-summary',
  'replay-group', 'replay-date', 'replay-start', 'replay-back', 'replay-step',
  'replay-play', 'replay-exit', 'replay-forming', 'replay-speed', 'replay-window',
  'notes', 'explorer-data'].forEach(declare);
@@ -76,6 +83,20 @@ const viewButtons = ['candles', 'line'].map(function (view) {
 });
 
 const documentListeners = {};
+
+// I.2 — el portapapeles. `writeText` devuelve algo con `catch`, como la promesa
+// de verdad, para que el explorador pueda encadenarlo.
+const copiado = [];
+// `navigator` es un global de node y no se deja reasignar: hay que redefinirlo.
+Object.defineProperty(global, 'navigator', {
+  configurable: true,
+  writable: true,
+  value: {
+    clipboard: {
+      writeText(text) { copiado.push(text); return { catch() { return null; } }; },
+    },
+  },
+});
 
 global.document = {
   activeElement: null,
@@ -94,6 +115,10 @@ global.document = {
     if (selector === '#visible-buttons button') { return elements['visible-buttons'].children; }
     if (selector === '#mode-buttons button') { return elements['mode-buttons'].children; }
     if (selector === '#noise-buttons button') { return elements['noise-buttons'].children; }
+    if (selector === '#sim-buttons button') { return elements['sim-buttons'].children; }
+    if (selector === '#sim-ratio button') { return elements['sim-ratio'].children; }
+    if (selector === '#rect-buttons button') { return elements['rect-buttons'].children; }
+  if (selector === '#account-buttons button') { return elements['account-buttons'].children; }
     if (selector === '#view-buttons button') { return viewButtons; }
     missing.push(selector);
     return [];
@@ -118,13 +143,31 @@ function engineLayer(name) {
   return !/^(Velas |Cierres |Vela en formación)/.test(name || '');
 }
 
+function simShape(shape) {
+  return String(shape.name || '').indexOf('sim-') === 0;
+}
+
+// I.3 — los recuadros de PUL, UL y APUL los planta el propietario a mano, igual
+// que la caja simulada: tampoco son capa del motor.
+function rectShape(shape) {
+  return String(shape.name || '').indexOf('rect-') === 0;
+}
+
+function handDrawn(shape) {
+  return simShape(shape) || rectShape(shape);
+}
+
 function furthest(traces, layout) {
   const points = [];
   traces.forEach(function (trace) {
     if (!engineLayer(trace.name)) { return; }
     (trace.x || []).forEach(function (value) { if (value) { points.push(value); } });
   });
-  (layout.shapes || []).forEach(function (shape) { points.push(shape.x1); });
+  // La caja simulada la dibuja el propietario a mano: no es motor y no puede
+  // contar como que el replay se ha adelantado al reloj.
+  (layout.shapes || []).forEach(function (shape) {
+    if (!handDrawn(shape)) { points.push(shape.x1); }
+  });
   return points.length ? points.sort()[points.length - 1] : null;
 }
 
@@ -148,8 +191,11 @@ global.Plotly = {
           type: trace.type,
           points: (trace.x && trace.x.length) || 0,
           dash: (trace.line && trace.line.dash) || null,
-          // Fase 2.0: una zona que existe va rellena; una candidata sin
-          // confirmar, sólo con el contorno. La diferencia se comprueba aquí.
+          // El color del trazo: el marco del ID lo toma de su TEMPORALIDAD y es
+          // lo único que dice de quién es cada recuadro cuando hay dos.
+          color: (trace.line && trace.line.color) || null,
+          // Fase 2.0: el tramo en que la zona es del ID va relleno y el que va
+          // desde su vela definitoria, sólo con el contorno. Se comprueba aquí.
           fill: trace.fill || null,
           fillcolor: trace.fillcolor || null,
           captions: trace.text && trace.text.length <= 200 ? trace.text.slice() : null,
@@ -168,7 +214,29 @@ global.Plotly = {
       firstBar: traces[0] && traces[0].x && traces[0].x[0],
       lastBar: traces[0] && traces[0].x && traces[0].x[traces[0].x.length - 1],
       hover: traces[0] && traces[0].text && traces[0].text[0],
-      shapes: (layout.shapes || []).length,
+      shapes: (layout.shapes || []).filter(function (shape) {
+        return !handDrawn(shape);
+      }).length,
+      // I.1 — la caja de la entrada simulada, con lo que dice cada rectángulo.
+      sim: (layout.shapes || []).filter(simShape).map(function (shape) {
+        return {
+          name: shape.name, type: shape.type,
+          x0: shape.x0, x1: shape.x1, y0: shape.y0, y1: shape.y1,
+          label: (shape.label && shape.label.text) || null,
+        };
+      }),
+      // I.3 — los recuadros marcados a mano, con el color y el trazo que los
+      // distinguen de todo lo que dibuja el motor.
+      rect: (layout.shapes || []).filter(rectShape).map(function (shape) {
+        return {
+          name: shape.name, type: shape.type,
+          x0: shape.x0, x1: shape.x1, y0: shape.y0, y1: shape.y1,
+          color: (shape.line && shape.line.color) || null,
+          dash: (shape.line && shape.line.dash) || null,
+          fillcolor: shape.fillcolor || null,
+          label: (shape.label && shape.label.text) || null,
+        };
+      }),
       yTickFormat: layout.yaxis && layout.yaxis.tickformat,
       xRange: (layout.xaxis && layout.xaxis.range) || null,
       yRange: (layout.yaxis && layout.yaxis.range) || null,
@@ -194,6 +262,34 @@ function snapshot(label) {
     replayPlay: elements['replay-play'].textContent,
     lastRelayout: relayoutCalls[relayoutCalls.length - 1] || null,
     replayLocked: elements['from'].disabled === true && elements['next'].disabled === true,
+    simArmed: (elements['sim-buttons'].children.filter(function (button) {
+      return button.getAttribute('aria-pressed') === 'true';
+    })[0] || {}).dataset?.side || null,
+    simClearDisabled: elements['sim-clear'].disabled === true,
+    simRatio: (elements['sim-ratio'].children.filter(function (button) {
+      return button.getAttribute('aria-pressed') === 'true';
+    })[0] || {}).dataset?.ratio || null,
+    simCursor: elements['chart'].style.cursor || '',
+    // I.3 — los recuadros a mano: qué botón espera el clic y si hay algo que quitar.
+    rectArmed: (elements['rect-buttons'].children.filter(function (button) {
+      return button.getAttribute('aria-pressed') === 'true';
+    })[0] || {}).dataset?.kind || null,
+    rectUndoDisabled: elements['rect-undo'].disabled === true,
+    rectClearDisabled: elements['rect-clear'].disabled === true,
+    // I.2 — la cuenta simulada: lo que dice la barra y lo que deja hacer.
+    account: {
+      summary: elements['account-summary'].textContent,
+      initial: elements['account-initial'].value,
+      mode: elements['account-mode'].value,
+      risk: elements['account-risk'].value,
+      resultsDisabled: elements['account-buttons'].children.map(function (button) {
+        return button.disabled === true;
+      }),
+      undoDisabled: elements['account-undo'].disabled === true,
+      resetDisabled: elements['account-reset'].disabled === true,
+      copyDisabled: elements['account-copy'].disabled === true,
+    },
+    copiado: copiado.length ? copiado[copiado.length - 1] : null,
     visibleMode: (elements['visible-buttons'].children.filter(function (button) {
       return button.getAttribute('aria-pressed') === 'true';
     })[0] || {}).dataset?.visible || null,
@@ -208,7 +304,8 @@ function snapshot(label) {
     // Las casillas que el preset mueve sin que nadie las toque: si el estado y
     // el control se separan, el explorador miente sobre lo que se está viendo.
     boxes: ['layer-limbo', 'layer-marks', 'layer-contacts', 'layer-mid', 'layer-wrong',
-      'layer-zones-ul', 'layer-zones-ob', 'layer-zones-context', 'layer-signals',
+      'layer-frame', 'layer-zones', 'layer-signals',
+      'layer-cascade', 'layer-entries', 'layer-regime',
       'layer-avoided', 'layer-steps']
       .reduce(function (state, id) {
         state[id] = elements[id].checked === true;
@@ -220,7 +317,8 @@ function snapshot(label) {
 global.window = global;
 eval(fs.readFileSync(scriptPath, 'utf8'));
 
-const payloadMeta = JSON.parse(elements['explorer-data'].textContent).meta;
+const payloadData = JSON.parse(elements['explorer-data'].textContent);
+const payloadMeta = payloadData.meta;
 const steps = [];
 const tabs = elements['tf-buttons'].children;
 const presets = elements['preset-buttons'].children;
@@ -319,41 +417,50 @@ steps.push(snapshot('con-nivel-50'));
 elements['layer-contacts'].fire('change', { target: { checked: false } });
 elements['layer-mid'].fire('change', { target: { checked: false } });
 
-// Fase 2.0 — las dos capas de zonas se encienden y se apagan por separado. El
-// gráfico con contexto lleva dos temporalidades, así que también comprueba que
-// las zonas de la superior se dibujan.
-const conZonas = tabs.filter(function (tab) {
+// El MARCO del ID: el recuadro de la constitución a la muerte y del ancla al
+// extremo. Se enciende y se apaga sobre las mismas velas. Si el reparto tiene
+// algún gráfico con contexto se retrata ahí, porque así comprueba de paso que el
+// marco de la temporalidad superior se dibuja y con su color; el reparto por
+// defecto no tiene ninguno —el Diario se dibuja sólo en su gráfico— y entonces
+// se retrata H4, que es donde el propietario audita el ID.
+const conMarco = tabs.filter(function (tab) {
   return JSON.parse(elements['explorer-data'].textContent).layout[tab.dataset.tf].length > 1;
-})[0] || tabs[0];
-conZonas.fire('click');
+})[0] || tabs.filter(function (tab) { return tab.dataset.tf === 'H4'; })[0] || tabs[0];
+conMarco.fire('click');
 presets[0].fire('click');
-steps.push(snapshot('zonas-por-defecto'));
-elements['layer-zones-ob'].fire('change', { target: { checked: false } });
-steps.push(snapshot('zonas-solo-ul'));
-elements['layer-zones-ul'].fire('change', { target: { checked: false } });
-elements['layer-zones-ob'].fire('change', { target: { checked: true } });
-steps.push(snapshot('zonas-solo-ob'));
-elements['layer-zones-ul'].fire('change', { target: { checked: false } });
-elements['layer-zones-ob'].fire('change', { target: { checked: false } });
-steps.push(snapshot('zonas-apagadas'));
-elements['layer-zones-ul'].fire('change', { target: { checked: true } });
-elements['layer-zones-ob'].fire('change', { target: { checked: true } });
-// H.1 — las zonas de la temporalidad de contexto se apagan solas: son dos
-// rectángulos del tamaño de la pantalla y tapan el precio.
-elements['layer-zones-context'].fire('change', { target: { checked: false } });
-steps.push(snapshot('zonas-sin-contexto'));
-elements['layer-zones-context'].fire('change', { target: { checked: true } });
-// El filtro de ID visibles NO toca las zonas: UL y OB son siempre los del ID
-// actual, así que los tres pasos tienen que salir iguales.
-const visiblesZonas = elements['visible-buttons'].children;
-visiblesZonas.forEach(function (button) {
+// El paso `sin-principal` dejó apagado el impulso del gráfico: el marco cuelga
+// de las mismas casillas, así que se encienden todas antes de retratarlo.
+elements['impulse-layers'].children.forEach(function (wrapper) {
+  wrapper.children[0].fire('change', { target: { checked: true } });
+});
+steps.push(snapshot('marco-por-defecto'));
+elements['layer-frame'].fire('change', { target: { checked: false } });
+steps.push(snapshot('marco-apagado'));
+elements['layer-frame'].fire('change', { target: { checked: true } });
+// El marco obedece el selector de ID visibles, igual que las líneas del ID.
+const visiblesMarco = elements['visible-buttons'].children;
+visiblesMarco.forEach(function (button) {
   button.fire('click');
-  steps.push(snapshot('zonas-ids-' + button.dataset.visible));
+  steps.push(snapshot('marco-ids-' + button.dataset.visible));
 });
 // Se devuelve el filtro a su valor de salida: los pasos de más abajo lo dan por
 // supuesto y este bloque no debe cambiar el estado con el que se encuentran.
-visiblesZonas.filter(function (button) { return button.dataset.visible === 'pair'; })
+visiblesMarco.filter(function (button) { return button.dataset.visible === 'pair'; })
   .forEach(function (button) { button.fire('click'); });
+
+// Cada gráfico lleva su marco y el de la temporalidad que le toca: el del Diario
+// sobre H4, el de H4 sobre H1 y el de H1 sobre M15. Se retrata cada gráfico con
+// el periodo completo para poder comprobarlo.
+// El paso del DIARIO es además el que audita el APUL: la zona en contra de un ID
+// nacido tras una constitución abortada. Las cajas son sólo las del ID que se
+// mira, así que ese caso se prueba con un histórico cortado mientras ese ID
+// sigue vivo (ver `test_impulse_explorer.py`).
+tabs.forEach(function (tab) {
+  tab.fire('click');
+  steps.push(snapshot('marco-de-' + tab.dataset.tf));
+});
+// El gráfico vuelve a ser el que los pasos siguientes dan por supuesto.
+conMarco.fire('click');
 
 // Fase 2.1: la capa de roturas evitadas, encendida y apagada sobre las mismas
 // velas. Con `break_by_zone: false` no hay ninguna y los dos pasos salen iguales.
@@ -361,16 +468,35 @@ visiblesZonas.filter(function (button) { return button.dataset.visible === 'pair
 // impulsos antiguos quedan fuera y el paso no comprobaría la capa sino el filtro.
 // Y se vuelve a encender el impulso principal, que el paso `sin-principal` dejó
 // apagado: la capa de evitadas es sólo del principal, igual que los marcadores.
-visiblesZonas.filter(function (button) { return button.dataset.visible === 'all'; })
+visiblesMarco.filter(function (button) { return button.dataset.visible === 'all'; })
   .forEach(function (button) { button.fire('click'); });
 const capaPrincipal = elements['impulse-layers'].children[0].children[0];
 capaPrincipal.fire('change', { target: { checked: true } });
+
+// Constituciones, roturas y el reloj de arena de las constituciones abortadas
+// comparten capa: se apaga y se enciende para que el paso recorra las tres. Va
+// aquí porque necesita las tres cosas que este bloque acaba de dejar puestas: el
+// impulso principal encendido (los marcadores son suyos), todos los ID y el
+// histórico entero a la vista. Las constituciones abortadas son raras y con una
+// ventana corta no cae ninguna.
+steps.push(snapshot('marcas-por-defecto'));
+elements['layer-marks'].fire('change', { target: { checked: false } });
+steps.push(snapshot('sin-marcas'));
+elements['layer-marks'].fire('change', { target: { checked: true } });
 steps.push(snapshot('evitadas-por-defecto'));
 elements['layer-avoided'].fire('change', { target: { checked: false } });
 steps.push(snapshot('evitadas-apagadas'));
 elements['layer-avoided'].fire('change', { target: { checked: true } });
 
-// Señales de zona: el toque del OB y el rechazo/rotura del UL. Se encienden y se
+// Las ZONAS del ID: el UL y el PUL. Se encienden y se apagan sobre las mismas
+// velas; sin zonas en el payload los dos pasos salen iguales, que es lo que
+// comprueba el test de la corrida sin zonas.
+steps.push(snapshot('zonas-por-defecto'));
+elements['layer-zones'].fire('change', { target: { checked: false } });
+steps.push(snapshot('zonas-apagadas'));
+elements['layer-zones'].fire('change', { target: { checked: true } });
+
+// Señales de zona: el toque del PUL y el rechazo/rotura del UL. Se encienden y se
 // apagan sobre las mismas velas; sin zonas en el payload los dos pasos salen
 // iguales, que es lo que comprueba el test de la corrida sin zonas.
 steps.push(snapshot('senales-por-defecto'));
@@ -386,7 +512,7 @@ elements['layer-steps'].fire('change', { target: { checked: false } });
 steps.push(snapshot('escalera-sin-saltos'));
 elements['layer-steps'].fire('change', { target: { checked: true } });
 capaPrincipal.fire('change', { target: { checked: false } });
-visiblesZonas.filter(function (button) { return button.dataset.visible === 'pair'; })
+visiblesMarco.filter(function (button) { return button.dataset.visible === 'pair'; })
   .forEach(function (button) { button.fire('click'); });
 tabs[0].fire('click');
 presets[presets.length - 1].fire('click');
@@ -417,6 +543,96 @@ visibles.forEach(function (button) {
   button.fire('click');
   steps.push(snapshot('ids-' + button.dataset.visible));
 });
+
+// La cascada H4 -> H1, con el Diario de veto. Se recorren los cuatro gráficos
+// porque cada paso se dibuja en el suyo: el tramo diario en el Diario, el toque
+// de H4 en H4 y la confirmación en H1, con su caja si es el PUL de H1. Encendida
+// y apagada sobre las mismas velas; sin cascada en
+// el payload los dos pasos salen iguales, que es lo que comprueba el test de la
+// corrida sin ella. Va con el periodo completo y todos los ID a la vista, que es
+// como lo deja el bloque de arriba.
+tabs.forEach(function (tab) {
+  tab.fire('click');
+  // La capa cuelga del impulso principal del gráfico, y algún paso de más arriba
+  // pudo apagarlo: se encienden todas antes de mirar, que es lo que se quiere
+  // probar aquí.
+  elements['impulse-layers'].children.forEach(function (wrapper) {
+    wrapper.children[0].fire('change', { target: { checked: true } });
+  });
+  steps.push(snapshot('cascada-' + tab.dataset.tf));
+  elements['layer-cascade'].fire('change', { target: { checked: false } });
+  steps.push(snapshot('cascada-apagada-' + tab.dataset.tf));
+  elements['layer-cascade'].fire('change', { target: { checked: true } });
+});
+tabs[0].fire('click');
+
+// Fase 3.1 — las ENTRADAS y el régimen de H4. Se recorren los cuatro gráficos:
+// una operación es un tramo de precio y de tiempo y se dibuja igual en todos, así
+// que apagarla tiene que quitar sus trazas en cualquiera de ellos. Sin entradas en
+// el payload los dos pasos salen iguales, que es lo que comprueba el test de la
+// corrida sin ellas.
+tabs.forEach(function (tab) {
+  tab.fire('click');
+  steps.push(snapshot('entradas-' + tab.dataset.tf));
+  elements['layer-entries'].fire('change', { target: { checked: false } });
+  steps.push(snapshot('entradas-apagadas-' + tab.dataset.tf));
+  elements['layer-entries'].fire('change', { target: { checked: true } });
+});
+
+// La ETIQUETA escrita de cada operación: sólo se escribe con pocas a la vista, así
+// que se encoge la ventana a un día en M15. Se elige el día de una que entró y
+// salió en la MISMA vela —el caso que sin ancho no se veía—, y si no hubiera
+// ninguna, el de la primera que se llenó.
+const operaciones = payloadData.entries || [];
+const relampago = operaciones.filter(function (item) {
+  return item.xf !== undefined && item.xe === item.xf;
+})[0] || operaciones.filter(function (item) { return item.xf !== undefined; })[0];
+function unDia(item, minuto, etiqueta) {
+  if (!item) { return; }
+  const dia = new Date(minuto * 60000).toISOString().slice(0, 10);
+  tabs.filter(function (tab) { return tab.dataset.tf === 'M15'; })
+    .forEach(function (tab) { tab.fire('click'); });
+  elements['from'].fire('change', { target: { value: dia } });
+  elements['to'].fire('change', { target: { value: dia } });
+  steps.push(snapshot(etiqueta));
+  presets[0].fire('click');
+}
+
+unDia(relampago, relampago && relampago.xf, 'entradas-un-dia');
+
+// El RECHAZO_UL afinado con un OB: su límite cae fuera del recuadro del patrón, y
+// el globo tiene que decir de dónde sale. Se retrata el día en que se armó.
+const rechazo = operaciones.filter(function (item) {
+  return item.f === 'RECHAZO_UL' && item.pat === 'OB';
+})[0];
+unDia(rechazo, rechazo && rechazo.x, 'entradas-rechazo-ob');
+
+// El patrón de DETRÁS de la zona: el recuadro cae fuera de la zona de H1 y el
+// stop no va a la zona sino al borde lejano del patrón. Se retrata el día en que
+// se armó, que es donde se ve el hueco entre la zona y el sitio.
+const detras = operaciones.filter(function (item) {
+  return item.f === 'ZONA_ATRAS';
+})[0];
+unDia(detras, detras && detras.x, 'entradas-detras-zona');
+
+// El CIERRE DEL VIERNES: la posición que no llegó ni al stop ni al objetivo
+// porque cerró el mercado, y el límite que se quitó por lo mismo. Son lo único
+// que sale del gráfico sin que el precio haya llegado a ningún sitio.
+const cierreViernes = operaciones.filter(function (item) {
+  return item.o === 'CIERRE_SEMANAL';
+})[0];
+unDia(cierreViernes, cierreViernes && cierreViernes.xe, 'entradas-cierre-viernes');
+
+const quitadoViernes = operaciones.filter(function (item) {
+  return item.why === 'CIERRE_SEMANAL';
+})[0];
+unDia(quitadoViernes, quitadoViernes && quitadoViernes.xc, 'entradas-limite-viernes');
+
+tabs[0].fire('click');
+elements['layer-regime'].fire('change', { target: { checked: false } });
+steps.push(snapshot('regimen-apagado'));
+elements['layer-regime'].fire('change', { target: { checked: true } });
+steps.push(snapshot('regimen-encendido'));
 
 // R-36 — alternar los tres LEG_START_MODE sobre las mismas velas, y apagar la
 // capa que marca los extremos de color contrario.
@@ -622,6 +838,255 @@ elements['layer-mid'].fire('change', { target: { checked: false } });
 // Y el preset lo suelta: pedir otro tramo de historia es pedir otro sitio.
 presets[presets.length - 1].fire('click');
 steps.push(snapshot('zoom-suelto-por-el-preset'));
+
+// I.1 — el simulador de entradas: dos botones que arman, un clic que planta la
+// caja y arrastres que la mueven. Con el encuadre tomado a mano se sabe qué
+// precio hay debajo de cada píxel, así que el recorrido puede comprobar dónde
+// cae la caja y cuánto se mueve. Es dibujo del propietario: ninguna de estas
+// cosas toca al motor.
+tabs[0].fire('click');
+presets[0].fire('click');
+const spanDiario = payload.spans[tabs[0].dataset.tf];
+const simX = [
+  minuteOf(plotCalls[plotCalls.length - 1].lastBar) - 200 * spanDiario,
+  minuteOf(plotCalls[plotCalls.length - 1].lastBar),
+];
+const simY = precios;
+zoomTo(simX, simY);
+
+// El mismo cálculo que hace el explorador: MARGIN sobre el div de 1200 x 720.
+function pixelOf(minute, price) {
+  const width = 1200 - 66 - 18;
+  const height = 720 - 16 - 44;
+  return {
+    x: 66 + (minute - simX[0]) / (simX[1] - simX[0]) * width,
+    y: 16 + (simY[1] - price) / (simY[1] - simY[0]) * height,
+  };
+}
+
+const simButtons = elements['sim-buttons'].children;
+
+function armar(side) {
+  simButtons.filter(function (button) { return button.dataset.side === side; })
+    .forEach(function (button) { button.fire('click'); });
+}
+
+function clicGrafico(point) {
+  elements['chart'].fire('click', {
+    clientX: point.x, clientY: point.y,
+    preventDefault() {}, stopPropagation() {},
+  });
+}
+
+function arrastrarCaja(desde, hasta) {
+  elements['chart'].fire('mousedown', {
+    clientX: desde.x, clientY: desde.y,
+    preventDefault() {}, stopPropagation() {},
+  });
+  fireDocument('mousemove', {
+    clientX: hasta.x, clientY: hasta.y, preventDefault() {},
+  });
+  fireDocument('mouseup', {});
+}
+
+function cajaSimulada() {
+  const shapes = plotCalls[plotCalls.length - 1].sim || [];
+  const busca = function (name) {
+    return shapes.filter(function (shape) { return shape.name === name; })[0];
+  };
+  const linea = busca('sim-entrada');
+  if (!linea) { return null; }
+  return {
+    entry: linea.y0,
+    target: busca('sim-objetivo').y1,
+    stop: busca('sim-riesgo').y1,
+    from: minuteOf(linea.x0),
+    to: minuteOf(linea.x1),
+  };
+}
+
+function asaDeLaCaja(price) {
+  const caja = cajaSimulada();
+  return pixelOf(Math.round((caja.from + caja.to) / 2), caja[price]);
+}
+
+const entradaSimulada = (simY[0] + simY[1]) / 2;
+const minutoSimulado = simX[0] + Math.round((simX[1] - simX[0]) * 0.4);
+
+armar('long');
+steps.push(snapshot('sim-armado'));
+// Escape suelta el botón sin plantar nada.
+pressKey('Escape');
+steps.push(snapshot('sim-desarmado'));
+
+armar('long');
+clicGrafico(pixelOf(minutoSimulado, entradaSimulada));
+steps.push(snapshot('sim-largo'));
+
+// El borde de fuera de la caja roja mueve el stop y nada más.
+const asaStop = asaDeLaCaja('stop');
+arrastrarCaja(asaStop, { x: asaStop.x, y: asaStop.y + 40 });
+steps.push(snapshot('sim-stop-arrastrado'));
+
+// La línea de la entrada mueve el conjunto entero: las distancias no cambian.
+const asaEntrada = asaDeLaCaja('entry');
+arrastrarCaja(asaEntrada, { x: asaEntrada.x, y: asaEntrada.y - 25 });
+steps.push(snapshot('sim-entrada-arrastrada'));
+
+// El R:R fijo: 1:3 recoloca el objetivo sin tocar el stop, y con el candado
+// puesto mover el stop arrastra el objetivo con él.
+const ratios = elements['sim-ratio'].children;
+
+function fijarRatio(value) {
+  ratios.filter(function (button) { return button.dataset.ratio === value; })
+    .forEach(function (button) { button.fire('click'); });
+}
+
+fijarRatio('3');
+steps.push(snapshot('sim-ratio-1-3'));
+
+const asaStopConCandado = asaDeLaCaja('stop');
+arrastrarCaja(asaStopConCandado, { x: asaStopConCandado.x, y: asaStopConCandado.y - 20 });
+steps.push(snapshot('sim-stop-con-candado'));
+
+// Arrastrar el objetivo suelta el candado: manda lo que se ve.
+const asaObjetivo = asaDeLaCaja('target');
+arrastrarCaja(asaObjetivo, { x: asaObjetivo.x, y: asaObjetivo.y + 30 });
+steps.push(snapshot('sim-objetivo-a-mano'));
+
+// En corto el objetivo va por debajo de la entrada y el riesgo por encima.
+fijarRatio('4');
+armar('short');
+clicGrafico(pixelOf(minutoSimulado, entradaSimulada));
+steps.push(snapshot('sim-corto'));
+
+elements['sim-clear'].fire('click');
+steps.push(snapshot('sim-quitado'));
+
+
+// I.2 — la cuenta simulada: el capital, el riesgo y los tres botones que apuntan
+// la caja dibujada. El encuadre y el ratio son los mismos que usa el bloque de
+// arriba, así que el R:R de cada caja es 1:2 exacto y las cifras se pueden
+// comprobar a mano: 50 $ al 2 % son 1,00 $ de riesgo y 2,00 $ de objetivo.
+const resultados = elements['account-buttons'].children;
+
+function apuntar(result) {
+  resultados.filter(function (button) { return button.dataset.result === result; })
+    .forEach(function (button) { button.fire('click'); });
+}
+
+function plantarCaja(side) {
+  armar(side);
+  clicGrafico(pixelOf(minutoSimulado, entradaSimulada));
+}
+
+// Fijar un R:R sin caja plantada deja el ratio puesto para la siguiente y no
+// puede romper nada: es el gesto natural antes de dibujar.
+fijarRatio('2');
+steps.push(snapshot('ratio-sin-caja'));
+steps.push(snapshot('cuenta-sin-nada'));
+plantarCaja('long');
+steps.push(snapshot('cuenta-con-caja'));
+apuntar('win');
+steps.push(snapshot('cuenta-ganada'));
+plantarCaja('long');
+apuntar('loss');
+steps.push(snapshot('cuenta-perdida'));
+plantarCaja('long');
+apuntar('be');
+steps.push(snapshot('cuenta-break-even'));
+elements['account-undo'].fire('click');
+steps.push(snapshot('cuenta-deshecha'));
+elements['account-copy'].fire('click');
+steps.push(snapshot('cuenta-copiada'));
+
+// Cambiar el capital de partida vuelve a contar la curva entera.
+elements['account-initial'].fire('change', { target: { value: '100' } });
+steps.push(snapshot('cuenta-capital-100'));
+
+// Y el riesgo en dólares fijos, que no compone.
+elements['account-mode'].fire('change', { target: { value: 'cash' } });
+elements['account-risk'].fire('change', { target: { value: '5' } });
+steps.push(snapshot('cuenta-riesgo-fijo'));
+
+// Un riesgo imposible no se acepta y el control repone el que está puesto.
+elements['account-risk'].fire('change', { target: { value: '0' } });
+steps.push(snapshot('cuenta-riesgo-invalido'));
+
+elements['account-reset'].fire('click');
+steps.push(snapshot('cuenta-reiniciada'));
+elements['sim-clear'].fire('click');
+
+// I.3 — los recuadros a mano: tres botones —PUL, UL y APUL— que arman, un clic
+// que planta el suyo y arrastres que lo mueven. Se marcan varios de cada nombre y
+// se quitan de uno en uno o de golpe. Es dibujo del propietario: no lo ha
+// detectado el motor y no cuenta como capa.
+function botonRect(kind) {
+  return elements['rect-buttons'].children.filter(function (button) {
+    return button.dataset.kind === kind;
+  })[0];
+}
+
+function armarRect(kind) {
+  botonRect(kind).fire('click');
+}
+
+function recuadros() {
+  return (plotCalls[plotCalls.length - 1].rect || []).map(function (shape) {
+    return {
+      name: shape.name,
+      high: shape.y1,
+      low: shape.y0,
+      from: minuteOf(shape.x0),
+      to: minuteOf(shape.x1),
+    };
+  });
+}
+
+function asaDelRecuadro(index, borde) {
+  const rect = recuadros()[index];
+  const minuto = Math.round((rect.from + rect.to) / 2);
+  if (borde === 'high') { return pixelOf(minuto, rect.high); }
+  if (borde === 'low') { return pixelOf(minuto, rect.low); }
+  return pixelOf(minuto, (rect.high + rect.low) / 2);
+}
+
+steps.push(snapshot('rect-sin-nada'));
+armarRect('PUL');
+steps.push(snapshot('rect-armado'));
+// Escape suelta el botón sin plantar nada, igual que en el simulador.
+pressKey('Escape');
+steps.push(snapshot('rect-desarmado'));
+
+armarRect('PUL');
+clicGrafico(pixelOf(minutoSimulado, entradaSimulada));
+steps.push(snapshot('rect-plantado'));
+
+// El borde de arriba mueve el techo y nada más.
+const asaTecho = asaDelRecuadro(0, 'high');
+arrastrarCaja(asaTecho, { x: asaTecho.x, y: asaTecho.y - 20 });
+steps.push(snapshot('rect-techo-arrastrado'));
+
+// Por dentro se mueve entero: el alto y el ancho no cambian.
+const asaDentro = asaDelRecuadro(0, 'body');
+arrastrarCaja(asaDentro, { x: asaDentro.x + 40, y: asaDentro.y + 30 });
+steps.push(snapshot('rect-movido'));
+
+// Se marcan varios y de nombres distintos: cada uno con su color.
+const medioSimulado = (simY[0] + entradaSimulada) / 2;
+armarRect('UL');
+clicGrafico(pixelOf(minutoSimulado, medioSimulado));
+steps.push(snapshot('rect-segundo'));
+
+// Y se numeran POR NOMBRE: el segundo PUL es «PUL 2» aunque entre medias haya un UL.
+armarRect('PUL');
+clicGrafico(pixelOf(minutoSimulado, (simY[0] + medioSimulado) / 2));
+steps.push(snapshot('rect-tercero'));
+
+elements['rect-undo'].fire('click');
+steps.push(snapshot('rect-deshecho'));
+elements['rect-clear'].fire('click');
+steps.push(snapshot('rect-limpio'));
 
 console.log(JSON.stringify({
   unknownElements: missing,

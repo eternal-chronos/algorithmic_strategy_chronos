@@ -402,7 +402,7 @@ def breaks(after: TimeframeAnalysis) -> pd.DataFrame:
 
     "Por línea" con la regla nueva significa una sola cosa: que en ese lado no
     había zona que sustituyera a la línea. Sólo le puede pasar al lado en contra
-    de un ID cuyo OB nunca llegó a confirmarse, porque el UL existe siempre.
+    del primer ID del histórico, que no tiene PUL, porque el UL existe siempre.
     """
     columns = [
         "tipo_rotura", "total", "por_zona", "por_linea", "pct_por_linea", "evitadas",
@@ -462,7 +462,7 @@ def overlap(
     exteriores invertidos, y unas zonas que se pisan los tienen en el otro orden.
     """
     columns = [
-        "anio", "con_ob_antes", "con_ob_despues",
+        "anio", "con_pul_antes", "con_pul_despues",
         "solapadas_antes", "solapadas_despues",
         "pct_antes", "pct_despues", "diferencia",
     ]
@@ -477,8 +477,8 @@ def overlap(
     frame = pd.DataFrame(
         {
             "anio": merged["anio"],
-            "con_ob_antes": merged["pares_antes"].astype(int),
-            "con_ob_despues": merged["pares_despues"].astype(int),
+            "con_pul_antes": merged["pares_antes"].astype(int),
+            "con_pul_despues": merged["pares_despues"].astype(int),
             "solapadas_antes": merged["se_solapan_antes"].astype(int),
             "solapadas_despues": merged["se_solapan_despues"].astype(int),
             "pct_antes": merged["pct_solape_antes"],

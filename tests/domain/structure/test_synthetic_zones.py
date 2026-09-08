@@ -4,33 +4,30 @@ La serie está en `domain/structure/synthetic_zones.py` y **cada cifra de este
 fichero se escribió antes de correr el motor**, leyendo la serie vela a vela.
 No hay ni una aserción copiada de una salida.
 
-Los ocho casos del §6 y dónde se comprueban:
+Los casos del §6 y dónde se comprueban:
 
   1. UL de mecha normal ................... `test_ul_de_mecha_normal`
   2. UL que se extiende a la siguiente .... `test_ul_que_se_extiende`
   3. UL que NO se extiende ................ `test_ul_que_no_se_extiende*`
   4. UL de altura cero .................... `test_ul_de_altura_cero`
-  5. OB confirmado dos barras después ..... `test_ob_que_tarda_dos_barras`
-  6. OB que nunca se confirma ............. `test_ob_que_nunca_se_confirma`
-  7. OB confirmado por la constituyente ... `test_la_vela_que_constituye_nunca_confirma`
-  8. Doji en posición de OB ............... `test_doji_en_posicion_de_ob_con_a2`
-  9. Los mismos casos en bajista .......... `test_la_serie_bajista_es_el_espejo_exacto`
-
-El caso 7 se comprueba **por imposibilidad**, que es el único resultado honesto:
-la vela que constituye es siempre del color contrario al impulso y la
-confirmación exige el color del impulso, así que ninguna vela puede hacer las
-dos cosas. El test lo fija sobre la serie entera para que, si algún día alguien
-cambia la regla, salte aquí.
+  5. PUL = el UL anterior hecho cuerpo .... `test_el_pul_es_el_cuerpo_del_extremo_anterior`
+  6. ID sin PUL ........................... `test_el_primer_id_no_tiene_pul`
+  7. UL y PUL sobre la misma vela ......... `test_el_ul_y_el_pul_se_reparten_la_vela`
+  8. Los mismos casos en bajista .......... `test_la_serie_bajista_es_el_espejo_exacto`
+  9. APUL en vez de PUL ................... `test_el_apul_sale_del_ultimo_id_interior*`
 """
 
 from __future__ import annotations
 
 import pytest
 
-from chronos.domain.structure.enums import AnchorMode, BodyDirection, ImpulseDirection
+from chronos.domain.structure.enums import BodyDirection, ImpulseDirection
+from chronos.domain.structure.synthetic_break import (
+    SYNTHETIC_ABORTED_DOWN,
+    SYNTHETIC_ABORTED_UP,
+)
 from chronos.domain.structure.synthetic_zones import (
     MIRROR_CENTRE,
-    SYNTHETIC_DOJI_OB,
     SYNTHETIC_ZONES_DOWN,
     SYNTHETIC_ZONES_UP,
 )
@@ -172,102 +169,133 @@ def test_la_zona_plana_sigue_existiendo(alcista: list[ZonedImpulse]) -> None:
     assert zona.low == zona.high == pytest.approx(alcista[2].impulse.extreme)
 
 
-# --- Caso 5: OB que tarda dos barras en confirmarse -------------------------
+# --- Caso 5: el PUL sale de la vela del extremo anterior ---------------------
+#
+# En esta serie los cinco ID van al alza —cada uno nace de la ROTURA A FAVOR del
+# anterior—, así que todos los PUL son de MECHA: la del extremo anterior apunta
+# hacia el ID nuevo y es lo primero que el precio encuentra al volver. El PUL de
+# CUERPO —el ID anterior iba al revés— se prueba en `test_zones.py` y en la serie
+# `SYNTHETIC_SAME_UP` de la fase 2.1.
 
 
-def test_ob_que_tarda_dos_barras(alcista: list[ZonedImpulse]) -> None:
-    """ID#4: el ancla es b10, con la mecha en 2045. Nadie la supera hasta b15."""
-    item = alcista[3]
-    zona = item.order_block
+def test_el_pul_es_la_mecha_del_extremo_anterior_cuando_iba_igual(
+    alcista: list[ZonedImpulse],
+) -> None:
+    """ID#2: su PUL sale de b2, la vela con la que se constituyó el ID#1.
 
-    assert zona is not None
-    assert zona.index_defining == 10
-    assert zona.index_confirmation == 15
-    assert item.impulse.index_constitution == 13
-    # b14 llega a 2040 y no basta; b15 llega a 2046 y sí.
-    assert zona.index_confirmation - item.impulse.index_constitution == 2
-
-
-def test_el_ob_cubre_la_vela_entera(alcista: list[ZonedImpulse]) -> None:
-    """A diferencia del UL, el OB sí cubre el cuerpo: b10 va de 2023 a 2045."""
-    zona = alcista[3].order_block
-
-    assert zona is not None
-    assert zona.inner == pytest.approx(2045.00)  # lo primero que encuentra la caída
-    assert zona.outer == pytest.approx(2023.00)  # lo que hay que cruzar para salir
-    assert zona.height == pytest.approx(22.00)
-    assert zona.low == pytest.approx(2023.00)
-    assert zona.high == pytest.approx(2045.00)
-
-
-def test_un_ob_confirmado_tarde_nace_al_confirmarse(alcista: list[ZonedImpulse]) -> None:
-    """El ID#4 nace en b13 pero su OB no existe hasta b15."""
-    series, _ = run_zones(SYNTHETIC_ZONES_UP)
-    zona = alcista[3].order_block
-
-    assert zona is not None
-    assert zona.ts_confirmation == series.at(15)
-    assert zona.ts_birth == series.at(15)
-    assert zona.ts_birth > alcista[3].impulse.ts_constitution
-
-
-def test_el_ob_confirmado_pronto_nace_con_el_id(alcista: list[ZonedImpulse]) -> None:
-    """Lo corriente: el ancla se supera dentro de la pierna, antes de constituir.
-
-    Ahí manda la constitución, porque durante el limbo no existe ninguna zona.
+    El ID#1 iba en su MISMO sentido, así que la zona es su mecha —el UL viejo tal
+    cual— y no el cuerpo: interior la punta (2012) y exterior el borde del cuerpo
+    (2010), que es el que hay que cruzar para dejarla atrás bajando.
     """
-    series, _ = run_zones(SYNTHETIC_ZONES_UP)
-    zona = alcista[0].order_block
+    item = alcista[1]
+    zona = item.penultimate
 
     assert zona is not None
-    assert zona.index_confirmation == 1
-    assert zona.ts_confirmation == series.at(1)
-    assert zona.ts_birth == series.at(3) == alcista[0].impulse.ts_constitution
+    assert zona.index_defining == 2 == alcista[0].impulse.index_extreme
+    assert zona.inner == pytest.approx(2012.00)  # punta de la mecha: lo primero
+    assert zona.outer == pytest.approx(2010.00)  # borde del cuerpo: lo que hay que cruzar
+    assert zona.height == pytest.approx(2.00)
 
 
-# --- Caso 6: OB que nunca se confirma ---------------------------------------
+def test_cada_pul_hereda_la_vela_del_ul_anterior(alcista: list[ZonedImpulse]) -> None:
+    """La cadena entera, escrita a mano leyendo la serie.
 
-
-def test_ob_que_nunca_se_confirma(alcista: list[ZonedImpulse]) -> None:
-    """ID#5: su ancla es b16, con la mecha en 2200. El ID muere en b19."""
-    item = alcista[4]
-
-    assert item.impulse.index_anchor == 16
-    assert item.impulse.index_end == 19
-    assert item.order_block is None
-
-
-def test_el_id_sin_ob_si_tiene_ul(alcista: list[ZonedImpulse]) -> None:
-    """Son dos zonas independientes: que falte el OB no deja al ID sin UL."""
-    item = alcista[4]
-    assert item.last.inner == pytest.approx(2039.00)
-    assert item.last.outer == pytest.approx(2040.00)
-
-
-# --- Caso 7: imposible por construcción -------------------------------------
-
-
-def test_la_vela_que_constituye_nunca_confirma(alcista: list[ZonedImpulse]) -> None:
-    """§6.7 pedía este caso y **no se puede construir**.
-
-    La vela que constituye un ID es la primera contraria a la pierna, y la
-    dirección del ID es la de la pierna: en un ID alcista constituye una roja.
-    La confirmación exige una vela del color del impulso, verde en un ID alcista.
-    Las dos condiciones se excluyen.
+    El borde del cuerpo sale siempre de la vela del extremo de aquel ID. La punta
+    no: es la mecha más lejana que el precio alcanzó mientras aquel ID estuvo
+    vivo, y por eso en tres de los cuatro casos la fija otra vela.
     """
-    for item in alcista:
-        if item.order_block is None:
-            continue
-        assert item.order_block.index_confirmation != item.impulse.index_constitution
+    esperado = [
+        # vela del cuerpo, punta (la mecha más lejana de la vida de aquel ID) y
+        # borde del cuerpo, que no se mueve nunca.
+        (2, 2012.00, 2010.00),  # ID#2 <- extremo del ID#1 en b2; su punta es la suya
+        (5, 2023.00, 2019.00),  # ID#3 <- extremo del ID#2 en b5, con la mecha de b6
+        (8, 2045.00, 2026.00),  # ID#4 <- extremo del ID#3 en b8, con la mecha de b10:
+        #                         la vela del extremo no dejó mecha, pero el ID sí
+        (12, 2200.00, 2034.00),  # ID#5 <- extremo del ID#4 en b12, con la mecha de b16
+    ]
+    for item, (vela, interior, exterior) in zip(alcista[1:], esperado, strict=True):
+        zona = item.penultimate
+        assert zona is not None
+        assert zona.index_defining == vela
+        assert zona.inner == pytest.approx(interior)
+        assert zona.outer == pytest.approx(exterior)
+
+
+def test_el_pul_de_mecha_no_cubre_el_cuerpo_de_su_vela(
+    alcista: list[ZonedImpulse],
+) -> None:
+    """b2 va de 2004 a 2012; el PUL del ID#2 sólo toma la mecha [2010, 2012]."""
+    zona = alcista[1].penultimate
+
+    assert zona is not None
+    assert zona.contains(2011.00)
+    assert not zona.contains(2007.00)  # el cuerpo: queda por detrás de la zona
+    assert not zona.contains(2004.50)  # la mecha de abajo: de nadie
+
+
+def test_el_pul_nace_con_su_id_y_no_antes(alcista: list[ZonedImpulse]) -> None:
+    """La vela es b2, pero la zona es del ID#2 y el ID#2 nace en b6."""
+    series, _ = run_zones(SYNTHETIC_ZONES_UP)
+    zona = alcista[1].penultimate
+
+    assert zona is not None
+    assert zona.ts_defining == series.at(2)
+    assert zona.ts_birth == series.at(6) == alcista[1].impulse.ts_constitution
+    assert zona.ts_outer_known == series.at(2)
+
+
+# --- Caso 6: ID sin PUL ------------------------------------------------------
+
+
+def test_el_primer_id_no_tiene_pul(alcista: list[ZonedImpulse]) -> None:
+    """El ID#1 no tiene ID anterior del que sacarlo. No es un fallo."""
+    assert alcista[0].penultimate is None
+    assert alcista[0].impulse.index_penultimate is None
+
+
+def test_el_id_sin_pul_si_tiene_ul(alcista: list[ZonedImpulse]) -> None:
+    """Son dos zonas independientes: que falte el PUL no deja al ID sin UL."""
+    item = alcista[0]
+    assert item.last.inner == pytest.approx(2010.00)
+    assert item.last.outer == pytest.approx(2012.00)
+
+
+def test_solo_el_primero_se_queda_sin_pul(alcista: list[ZonedImpulse]) -> None:
+    assert [item.penultimate is None for item in alcista] == [True, False, False, False, False]
+
+
+# --- Caso 7: el UL y el PUL se reparten la misma vela ------------------------
+
+
+def test_el_pul_del_id_siguiente_es_el_ul_viejo_tal_cual(
+    alcista: list[ZonedImpulse],
+) -> None:
+    """b2 lleva el UL del ID#1, y el ID#2 —que va igual— hereda ESA MISMA zona.
+
+    Los bordes son los mismos y lo que se invierte es cuál es interior: el UL se
+    recorre hacia arriba (cuerpo -> punta) y el PUL hacia abajo (punta ->
+    cuerpo), porque la rotura a favor sube y la rotura en contra baja.
+    """
+    ul = alcista[0].last
+    pul = alcista[1].penultimate
+
+    assert pul is not None
+    assert ul.index_defining == pul.index_defining == 2
+    assert ul.low == pytest.approx(2010.00) and ul.high == pytest.approx(2012.00)
+    assert (pul.low, pul.high) == (ul.low, ul.high)
+    assert (pul.inner, pul.outer) == (ul.outer, ul.inner)
 
 
 def test_el_color_de_la_constituyente_es_siempre_el_contrario(
     alcista: list[ZonedImpulse], bajista: list[ZonedImpulse]
 ) -> None:
-    """La razón de fondo del test anterior, medida en las dos direcciones."""
+    """La vela que constituye es siempre del color contrario al impulso.
+
+    No depende de ninguna zona, pero es la regla que hace que la vela del UL y
+    la de la constitución nunca sean la misma.
+    """
     series_up, _ = run_zones(SYNTHETIC_ZONES_UP)
     series_down, _ = run_zones(SYNTHETIC_ZONES_DOWN)
-
     for series, items, contrario in (
         (series_up, alcista, BodyDirection.BEARISH),
         (series_down, bajista, BodyDirection.BULLISH),
@@ -276,38 +304,7 @@ def test_el_color_de_la_constituyente_es_siempre_el_contrario(
             assert series.direction_of(item.impulse.index_constitution) is contrario
 
 
-# --- Caso 8: doji en posición de OB (sólo con ancla A2) ---------------------
-
-
-def test_doji_en_posicion_de_ob_con_a2() -> None:
-    """Con A2 el ancla es la primera vela de la pierna, y los dojis no la cortan."""
-    series, items = run_zones(SYNTHETIC_DOJI_OB, anchor_mode=AnchorMode.A2_FIRST_LEG_BAR)
-    item = items[1]
-    zona = item.order_block
-
-    assert item.impulse.index_anchor == 4
-    assert series.direction_of(4) is BodyDirection.DOJI
-    assert zona is not None
-    # El color del OB no interviene en la regla: la zona es la vela entera y la
-    # confirmación mira el color de quien la supera, no el suyo.
-    assert zona.inner == pytest.approx(2009.50)
-    assert zona.outer == pytest.approx(2008.50)
-    assert zona.height == pytest.approx(1.00)
-    assert zona.index_confirmation == 5
-
-
-def test_con_el_ancla_del_proyecto_el_ob_nunca_es_un_doji() -> None:
-    """A1 busca la última vela *contraria*, y un doji no lo es. Mismas velas."""
-    series, items = run_zones(SYNTHETIC_DOJI_OB, anchor_mode=AnchorMode.A1_LAST_COUNTER_BODY)
-    item = items[1]
-
-    assert item.impulse.index_anchor == 3  # se salta el doji de b4
-    assert series.direction_of(3) is BodyDirection.BEARISH
-    assert item.order_block is not None
-    assert item.order_block.height == pytest.approx(3.00)  # b3 va de 2008 a 2011
-
-
-# --- Caso 9: simetría exacta ------------------------------------------------
+# --- Caso 8: simetría exacta ------------------------------------------------
 
 
 def test_la_serie_bajista_es_el_espejo_exacto(
@@ -333,14 +330,12 @@ def test_la_serie_bajista_es_el_espejo_exacto(
         assert abajo.last.is_flat is arriba.last.is_flat
         assert abajo.last.height == pytest.approx(arriba.last.height)
 
-        assert (abajo.order_block is None) is (arriba.order_block is None)
-        if arriba.order_block is not None and abajo.order_block is not None:
-            assert abajo.order_block.inner == pytest.approx(reflejo(arriba.order_block.inner))
-            assert abajo.order_block.outer == pytest.approx(reflejo(arriba.order_block.outer))
-            assert abajo.order_block.height == pytest.approx(arriba.order_block.height)
-            assert (
-                abajo.order_block.index_confirmation == arriba.order_block.index_confirmation
-            )
+        assert (abajo.penultimate is None) is (arriba.penultimate is None)
+        if arriba.penultimate is not None and abajo.penultimate is not None:
+            assert abajo.penultimate.inner == pytest.approx(reflejo(arriba.penultimate.inner))
+            assert abajo.penultimate.outer == pytest.approx(reflejo(arriba.penultimate.outer))
+            assert abajo.penultimate.height == pytest.approx(arriba.penultimate.height)
+            assert abajo.penultimate.index_defining == arriba.penultimate.index_defining
 
 
 def test_los_casos_del_enunciado_caen_tambien_en_bajista(
@@ -350,6 +345,57 @@ def test_los_casos_del_enunciado_caen_tambien_en_bajista(
     assert bajista[0].last.extended is False and bajista[0].last.height == pytest.approx(2.00)
     assert bajista[1].last.extended is True and bajista[1].last.height == pytest.approx(4.00)
     assert bajista[2].last.is_flat
-    ob = bajista[3].order_block
-    assert ob is not None and ob.index_confirmation == 15
-    assert bajista[4].order_block is None
+    pul = bajista[3].penultimate
+    assert pul is not None and pul.index_defining == 8
+    assert bajista[0].penultimate is None
+
+
+# --- La zona APUL: la del ID nacido tras una constitución abortada -----------
+#
+# La serie no es la de esta fase: `SYNTHETIC_ZONES_UP` no tiene ninguna abortada
+# dentro. Se usa la de la 2.1, que se diseñó justo para eso, y aquí se comprueba
+# la ZONA —qué vela la define, dónde nace y cuáles son sus dos bordes—, no la
+# rotura.
+
+
+def test_el_apul_sale_del_ultimo_id_interior_del_retroceso_anterior() -> None:
+    """ID#2 de `SYNTHETIC_ABORTED_UP`: su zona en contra es la mecha de f5."""
+    _, aborted = run_zones(SYNTHETIC_ABORTED_UP)
+    item = aborted[1]
+
+    assert item.penultimate is None, "el APUL sustituye al PUL, no lo acompaña"
+    zona = item.ante_penultimate
+    assert zona is not None
+    assert zona.kind is ZoneKind.ANTE_PENULTIMATE
+    assert zona.index_defining == 5
+    assert zona.inner == pytest.approx(2010.00)  # base del cuerpo de f5
+    assert zona.outer == pytest.approx(2009.00)  # punta de su mecha
+    assert zona.height == pytest.approx(1.00)
+    assert zona.defining_body is BodyDirection.BEARISH
+
+
+def test_el_apul_nace_con_su_id_y_no_con_su_vela() -> None:
+    """La vela cerró mucho antes; la zona no existe hasta la constitución."""
+    _, aborted = run_zones(SYNTHETIC_ABORTED_UP)
+    zona = aborted[1].ante_penultimate
+
+    assert zona is not None
+    assert zona.ts_defining < zona.ts_birth
+    assert zona.ts_birth == aborted[1].impulse.ts_constitution
+    # No espera a ninguna vela de margen: no es el extremo recién fijado.
+    assert zona.ts_outer_known == zona.ts_defining
+    assert zona.extended is False
+
+
+def test_el_apul_bajista_es_el_espejo_del_alcista() -> None:
+    _, arriba = run_zones(SYNTHETIC_ABORTED_UP)
+    _, abajo = run_zones(SYNTHETIC_ABORTED_DOWN)
+
+    def reflejo(price: float) -> float:
+        return 2 * MIRROR_CENTRE - price
+
+    alta, baja = arriba[1].ante_penultimate, abajo[1].ante_penultimate
+    assert alta is not None and baja is not None
+    assert baja.inner == pytest.approx(reflejo(alta.inner))
+    assert baja.outer == pytest.approx(reflejo(alta.outer))
+    assert baja.index_defining == alta.index_defining

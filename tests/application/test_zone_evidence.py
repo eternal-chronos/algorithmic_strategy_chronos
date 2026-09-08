@@ -53,13 +53,11 @@ def series(config: ImpulseConfig) -> dict[str, pd.DataFrame]:
 # --- El panel ---------------------------------------------------------------
 
 
-def test_el_panel_cubre_los_seis_bloques(
+def test_el_panel_cubre_los_cinco_bloques(
     config: ImpulseConfig, series: dict[str, pd.DataFrame]
 ) -> None:
     titulos = [group.title for group in zone_evidence.collect(config, series).groups]
-    assert [titulo.split()[0] for titulo in titulos] == [
-        "Z.1", "Z.2", "Z.3", "Z.4", "Z.5", "Z.6"
-    ]
+    assert [titulo.split()[0] for titulo in titulos] == ["Z.1", "Z.2", "Z.3", "Z.4", "Z.5"]
 
 
 def test_el_dia_sintetico_y_el_lookahead_pasan_siempre(
@@ -70,7 +68,7 @@ def test_el_dia_sintetico_y_el_lookahead_pasan_siempre(
         group.title.split()[0]: group
         for group in zone_evidence.collect(config, series).groups
     }
-    for clave in ("Z.1", "Z.2", "Z.3", "Z.4"):
+    for clave in ("Z.1", "Z.2", "Z.3"):
         fallos = [check for check in grupos[clave].checks if not check.ok]
         assert not fallos, [(c.name, c.expected, c.obtained) for c in fallos]
 
@@ -81,7 +79,7 @@ def test_el_apagado_pasa_sobre_cualquier_histórico(
     grupo = next(
         group
         for group in zone_evidence.collect(config, series).groups
-        if group.title.startswith("Z.5")
+        if group.title.startswith("Z.4")
     )
     assert grupo.ok, [(c.name, c.expected, c.obtained) for c in grupo.checks if not c.ok]
 
@@ -91,12 +89,12 @@ def test_la_regresion_falla_con_un_historico_que_no_es_el_de_la_linea_base(
 ) -> None:
     """La fixture sintética no puede dar 401/1.914/7.231: el panel tiene que decirlo.
 
-    Es la comprobación de que Z.6 mira de verdad y no se limita a saludar.
+    Es la comprobación de que Z.5 mira de verdad y no se limita a saludar.
     """
     grupo = next(
         group
         for group in zone_evidence.collect(config, series).groups
-        if group.title.startswith("Z.6")
+        if group.title.startswith("Z.5")
     )
     assert not grupo.ok
     recuento = next(check for check in grupo.checks if check.name == "impulsos detectados")
@@ -107,7 +105,7 @@ def test_la_regresion_falla_con_un_historico_que_no_es_el_de_la_linea_base(
 def test_el_panel_detecta_que_las_zonas_han_movido_la_deteccion(
     config: ImpulseConfig, series: dict[str, pd.DataFrame]
 ) -> None:
-    """Z.5 compara dos corridas; si dieran distinto, el bloque tiene que caerse.
+    """Z.4 compara dos corridas; si dieran distinto, el bloque tiene que caerse.
 
     Se simula cambiando el modo de arranque de pierna entre las dos, que sí mueve
     impulsos: si el panel siguiera diciendo OK, no estaría comparando nada.
@@ -117,8 +115,8 @@ def test_el_panel_detecta_que_las_zonas_han_movido_la_deteccion(
     )
     con = zone_evidence.collect(config, series)
     distinto = zone_evidence.collect(otro, series)
-    bloque_con = next(g for g in con.groups if g.title.startswith("Z.5"))
-    bloque_otro = next(g for g in distinto.groups if g.title.startswith("Z.5"))
+    bloque_con = next(g for g in con.groups if g.title.startswith("Z.4"))
+    bloque_otro = next(g for g in distinto.groups if g.title.startswith("Z.4"))
 
     # Los dos pasan —cada uno se compara consigo mismo— pero los recuentos que
     # publican son distintos, que es lo que demuestra que leen los datos.
@@ -128,18 +126,18 @@ def test_el_panel_detecta_que_las_zonas_han_movido_la_deteccion(
     assert recuento_con.obtained != recuento_otro.obtained
 
 
-def test_el_caso_imposible_se_publica_como_cero(
+def test_el_id_sin_pul_se_publica_como_uno_y_solo_uno(
     config: ImpulseConfig, series: dict[str, pd.DataFrame]
 ) -> None:
-    """§6.7 — el panel tiene que decir que son cero, no callarse."""
+    """§6.6 — el panel tiene que decir cuántos son, no callarse."""
     grupo = next(
         group
         for group in zone_evidence.collect(config, series).groups
         if group.title.startswith("Z.1")
     )
-    check = next(c for c in grupo.checks if "constituye confirma" in c.name)
+    check = next(c for c in grupo.checks if "único que se queda sin PUL" in c.name)
     assert check.ok
-    assert "IMPOSIBLE: 0 casos" in check.obtained
+    assert check.obtained == "1 de 5"
 
 
 def test_el_panel_se_puede_renderizar(

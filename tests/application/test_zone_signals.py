@@ -80,18 +80,18 @@ def test_solo_hay_senales_donde_hay_detector(signals: ZoneSignalsRun) -> None:
 def test_los_tres_tipos_aparecen_en_el_historico(signals: ZoneSignalsRun) -> None:
     tipos = {item.kind for item in signals.per_timeframe[H4].items}
 
-    assert ZoneSignalKind.TOQUE_OB in tipos
+    assert ZoneSignalKind.TOQUE_PUL in tipos
     assert ZoneSignalKind.RECHAZO_UL in tipos
 
 
 def test_cada_senal_va_con_la_zona_que_le_toca(signals: ZoneSignalsRun) -> None:
+    """El toque es de la zona EN CONTRA, que puede ser el PUL o el APUL."""
+    en_contra = {ZoneKind.PENULTIMATE, ZoneKind.ANTE_PENULTIMATE}
     for item in signals.per_timeframe[H4].items:
-        esperada = (
-            ZoneKind.ORDER_BLOCK
-            if item.kind is ZoneSignalKind.TOQUE_OB
-            else ZoneKind.LAST
-        )
-        assert item.zone is esperada
+        if item.kind is ZoneSignalKind.TOQUE_PUL:
+            assert item.zone in en_contra
+        else:
+            assert item.zone is ZoneKind.LAST
 
 
 def test_ninguna_senal_se_adelanta_a_su_zona(
@@ -113,7 +113,7 @@ def test_ninguna_senal_sobrevive_a_su_id(
 ) -> None:
     """El límite es el CIERRE de la última vela del ID, no su apertura.
 
-    El toque del OB se fecha en la vela fina, así que cae dentro de la vela
+    El toque del PUL se fecha en la vela fina, así que cae dentro de la vela
     grande que mata al ID —donde el ID todavía estaba vivo— y no después.
     """
     for timeframe, medida in signals.per_timeframe.items():
@@ -142,7 +142,7 @@ def test_el_ob_no_da_dos_toques_en_la_misma_vela_del_id(
         velas = pd.DatetimeIndex(run.analyses[timeframe].bars.index)
         vistas: set[tuple[int, int]] = set()
         for item in medida.items:
-            if item.kind is not ZoneSignalKind.TOQUE_OB:
+            if item.kind is not ZoneSignalKind.TOQUE_PUL:
                 continue
             vela = int(velas.searchsorted(pd.Timestamp(item.timestamp), side="right")) - 1
             clave = (item.id_num, vela)
@@ -161,10 +161,10 @@ def test_el_toque_del_ob_se_fecha_en_la_vela_fina(
     finas = pd.DatetimeIndex(run.chart_bars["M15"].index)
     grandes = pd.DatetimeIndex(run.analyses[H4].bars.index)
     items = signals.per_timeframe[H4].items
-    toques = [item for item in items if item.kind is ZoneSignalKind.TOQUE_OB]
-    del_ul = [item for item in items if item.kind is not ZoneSignalKind.TOQUE_OB]
+    toques = [item for item in items if item.kind is ZoneSignalKind.TOQUE_PUL]
+    del_ul = [item for item in items if item.kind is not ZoneSignalKind.TOQUE_PUL]
 
-    assert toques, "el histórico de prueba tiene toques del OB"
+    assert toques, "el histórico de prueba tiene toques del PUL"
     assert all(pd.Timestamp(item.timestamp) in finas for item in toques)
     assert any(pd.Timestamp(item.timestamp) not in grandes for item in toques), (
         "alguno cae dentro de la vela de H4 y no en su apertura"

@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from chronos.domain.structure.enums import (
+    AntePenultimateOrigin,
     BodyDirection,
     BreakKind,
     BreakLevelSource,
@@ -76,6 +77,61 @@ class DominantImpulse:
     #: un impulso alcista es verde y en uno bajista, rojo.
     extreme_bar_direction: BodyDirection
 
+    #: Vela del extremo del ID **anterior**: la que llevaba su UL. Cuando aquel
+    #: ID iba en el mismo sentido que éste, su extremo queda por detrás y esa
+    #: vela es la del **PUL** de éste. `None` sólo en el primer impulso del
+    #: histórico, que no tiene ID anterior. Se guarda por lo mismo que las otras
+    #: dos velas: quien dibuje o audite no tiene que reconstruirla, y la fase 2.1
+    #: la lee barra a barra sin volver a la lista de impulsos.
+    index_penultimate: int | None
+    ts_penultimate: datetime | None
+    #: Hacia dónde iba aquel ID. Es lo que decide si hay PUL: sólo lo hay si iba
+    #: en el MISMO sentido que éste. Si iba al revés, su extremo es casi siempre
+    #: el ancla de éste y no un nivel detrás, así que el lado en contra pasa a
+    #: ser el APUL heredado; y cuando aquel extremo sí quedó por detrás del
+    #: ancla, el APUL es su propio UL. Se guarda porque después no se puede
+    #: reconstruir sin recorrer la lista de impulsos hacia atrás, y quien dibuja
+    #: no tiene esa lista.
+    penultimate_direction: ImpulseDirection | None
+
+    #: Vela del **APUL**: la del nivel en contra que le prestó el ID anterior
+    #: —porque aquél iba al revés y su extremo es el ancla de éste—, la del
+    #: extremo de aquel ID cuando quedó por detrás del ancla, o la del extremo
+    #: del último ID **interior** contrario del retroceso cuando en medio se
+    #: abortó una constitución. `None`
+    #: en los que llevan PUL o nada. Se guarda porque no se puede re-derivar sin
+    #: recorrer la cadena de impulsos hacia atrás —o sin volver a correr la
+    #: máquina dentro de aquel retroceso—, y quien dibuja no hace ni lo uno ni lo
+    #: otro.
+    index_ante_penultimate: int | None
+    ts_ante_penultimate: datetime | None
+    #: Hacia dónde iba el ID que fijó la mecha del APUL. En el heredado es el del
+    #: ID que la fijó, que puede ir en cualquiera de los dos sentidos porque la
+    #: zona viene de más atrás; en el del retroceso, el del ID interior. Decide
+    #: qué borde de la zona es el exterior.
+    ante_penultimate_direction: ImpulseDirection | None
+
+    #: Velas entre las que se busca la **punta** de la zona en contra: la vida
+    #: entera del ID que la fijó, del arranque de su pierna a la vela anterior a
+    #: la que lo rompió. Se apunta al constituir —sale de índices que el módulo
+    #: ya tiene— y quien lee la mecha es la capa de zonas. `None` cuando el lado
+    #: en contra se rompe por línea.
+    against_tip_window: tuple[int, int] | None
+
+    #: Qué zona lleva el lado en contra de este ID: su PUL, su APUL, o nada
+    #: mientras no hay ningún ID detrás del que sacarla. Se clasifica siempre,
+    #: también con `BREAK_BY_ZONE = false`: ahí la zona no gobierna la rotura,
+    #: pero es la misma que se mide y se dibuja. Con `against_by_zone` apagado la
+    #: zona existe igual y quien manda la rotura de ese lado es el ancla.
+    against_source: BreakLevelSource
+    #: `True` sólo en el APUL **heredado**: la zona no sale de ningún extremo del
+    #: ID anterior sino del nivel que aquél llevaba, y puede venir de varios ID
+    #: atrás. Los otros dos APUL —el UL del ID anterior contrario que dejó su
+    #: extremo por detrás del ancla, y el del ID interior de un retroceso— salen
+    #: de un extremo. Quien dibuja no puede distinguirlos por los bordes y son
+    #: tres historias distintas, así que el dato viaja con el impulso.
+    against_inherited: bool
+
     #: Barras cerradas en LIMBO entre la rotura anterior y esta constitución.
     limbo_bars: int
     #: Tamaño del cuerpo de la vela contraria que lo constituyó. Alimenta el
@@ -87,7 +143,7 @@ class DominantImpulse:
     ts_end: datetime | None = field(default=None, init=False)
     index_end: int | None = field(default=None, init=False)
     exit_break_kind: BreakKind | None = field(default=None, init=False)
-    #: Fase 2.1. De dónde salió el nivel que lo mató: la línea, el UL o el OB.
+    #: Fase 2.1. De dónde salió el nivel que lo mató: la línea, el UL o el PUL.
     #: Con `BREAK_BY_ZONE = false` es siempre la línea.
     exit_level_source: BreakLevelSource | None = field(default=None, init=False)
 
@@ -217,6 +273,54 @@ class DominantImpulse:
         return (first, *self.extension_trail)
 
     @property
+    def has_penultimate(self) -> bool:
+        """`True` si el lado en contra de este ID lo gobierna su PUL."""
+        return self.against_source is BreakLevelSource.PENULTIMATE
+
+    @property
+    def has_ante_penultimate(self) -> bool:
+        """`True` si lo gobierna su APUL, por cualquiera de sus tres motivos."""
+        return self.against_source is BreakLevelSource.ANTE_PENULTIMATE
+
+    @property
+    def ante_penultimate_origin(self) -> AntePenultimateOrigin | None:
+        """Cuál de los tres APUL lleva este ID, o `None` si no lleva APUL."""
+        if not self.has_ante_penultimate:
+            return None
+        if self.against_inherited:
+            return AntePenultimateOrigin.INHERITED
+        if (
+            self.penultimate_direction is not None
+            and self.penultimate_direction is not self.direction
+        ):
+            return AntePenultimateOrigin.COUNTER_EXTREME
+        return AntePenultimateOrigin.PULLBACK
+
+    @property
+    def index_against(self) -> int | None:
+        """Vela de la que sale el nivel en contra, o `None` si manda la línea."""
+        if self.has_penultimate:
+            return self.index_penultimate
+        if self.has_ante_penultimate:
+            return self.index_ante_penultimate
+        return None
+
+    @property
+    def against_direction(self) -> ImpulseDirection | None:
+        """Hacia dónde iba el ID que fijó la mecha del nivel en contra.
+
+        Es lo que dice qué borde de la zona es el exterior. Los dos sentidos
+        viajan con el impulso porque ninguno se puede reconstruir después: el del
+        PUL exigiría la lista de impulsos y el del APUL, seguir la cadena de
+        zonas heredadas hasta el ID que la marcó.
+        """
+        if self.has_penultimate:
+            return self.penultimate_direction
+        if self.has_ante_penultimate:
+            return self.ante_penultimate_direction
+        return None
+
+    @property
     def is_open(self) -> bool:
         return self.ts_end is None
 
@@ -316,3 +420,34 @@ class BarState:
     @property
     def in_limbo(self) -> bool:
         return self.state is MachineState.LIMBO
+
+
+@dataclass(frozen=True, slots=True)
+class AbortedConstitution:
+    """Vela contraria que no llega a constituir: el ID nacería ya roto.
+
+    La regla «primero la rotura» sólo protege al ID **anterior**. Sin esto, una
+    vela contraria que cierra al otro lado del nivel de rotura en contra del ID
+    que iba a crear lo constituye igualmente, y el ID nace muerto: la rotura no
+    se juzga hasta la barra siguiente, así que el impulso sobrevive apuntando al
+    revés que el precio y bloquea al que debería nacer.
+
+    Aquí esa vela no constituye nada: se comporta como una vela de rotura y gira
+    la pierna. Se registra entera —el nivel que cruzó y de dónde salía— porque es
+    una constitución que el propietario habría visto y no está.
+    """
+
+    timestamp: datetime
+    index: int
+    timeframe: str
+    #: Dirección del ID que se habría constituido, y de la pierna que muere aquí.
+    aborted_direction: ImpulseDirection
+    #: Dirección de la pierna que esta misma vela abre.
+    new_leg_direction: ImpulseDirection
+    close: float
+    #: Nivel de rotura en contra que el cierre ya había dejado atrás: el ancla, o
+    #: el borde exterior del PUL cuando la fase 2.1 lo pone a mandar.
+    level: float
+    #: La línea del ancla, mande o no, por la misma razón que en `BreakEvent`.
+    line: float
+    level_source: BreakLevelSource = BreakLevelSource.LINE

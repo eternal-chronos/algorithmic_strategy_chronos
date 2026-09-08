@@ -183,8 +183,13 @@ def _zones_summary(zones: ZonesRun) -> dict[str, object]:
             timeframe: {
                 "impulsos_con_zonas": len(item.items),
                 "zonas": len(item.table),
-                "con_ob_confirmado": len(item.with_order_block),
-                "sin_ob_confirmado": len(item.without_order_block),
+                "con_pul": len(item.with_penultimate),
+                "con_apul": len(item.with_ante_penultimate),
+                "apul_heredado": len(item.with_inherited_ante_penultimate),
+                "apul_extremo_contrario": len(
+                    item.with_counter_extreme_ante_penultimate
+                ),
+                "sin_zona_en_contra": len(item.without_against_zone),
                 "ul_altura_cero": sum(1 for zoned in item.items if zoned.last.is_flat),
                 "ul_extendidos": sum(1 for zoned in item.items if zoned.last.extended),
             }

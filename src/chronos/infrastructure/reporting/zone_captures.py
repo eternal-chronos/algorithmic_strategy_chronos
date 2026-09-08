@@ -1,18 +1,18 @@
-"""Capturas de la fase 2.0 (§8): las zonas UL y OB sobre las velas.
+"""Capturas de la fase 2.0 (§8): las zonas UL y PUL sobre las velas.
 
 Cinco lotes, los que pidió el propietario para auditar de un vistazo:
 
   1. diez ID alcistas y diez bajistas con las dos zonas bien formadas;
   2. los diez UL que se estiraron a la vela siguiente;
-  3. los diez ID que murieron sin que su OB llegara a confirmarse;
+  3. los diez ID que murieron sin que su PUL llegara a confirmarse;
   4. los cinco UL de altura cero, si los hay;
-  5. los cinco OB más altos en ATR y los cinco más bajos.
+  5. los cinco PUL más altos en ATR y los cinco más bajos.
 
 Cada imagen lleva sobreimpreso lo que hace falta para juzgarla sin abrir ningún
 CSV, y el `LEEME.txt` repite lo mismo en una línea por fichero.
 
-El OB va con **borde discontinuo mientras no está confirmado** y sólido cuando
-lo está. Aunque un OB sin confirmar no exista como zona, el propietario necesita
+El PUL va con **contorno atenuado desde su vela hasta que nace el ID** y sólido
+mientras el ID vive. Aunque en ese tramo la zona no sea suya, el propietario necesita
 ver dónde estaba la vela candidata: por eso se dibuja, y por eso se distingue.
 """
 
@@ -70,8 +70,11 @@ class ZoneCapture:
     constituted: pd.Timestamp
     ul_usd: float
     ul_atr: float
-    ob_usd: float | None
-    ob_atr: float | None
+    #: La zona del lado en contra —el PUL—. `None` cuando el ID no tiene
+    #: ninguna: el primero de cada temporalidad.
+    against_kind: str | None
+    against_usd: float | None
+    against_atr: float | None
     note: str
 
 
@@ -106,10 +109,10 @@ def _lots(zones: ZonesRun) -> list[tuple[str, list[Pick]]]:
         ("bien_formados_alcista", _well_formed(zones, "alcista")),
         ("bien_formados_bajista", _well_formed(zones, "bajista")),
         ("ul_extendido", _extended(zones)),
-        ("sin_ob", _without_order_block(zones)),
+        ("sin_zona_en_contra", _without_against_zone(zones)),
         ("ul_altura_cero", _flat(zones)),
-        ("ob_mas_alto", _extreme_order_blocks(zones, biggest=True)),
-        ("ob_mas_bajo", _extreme_order_blocks(zones, biggest=False)),
+        ("pul_mas_alto", _extreme_penultimates(zones, biggest=True)),
+        ("pul_mas_bajo", _extreme_penultimates(zones, biggest=False)),
     ]
 
 
@@ -136,7 +139,7 @@ def _well_formed(zones: ZonesRun, direction: str) -> list[Pick]:
         for timeframe, zoned in _candidates(zones)
         if timeframe == "H4"
         and zoned.direction.value == direction
-        and zoned.has_order_block
+        and zoned.has_penultimate
         and not zoned.last.is_flat
         and pd.notna(zoned.atr)
         and zoned.atr > 0
@@ -166,12 +169,16 @@ def _extended(zones: ZonesRun) -> list[Pick]:
     return ordered[:EXTENDED]
 
 
-def _without_order_block(zones: ZonesRun) -> list[Pick]:
-    """§8.3 — los ID que murieron sin OB confirmado. Son la cifra de 7.1."""
+def _without_against_zone(zones: ZonesRun) -> list[Pick]:
+    """§8.3 — los ID sin zona en contra. Es la cifra de 7.1.
+
+    Son los primeros de cada temporalidad, que no tienen ID detrás del que salga
+    la vela.
+    """
     pool = [
         (timeframe, zoned)
         for timeframe, zoned in _candidates(zones)
-        if not zoned.has_order_block
+        if zoned.against is None
     ]
     return pool[:WITHOUT_ORDER_BLOCK]
 
@@ -184,18 +191,18 @@ def _flat(zones: ZonesRun) -> list[Pick]:
     return pool[:FLAT]
 
 
-def _extreme_order_blocks(zones: ZonesRun, *, biggest: bool) -> list[Pick]:
-    """§8.5 — los OB más altos y los más bajos, medidos en ATR."""
+def _extreme_penultimates(zones: ZonesRun, *, biggest: bool) -> list[Pick]:
+    """§8.5 — los PUL más altos y los más bajos, medidos en ATR."""
     pool = [
         (timeframe, zoned)
         for timeframe, zoned in _candidates(zones)
-        if zoned.has_order_block and pd.notna(zoned.atr) and zoned.atr > 0
+        if zoned.has_penultimate and pd.notna(zoned.atr) and zoned.atr > 0
     ]
     if not pool:
         return []
     ordered = sorted(
         pool,
-        key=lambda pick: pick[1].order_block.height / pick[1].atr,  # type: ignore[union-attr]
+        key=lambda pick: pick[1].penultimate.height / pick[1].atr,  # type: ignore[union-attr]
         reverse=biggest,
     )
     return ordered[:EXTREME_ORDER_BLOCKS]
@@ -218,7 +225,7 @@ def _write_one(
     path = folder / f"{name}.png"
     figure.write_image(str(path), width=WIDTH, height=HEIGHT, scale=SCALE)
 
-    block = zoned.order_block
+    block = zoned.against
     return ZoneCapture(
         path=path,
         lot=lot,
@@ -228,8 +235,9 @@ def _write_one(
         constituted=stamp,
         ul_usd=zoned.last.height,
         ul_atr=_ratio(zoned.last.height, zoned.atr),
-        ob_usd=None if block is None else block.height,
-        ob_atr=None if block is None else _ratio(block.height, zoned.atr),
+        against_kind=None if block is None else block.kind.value,
+        against_usd=None if block is None else block.height,
+        against_atr=None if block is None else _ratio(block.height, zoned.atr),
         note=note,
     )
 
@@ -240,16 +248,13 @@ def _figure(
     last_index = len(analysis.bars) - 1
     end = zoned.index_end if zoned.index_end is not None else last_index
     # La ventana arranca en la vela más antigua que define una zona: sin ella la
-    # captura enseñaría un rectángulo que empieza fuera del encuadre. En los ID
-    # sin OB confirmado la vela que hay que encajar es la del **ancla**, que es
-    # justo la que el lote de §8.3 va a enseñar.
+    # captura enseñaría un rectángulo que empieza fuera del encuadre. La vela del
+    # PUL es anterior al ID —es la del extremo del ID de al lado—, así que casi
+    # siempre es ella.
     first = min(zoned.index_constitution, zoned.last.index_defining)
-    if zoned.order_block is not None:
-        first = min(first, zoned.order_block.index_defining)
-    else:
-        anchor = _anchor_index(analysis, zoned)
-        if anchor is not None:
-            first = min(first, anchor)
+    against = zoned.against
+    if against is not None:
+        first = min(first, against.index_defining)
 
     request = CaptureRequest(
         name=f"zonas_id{zoned.id_num}",
@@ -258,7 +263,7 @@ def _figure(
         last=end,
         title=(
             f"{analysis.timeframe} · ID {zoned.id_num} ({zoned.direction.value}) · "
-            f"zonas UL y OB · constituido {zoned.ts_constitution:%Y-%m-%d %H:%M} UTC"
+            f"zonas UL y PUL · constituido {zoned.ts_constitution:%Y-%m-%d %H:%M} UTC"
         ),
         subtitle=_subtitle(zoned, session_timezone),
         highlight=(zoned.id_num,),
@@ -269,19 +274,18 @@ def _figure(
     window_first = max(0, request.first - request.context)
     window_last = min(last_index, request.last + request.context)
     labels = bar_labels(pd.DatetimeIndex(analysis.bars.index[window_first : window_last + 1]))
-    note = draw_zones(figure, analysis, zoned, window_first, window_last, labels)
+    note = draw_zones(figure, zoned, window_first, window_last, labels)
     return figure, note
 
 
 def draw_zones(
     figure: go.Figure,
-    analysis: TimeframeAnalysis,
     zoned: ImpulseZones,
     first: int,
     last: int,
     labels: Sequence[str],
 ) -> str:
-    """Dibuja el UL y el OB de un ID sobre una captura ya montada.
+    """Dibuja el UL y el PUL de un ID sobre una captura ya montada.
 
     Pública porque las capturas de la fase 2.1 dibujan exactamente las mismas dos
     zonas: son las que ahora deciden la rotura, y enseñarlas con otro trazo
@@ -308,7 +312,7 @@ def draw_zones(
     if ul.is_flat:
         notes.append("UL de altura cero")
 
-    block = zoned.order_block
+    block = zoned.against
     if block is not None:
         _rectangle(figure, block, zoned, first, last, labels, colour, dashed=False)
         _annotate(
@@ -316,30 +320,77 @@ def draw_zones(
             labels,
             block.index_defining - first,
             block.outer,
-            f"<b>OB {block.low:,.{DECIMALS}f} → {block.high:,.{DECIMALS}f}</b>"
-            f"<br>confirmado {block.ts_confirmation:%Y-%m-%d %H:%M} UTC",
+            f"<b>{block.kind.value} {block.inner:,.{DECIMALS}f} → "
+            f"{block.outer:,.{DECIMALS}f}</b>"
+            + (
+                "<br>la mecha del extremo del ID anterior, que iba en el mismo "
+                "sentido"
+                if block.kind is ZoneKind.PENULTIMATE
+                else (
+                    "<br>la zona en contra que le prestó el ID anterior, que iba "
+                    "al revés"
+                    if zoned.against_is_inherited
+                    else (
+                        "<br>el UL del ID anterior, que iba al revés pero dejó su "
+                        "extremo por detrás del ancla de éste"
+                        if zoned.against_is_counter_extreme
+                        else "<br>mecha en contra de la vela del extremo del último "
+                        "ID interior del retroceso anterior"
+                    )
+                )
+            )
+            + "<br>la punta llega hasta la mecha más lejana de la vida de aquel ID"
+            + (
+                "<br>ALTURA CERO: "
+                + (
+                    "la vela no dejó mecha en ese lado"
+                )
+                if block.is_flat
+                else ""
+            ),
             colour,
             above=zoned.direction.value != "alcista",
         )
-        _confirmation_marker(figure, analysis, block, first, last, labels)
+        if zoned.has_penultimate:
+            notes.append(
+                "su PUL es el UL del ID anterior —la MECHA del extremo viejo—: aquel "
+                "ID iba en su mismo sentido y éste nació más allá"
+            )
+        elif zoned.against_is_inherited:
+            notes.append(
+                "no tiene PUL sino APUL: el ID anterior iba AL REVÉS, así que su "
+                "extremo es el ancla de éste y el nivel en contra es el que aquel "
+                "ID llevaba, HEREDADO tal cual"
+            )
+        elif zoned.against_is_counter_extreme:
+            notes.append(
+                "no tiene PUL sino APUL: el ID anterior iba AL REVÉS pero su "
+                "extremo quedó POR DETRÁS del ancla de éste —el giro lo trajo una "
+                "constitución abortada—, así que el nivel en contra es su UL"
+            )
+        elif zoned.has_ante_penultimate:
+            notes.append(
+                "no tiene PUL sino APUL: nació tras una CONSTITUCIÓN ABORTADA, así "
+                "que su nivel en contra sale del último ID interior del retroceso "
+                "del ID anterior"
+            )
     else:
-        # Sin confirmar el OB no existe como zona, pero el propietario necesita
-        # ver dónde estaba la vela candidata: se dibuja con borde discontinuo.
-        _candidate_rectangle(figure, analysis, zoned, first, last, labels)
-        notes.append("murió sin OB confirmado (la vela candidata va punteada)")
+        notes.append(
+            "el arranque de la temporalidad: todavía no hay ningún ID detrás, "
+            "así que no tiene PUL"
+        )
 
-    return " · ".join(notes) if notes else "UL y OB bien formados"
+    return " · ".join(notes) if notes else "las dos zonas bien formadas"
 
 
-def _birth_index(zoned: ImpulseZones, zone: Zone) -> int:
+def _birth_index(zoned: ImpulseZones) -> int:
     """Barra en la que la zona empieza a existir.
 
-    El UL nace con la constitución del ID; el OB, cuando además se confirma. La
-    vela que define la zona es anterior a las dos, y ese tramo NO es zona.
+    Las dos nacen con la constitución del ID. La vela que define cada una es
+    anterior —la del extremo en el UL, la del extremo del ID de al lado en el
+    PUL— y ese tramo NO es zona.
     """
-    if zone.kind is ZoneKind.LAST or zone.index_confirmation is None:
-        return zoned.index_constitution
-    return max(zoned.index_constitution, zone.index_confirmation)
+    return zoned.index_constitution
 
 
 def _rectangle(
@@ -361,7 +412,7 @@ def _rectangle(
     ahí antes de tiempo, que es justo lo contrario de lo que ocurre.
     """
     end = min(zoned.index_end if zoned.index_end is not None else last, last)
-    birth = _birth_index(zoned, zone)
+    birth = _birth_index(zoned)
     defining = zone.index_defining
 
     if birth > defining:
@@ -417,7 +468,7 @@ def _band(
         y0=zone.low,
         y1=zone.high,
         fillcolor=colour if fill else "rgba(0,0,0,0)",
-        opacity=(0.18 if zone.kind is ZoneKind.ORDER_BLOCK else 0.28) if fill else 0.4,
+        opacity=(0.28 if zone.kind is ZoneKind.LAST else 0.18) if fill else 0.4,
         line={
             "color": colour,
             "width": 1.4 if fill else 1.0,
@@ -427,86 +478,6 @@ def _band(
     )
 
 
-def _candidate_rectangle(
-    figure: go.Figure,
-    analysis: TimeframeAnalysis,
-    zoned: ImpulseZones,
-    first: int,
-    last: int,
-    labels: Sequence[str],
-) -> None:
-    """La vela del ancla de un ID sin OB: dónde *habría* estado la zona."""
-    index = _anchor_index(analysis, zoned)
-    if index is None or not first <= index <= last:
-        return
-    end = min(zoned.index_end if zoned.index_end is not None else last, last)
-    bar = analysis.bars.iloc[index]
-    figure.add_shape(
-        type="rect",
-        x0=labels[index - first],
-        x1=labels[max(end, index) - first],
-        y0=float(bar["low"]),
-        y1=float(bar["high"]),
-        fillcolor="rgba(0,0,0,0)",
-        line={"color": theme.INK_MUTED, "width": 1.6, "dash": "dot"},
-        layer="below",
-    )
-    _annotate(
-        figure,
-        labels,
-        index - first,
-        float(bar["low"]) if zoned.direction.value == "alcista" else float(bar["high"]),
-        "<b>OB SIN CONFIRMAR</b><br>ninguna vela del color del impulso<br>"
-        "superó esta mecha antes de morir el ID",
-        theme.INK_MUTED,
-        above=zoned.direction.value != "alcista",
-    )
-
-
-def _anchor_index(analysis: TimeframeAnalysis, zoned: ImpulseZones) -> int | None:
-    for impulse in analysis.impulses:
-        if impulse.id_num == zoned.id_num:
-            return impulse.index_anchor
-    return None
-
-
-def _confirmation_marker(
-    figure: go.Figure,
-    analysis: TimeframeAnalysis,
-    zone: Zone,
-    first: int,
-    last: int,
-    labels: Sequence[str],
-) -> None:
-    """§8 — un marcador sobre la vela que confirma cada OB."""
-    index = zone.index_confirmation
-    if index is None or not first <= index <= last:
-        return
-    bar = analysis.bars.iloc[index]
-    level = float(bar["high"] if zone.direction.value == "alcista" else bar["low"])
-    figure.add_trace(
-        go.Scatter(
-            x=[labels[index - first]],
-            y=[level],
-            mode="markers",
-            marker={
-                "symbol": "star",
-                "size": 15,
-                "color": theme.INK_PRIMARY,
-                "line": {"color": theme.SURFACE, "width": 1},
-            },
-            hoverinfo="skip",
-            showlegend=False,
-        )
-    )
-    figure.add_annotation(
-        x=labels[index - first],
-        y=level,
-        text="confirma el OB",
-        showarrow=False,
-        yshift=18 if zone.direction.value == "alcista" else -18,
-        font={"size": 10, "color": theme.INK_PRIMARY},
-    )
 
 
 def _annotate(
@@ -546,13 +517,14 @@ def _subtitle(zoned: ImpulseZones, session_timezone: str) -> str:
     stamp = pd.Timestamp(zoned.ts_constitution)
     local = stamp.tz_convert(session_timezone)
     zona = session_label(session_timezone)
-    block = zoned.order_block
+    block = zoned.against
     ob = (
-        "sin OB confirmado"
+        "sin zona en contra: es el primer ID de la temporalidad"
         if block is None
         else (
-            f"OB {block.height:,.2f} USD = {_ratio(block.height, zoned.atr):.3f} ATR · "
-            f"confirmado {zoned.bars_from_ob_candle} barras después de su vela"
+            f"{block.kind.value} {block.height:,.2f} USD = "
+            f"{_ratio(block.height, zoned.atr):.3f} ATR · "
+            f"vela de {block.ts_defining:%Y-%m-%d %H:%M} UTC"
         )
     )
     return (
@@ -576,33 +548,37 @@ def _ratio(numerator: float, denominator: float) -> float:
 def _write_readme(captures: Sequence[ZoneCapture], folder: Path) -> None:
     """Una línea por imagen: fichero, ID, fecha, dirección y las dos alturas."""
     lines = [
-        "CAPTURAS DE LA FASE 2.0 · ZONAS UL Y OB",
-        "=======================================",
+        "CAPTURAS DE LA FASE 2.0 · ZONAS UL, PUL Y APUL",
+        "=============================================",
         "",
         "Una línea por imagen. Las alturas van en USD y en ATR: el oro pasó de ~1.200 a",
         "~4.300 USD en el histórico y los dólares solos no comparan nada entre años.",
         "",
-        "El OB va con borde sólido cuando está confirmado y PUNTEADO cuando el ID murió",
-        "sin que llegara a confirmarse: esa zona no existe, pero la vela candidata sí, y",
-        "hay que poder verla. La estrella marca la vela que confirma cada OB.",
+        "La zona en contra es el UL de un ID que ya murió: el del ID ANTERIOR si iba en",
+        "el mismo sentido (PUL), y si iba al revés la que aquél llevaba, heredada (APUL).",
+        "Su vela queda por detrás del ID: el tramo entre esa vela y la constitución va",
+        "con contorno atenuado, porque ahí la zona todavía no era de este ID. La punta",
+        "llega hasta la mecha más lejana que el precio alcanzó con aquel ID en pie.",
         "",
         "Los lotes son los cinco del §8:",
         "  bien_formados_*  diez alcistas y diez bajistas de H4 con las dos zonas y el UL",
         "                   con mecha. Se eligen los MÁS CERCANOS A LA MEDIANA de altura",
         "                   del UL en ATR, no los mayores: son casos representativos.",
         "  ul_extendido     los que se estiraron a la vela siguiente",
-        "  sin_ob           los que murieron sin OB confirmado (la cifra de 7.1)",
+        "  sin_zona_en_contra  los que no tienen ninguna: los del arranque de cada"
+        "\n                   temporalidad, hasta que la cadena de zonas empieza",
         "  ul_altura_cero   los UL cuya vela del extremo no dejó mecha",
-        "  ob_mas_alto/bajo los OB extremos por altura en ATR",
+        "  pul_mas_alto/bajo los PUL extremos por altura en ATR",
         "",
     ]
     if not captures:
         lines.append("(no se escribió ninguna captura)")
     for capture in captures:
         ob = (
-            "sin OB confirmado"
-            if capture.ob_usd is None
-            else f"OB {capture.ob_usd:,.2f} USD / {capture.ob_atr:.3f} ATR"
+            "sin zona en contra"
+            if capture.against_usd is None
+            else f"{capture.against_kind} {capture.against_usd:,.2f} USD / "
+            f"{capture.against_atr:.3f} ATR"
         )
         lines.append(
             f"{capture.path.name}  ·  {capture.timeframe} ID {capture.id_num}  ·  "

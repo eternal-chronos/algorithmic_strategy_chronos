@@ -47,15 +47,16 @@ def test_el_yaml_del_proyecto_carga_y_declara_los_parametros_abiertos() -> None:
 
 
 def test_el_reparto_de_graficos_del_yaml_es_el_del_propietario() -> None:
-    """Diario solo, H4 con el diario, y H1 y M15 con el de H4.
+    """Cada uno con el suyo, y H1 y M15 con el de H4.
 
-    El ID vive sólo en el Diario y en H4: a H1 y a M15 no se les marca ID.
+    El ID vive sólo en el Diario y en H4: a H1 y a M15 no se les marca ID. Y el
+    Diario se dibuja SÓLO en su gráfico: en H4 no se ve nada suyo.
     """
     charts = load_impulse_config(Path("config/impulse.yaml")).charts
 
     assert charts.charts == ("D", "H4", "H1", "M15")
     assert charts.overlays("D") == ("D",)
-    assert charts.overlays("H4") == ("H4", "D")
+    assert charts.overlays("H4") == ("H4",)
     assert charts.overlays("H1") == ("H4",)
     assert charts.overlays("M15") == ("H4",)
     # H1 y M15 se dibujan pero no llevan detector propio.
@@ -277,3 +278,159 @@ def test_el_hash_de_la_corrida_queda_en_el_csv_y_en_run_json(workspace: Path) ->
     ).fingerprint()
     assert set(tabla["config_hash"]) == {esperado}
     assert esperado in (carpeta / "run.json").read_text(encoding="utf-8")
+
+
+# --- Fase 3.0 · con qué regla de rotura corre la cascada ---------------------
+
+
+def test_las_entradas_corren_con_el_ul_a_favor_y_el_ancla_en_contra(
+    workspace: Path,
+) -> None:
+    """La regla del propietario desde la fase 3.0: el ID no cambia mientras una
+    vela no CIERRE más allá del UL entero, y en contra manda la línea del ancla.
+
+    La regla la fija la corrida de la fase, no el YAML: el explorador la declara
+    en su cabecera y es ahí donde se comprueba, porque es lo que lee quien audita.
+    """
+    salida = workspace / "fase30"
+    resultado = runner.invoke(
+        app,
+        [
+            "structure",
+            "entradas",
+            "--config",
+            str(workspace / "impulse.yaml"),
+            "--salida",
+            str(salida),
+        ],
+    )
+
+    assert resultado.exit_code == 0, resultado.stdout
+    assert "el UL mandando a favor, el ancla en contra" in resultado.stdout
+    explorador = (salida / "explorador_entradas.html").read_text(encoding="utf-8")
+    assert "rotura por el UL a favor y por línea del ancla en contra" in explorador
+    assert "rotura por ZONA" not in explorador
+    assert '"breakAgainstByZone":false' in explorador
+    # Y las zonas siguen encendidas: de ellas cuelgan el toque del PUL y el veto.
+    assert '"hasZones":true' in explorador
+
+
+# --- Fase 3.1 · las operaciones ----------------------------------------------
+
+
+def test_las_operaciones_salen_dibujadas_y_sin_una_sola_metrica(
+    workspace: Path,
+) -> None:
+    """Lo que se entrega es el dibujo: ni R esperada, ni aciertos, ni curva.
+
+    Lo pidió el propietario y no es cosmético: hasta que las entradas estén
+    ajustadas, un número sólo diría lo buena que es una regla a medio escribir.
+    """
+    salida = workspace / "fase31"
+    resultado = runner.invoke(
+        app,
+        [
+            "structure",
+            "operaciones",
+            "--config",
+            str(workspace / "impulse.yaml"),
+            "--salida",
+            str(salida),
+        ],
+    )
+
+    assert resultado.exit_code == 0, resultado.stdout
+    assert "SIN MÉTRICAS" in resultado.stdout
+    # El cierre del viernes se declara: es la única regla que cierra una
+    # operación sin que el precio haya llegado a ningún sitio.
+    assert "cierra el mercado" in resultado.stdout
+    explorador = (salida / "explorador_operaciones.html").read_text(encoding="utf-8")
+    assert '"hasEntries":' in explorador
+    assert '"riskReward":3' in explorador
+    assert '"marketWeek":' in explorador
+    # La cuenta con la que se auditan viaja con la corrida, no con el explorador.
+    assert '"account":{"initial":50.0,"mode":"percent","risk":17.0}' in explorador
+
+
+# --- Setup 1: el interruptor de la entrada ----------------------------------
+
+
+def test_el_yaml_del_proyecto_trae_el_setup_1_apagado() -> None:
+    """El proyecto está en la ESTRUCTURA: ni cascada, ni ID de H1, ni entradas.
+
+    Es una decisión del propietario escrita en el fichero, no un defecto del
+    motor: el dataclass nace encendido y lo apaga el YAML.
+    """
+    assert load_impulse_config(Path("config/impulse.yaml")).setup1.enabled is False
+    assert ImpulseConfig().setup1.enabled is True
+
+
+def test_con_el_setup_1_apagado_las_operaciones_no_se_calculan(workspace: Path) -> None:
+    """Y se dice por qué, en vez de escribir un explorador vacío."""
+    _write_run(
+        workspace, make_m1_history(weeks=10), setup1={"enabled": False}
+    )
+    result = runner.invoke(
+        app,
+        [
+            "structure",
+            "operaciones",
+            "--config",
+            str(workspace / "impulse.yaml"),
+            "--salida",
+            str(workspace / "fase31"),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "SETUP 1 ESTÁ APAGADO" in result.stdout
+    assert "setup2" in result.stdout
+    assert not (workspace / "fase31").exists()
+
+
+def test_con_el_setup_1_apagado_la_cascada_tampoco(workspace: Path) -> None:
+    _write_run(workspace, make_m1_history(weeks=10), setup1={"enabled": False})
+    result = runner.invoke(
+        app,
+        [
+            "structure",
+            "entradas",
+            "--config",
+            str(workspace / "impulse.yaml"),
+            "--salida",
+            str(workspace / "fase30"),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "SETUP 1 ESTÁ APAGADO" in result.stdout
+    assert not (workspace / "fase30").exists()
+
+
+def test_setup2_dibuja_la_estructura_con_el_setup_1_apagado(workspace: Path) -> None:
+    """El punto de partida: ID de Diario y H4 con sus zonas, y nada más.
+
+    No depende del interruptor —dibuja la estructura esté encendido o apagado— y
+    no enciende el detector de H1: el explorador no puede traer ni una entrada.
+    """
+    _write_run(workspace, make_m1_history(weeks=10), setup1={"enabled": False})
+    result = runner.invoke(
+        app,
+        [
+            "structure",
+            "setup2",
+            "--config",
+            str(workspace / "impulse.yaml"),
+            "--salida",
+            str(workspace / "setup2"),
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    html = (workspace / "setup2" / "explorador_setup2.html").read_text(encoding="utf-8")
+    assert '"hasEntries":false' in html
+    assert '"hasCascade":false' in html
+    assert '"setup1":false' in html
+    assert '"hasZones":true' in html
+    # H1 no lleva detector: en el reparto por defecto sólo hay ID de D y de H4.
+    assert '"charts":["D","H4","H1","M15"]' in html

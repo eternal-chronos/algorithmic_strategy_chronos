@@ -12,33 +12,44 @@ cortas, cada una con lo suyo, más sus espejos:
     1. mecha que perfora el UL y cierra dentro .... `SYNTHETIC_BREAK_UP`, b5
     2. cierre dentro del UL ....................... `SYNTHETIC_BREAK_UP`, b4
     3. cierre más allá del borde exterior del UL .. `SYNTHETIC_BREAK_UP`, b6
-    4. los tres anteriores con el OB .............. `SYNTHETIC_ORDER_BLOCK_UP`, c4/c5/c6
-    5. sin OB confirmado -> muere por línea ....... `SYNTHETIC_WITHOUT_ORDER_BLOCK_UP`, c8
-    6. con el OB confirmado -> ya no muere ........ `SYNTHETIC_ORDER_BLOCK_UP`, c8
+    4. el ID que viene del revés no tiene PUL ..... `SYNTHETIC_PENULTIMATE_UP`, ID#2
+    5. sin zona en contra -> muere por línea ...... `SYNTHETIC_PENULTIMATE_UP`, ID#1 en e5
+    6. y el heredero de un ID sin zona, también ... `SYNTHETIC_PENULTIMATE_UP`, e8
     7. sobrevive y extiende el extremo ............ `SYNTHETIC_BREAK_UP`, b4 y b5
     8. zonas y una vela que cumple las dos ........ `SYNTHETIC_OVERLAP_UP`, d4
     9. UL de altura cero .......................... `SYNTHETIC_BREAK_UP`, ID#2
    10. todos los anteriores en bajista ............ los espejos, sin escribir a mano
+   11. PUL: el ID anterior iba en el mismo sentido  `SYNTHETIC_SAME_UP`, a9
+   12. cierre dentro de ese PUL -> no muere ....... `SYNTHETIC_SAME_UP`, a10
+   13. cierre más allá de ese PUL -> muere ........ `SYNTHETIC_SAME_UP`, a11
+   14. APUL del retroceso tras una abortada ....... `SYNTHETIC_ABORTED_UP`, f10
+   15. cierre dentro de ese APUL -> no muere ...... `SYNTHETIC_ABORTED_UP`, f11
+   16. cierre más allá de ese APUL -> muere ....... `SYNTHETIC_ABORTED_UP`, f12
+   17. la punta de la zona se lleva toda la vida .. `SYNTHETIC_INHERITED_UP`, g4
+   18. APUL HEREDADO: el anterior iba al revés .... `SYNTHETIC_INHERITED_UP`, g11
+   19. cierre dentro de ese APUL -> no muere ...... `SYNTHETIC_INHERITED_UP`, g12
+   20. cierre más allá de ese APUL -> muere ....... `SYNTHETIC_INHERITED_UP`, g13
+   21. APUL del EXTREMO CONTRARIO ................ `SYNTHETIC_COUNTER_EXTREME_UP`, h8
+   22. cierre dentro de ese APUL -> no muere ..... `SYNTHETIC_COUNTER_EXTREME_UP`, h9
+   23. cierre más allá de ese APUL -> muere ...... `SYNTHETIC_COUNTER_EXTREME_UP`, h10
 
 Los espejos se derivan con el `mirror` de la fase 2.0 y no se escriben a mano a
 propósito: la reflexión conserva todas las desigualdades estrictas del módulo,
 así que cualquier asimetría que aparezca al correrlos es un fallo del código.
 
-**Casos 5 y 6 sobre las mismas velas.** Las dos series del OB se diferencian en
-**un solo número**: la mecha inferior de `c2`, la vela que acaba siendo el ancla
-del ID#2. Con `2004.00` alguien la supera y el OB se confirma; con `1900.00` no
-la supera nadie y el ID se queda sin OB. Todo lo demás —cuerpos, impulsos,
-numeración— es idéntico, porque el módulo 1 sólo mira cuerpos y esa mecha no
-interviene en ninguna otra zona. Así el §5 se puede leer literalmente: *el mismo
-ID*, antes y después de tener OB, contra *la misma vela*.
+**Casos 4, 5 y 6 en la misma serie.** `SYNTHETIC_PENULTIMATE_UP` es ahora la
+serie de la cadena VACÍA: el ID#1 no tiene ningún ID detrás y muere por línea
+(caso 5); el ID#2 nace de su rotura EN CONTRA, así que el extremo del #1 es su
+ancla y no lleva PUL (caso 4), y como el #1 no tenía ninguna zona que prestarle
+tampoco hereda APUL, de modo que también muere en su línea del ancla (caso 6).
 
-**Caso 8, y lo que enseña.** Que dos zonas se solapen en precio **no** basta para
-que una vela cumpla las dos condiciones de rotura: hace falta que los dos bordes
-exteriores estén *invertidos*, y eso es lo contrario de solaparse. En un ID
-alcista el borde exterior del UL está en la mecha de la vela del extremo y el del
-OB en el suelo de la vela del ancla, así que
+**Caso 8, y lo que enseña.** Que dos niveles se solapen en precio **no** basta
+para que una vela cumpla las dos condiciones de rotura: hace falta que los dos
+bordes exteriores estén *invertidos*, y eso es lo contrario de solaparse. En un
+ID alcista el borde exterior del UL está en la mecha de la vela del extremo y el
+del lado en contra nunca pasa del ancla, así que
 
-    borde exterior del UL >= extremo > ancla >= borde exterior del OB
+    borde exterior del UL >= extremo > ancla >= nivel en contra
 
 mientras el rango del ID sea positivo, y ninguna vela puede cerrar por encima del
 primero y por debajo del segundo a la vez. El orden sólo decide algo cuando el
@@ -61,8 +72,8 @@ MIRROR_CENTRE = 2000.0
 #: segundo tiene un UL de altura cero y muere exactamente como en la fase 1.
 SYNTHETIC_BREAK_UP: tuple[Candle, ...] = (
     # --- ID#1: dos roturas evitadas y el extremo que las sigue ---------------
-    (2000.00, 2002.00, 1994.00, 1995.00),  # b0 roja · semilla bajista; OB del ID#1 [1994, 2002]
-    (1995.00, 2006.00, 1994.00, 2005.00),  # b1 verde · abre la pierna; 2006 > 2002 confirma el OB#1
+    (2000.00, 2002.00, 1994.00, 1995.00),  # b0 roja · semilla bajista; el ID#1 no tiene PUL
+    (1995.00, 2006.00, 1994.00, 2005.00),  # b1 verde · abre la pierna del ID#1
     (2005.00, 2012.00, 2004.00, 2010.00),  # b2 verde · extremo del ID#1 (cuerpo 2010, mecha 2012)
     (2010.00, 2011.00, 2008.00, 2009.00),  # b3 roja · CONSTITUYE ID#1; 2011 < 2012, no extiende
     #                                            UL#1 = [2010, 2012] · ancla 1995 · extremo 2010
@@ -83,83 +94,293 @@ SYNTHETIC_BREAK_UP: tuple[Candle, ...] = (
     #                                            la propia línea. ROTURA_A_FAVOR, igual que la fase 1
 )
 
-#: Casos 4 y 6. Un ID alcista con un OB muy ancho que aguanta dos velas y cede a
-#: la tercera; después un ID bajista que sobrevive a un cierre más allá de su
-#: línea del ancla porque su OB **sí** está confirmado.
-SYNTHETIC_ORDER_BLOCK_UP: tuple[Candle, ...] = (
-    (2000.00, 2002.00, 1980.00, 1995.00),  # c0 roja · semilla; OB del ID#1, ancho: [1980, 2002]
-    (1995.00, 2006.00, 1994.00, 2005.00),  # c1 verde · abre la pierna; 2006 > 2002 confirma el OB#1
-    (2005.00, 2012.00, 2004.00, 2010.00),  # c2 verde · extremo del ID#1. Su MECHA INFERIOR es lo
-    #                                            único que separa esta serie de la de abajo: con
-    #                                            2004.00 el OB del ID#2 llega a confirmarse
-    (2010.00, 2011.00, 2008.00, 2009.00),  # c3 roja · CONSTITUYE ID#1; ancla 1995, extremo 2010
-    (2009.00, 2010.00, 1989.00, 1990.00),  # c4 roja · CASO 4b: cierra 1990, bajo la línea 1995 pero
-    #                                            dentro del OB, y la mecha 1989 no llega a 1980.
-    #                                            SOBREVIVE. El ancla no se mueve: nunca lo hace
-    (1990.00, 1992.00, 1975.00, 1985.00),  # c5 roja · CASO 4a: la mecha 1975 PERFORA el borde 1980
-    #                                            y el cierre 1985 se queda dentro. SOBREVIVE
-    (1985.00, 1986.00, 1975.00, 1978.00),  # c6 roja · CASO 4c: cierra 1978 < 1980. ROTURA_EN_CONTRA
-    #                                            por zona
-    (1978.00, 1982.00, 1977.00, 1981.00),  # c7 verde · CONSTITUYE ID#2 bajista; ancla 2010 (la vela
-    #                                            c2), extremo 1978
-    (1981.00, 2015.00, 1980.00, 2011.00),  # c8 verde · CASO 6: cierra 2011, más allá de la línea del
-    #                                            ancla (2010) pero dentro del OB [2004, 2012].
-    #                                            SOBREVIVE: con OB confirmado ya no muere por línea
+#: Casos 4, 5 y 6. Un ID#1 bajista que muere por línea porque es el primero del
+#: histórico y no tiene PUL, y el ID#2 alcista que nace de esa rotura: su PUL es
+#: el cuerpo de `e2`, la vela que fijó el extremo del ID#1, y cubre la línea de
+#: su propio ancla, así que aguanta dos velas que la fase 1 habría llamado
+#: rotura y cede a la tercera.
+SYNTHETIC_PENULTIMATE_UP: tuple[Candle, ...] = (
+    (1990.00, 1996.00, 1989.00, 1995.00),  # e0 verde · semilla alcista; su cuerpo alto (1995) es
+    #                                            el ancla del ID#1
+    (1995.00, 1996.00, 1985.00, 1986.00),  # e1 roja · abre la pierna bajista
+    (1986.00, 1987.00, 1975.00, 1976.00),  # e2 roja · extremo del ID#1. Su cuerpo [1976, 1986]
+    #                                            será el PUL del ID#2: ancho a propósito
+    (1976.00, 1981.00, 1975.00, 1980.00),  # e3 verde · CONSTITUYE ID#1 bajista; ancla 1995
+    (1980.00, 1981.00, 1977.00, 1978.00),  # e4 roja · retroceso; última contraria antes de la
+    #                                            pierna alcista, así que su cuerpo bajo (1978)
+    #                                            será el ancla del ID#2
+    (1978.00, 1998.00, 1977.00, 1997.00),  # e5 verde · CASO 5: cierra 1997 > 1995 y mata al ID#1
+    #                                            POR LÍNEA: es el primer ID y no tiene PUL
+    (1997.00, 2006.00, 1996.00, 2005.00),  # e6 verde · extremo del ID#2 alcista
+    (2005.00, 2006.00, 2002.00, 2003.00),  # e7 roja · CONSTITUYE ID#2; ancla 1978, extremo 2005
+    #                                            PUL#2 = [1976, 1986], interior 1986
+    (2003.00, 2004.00, 1976.50, 1977.00),  # e8 roja · CASOS 4b y 6: cierra 1977, bajo la línea
+    #                                            1978 pero dentro del PUL, y la mecha 1976.50 no
+    #                                            llega a 1976. SOBREVIVE
+    (1977.00, 1978.00, 1975.00, 1976.50),  # e9 roja · CASO 4a: la mecha 1975 PERFORA el borde
+    #                                            1976 y el cierre 1976.50 se queda dentro. SOBREVIVE
+    (1976.50, 1977.00, 1974.00, 1975.00),  # e10 roja · CASO 4c: cierra 1975 < 1976.
+    #                                            ROTURA_EN_CONTRA por zona
 )
 
-#: Posición y valor de la mecha que distingue las dos series del OB.
-_OB_WICK_POSITION = 2
-_OB_WICK_UNREACHABLE = 1900.00
 
-
-def _without_order_block(candles: tuple[Candle, ...]) -> tuple[Candle, ...]:
-    """La misma serie con la mecha del ancla del ID#2 fuera de alcance.
-
-    Un solo número cambia. El módulo 1 sólo mira cuerpos, así que los impulsos, su
-    numeración y sus dos líneas salen idénticos; lo único que desaparece es el OB
-    del ID#2, porque ninguna vela llega a superar esa mecha.
-    """
-    open_, high, _low, close = candles[_OB_WICK_POSITION]
-    return (
-        *candles[:_OB_WICK_POSITION],
-        (open_, high, _OB_WICK_UNREACHABLE, close),
-        *candles[_OB_WICK_POSITION + 1 :],
-    )
-
-
-#: Caso 5. Las mismas velas y el mismo ID#2, esta vez sin OB que lo proteja: el
-#: cierre de `c8` lo mata por línea.
-SYNTHETIC_WITHOUT_ORDER_BLOCK_UP: tuple[Candle, ...] = _without_order_block(
-    SYNTHETIC_ORDER_BLOCK_UP
+#: Casos 11, 12 y 13: el **PUL de MECHA**. Tres impulsos encadenados donde el
+#: segundo muere A FAVOR, así que el tercero nace en el MISMO sentido que él y
+#: más allá de su extremo. El PUL del ID#3 sigue siendo el UL del ID#2 —la regla
+#: no cambia—, pero como aquel ID iba en la misma dirección su MECHA es lo que
+#: mira al ID nuevo: la zona es esa mecha, no el cuerpo.
+#:
+#:   11. el ID#2 lleva PUL de cuerpo y el ID#3 de mecha ... a6 y a9
+#:   12. cierre dentro del PUL del ID#3 .................. a10, sobrevive
+#:   13. cierre más allá de su borde exterior ............ a11, ROTURA_EN_CONTRA
+#:
+#: Aquí la zona en contra queda **por encima** de la línea del ancla del ID#3
+#: (2005 contra 2003) y eso no es un defecto de la serie: es lo que la regla hace
+#: cuando el ID nace de una continuación. El nivel que hay que cruzar para matar
+#: al ID no es su ancla sino el borde del cuerpo que dejó el extremo anterior, y
+#: por tanto la rotura en contra se **adelanta** en vez de evitarse.
+SYNTHETIC_SAME_UP: tuple[Candle, ...] = (
+    # --- ID#1 bajista: el primero del histórico, sin ninguna zona en contra ---
+    (1990.00, 1996.00, 1989.00, 1995.00),  # a0 verde · semilla alcista; su cuerpo alto (1995) es
+    #                                            el ancla del ID#1
+    (1995.00, 1996.00, 1985.00, 1986.00),  # a1 roja · abre la pierna bajista
+    (1986.00, 1987.00, 1975.00, 1976.00),  # a2 roja · extremo del ID#1. Su CUERPO [1976, 1986] será
+    #                                            el PUL del ID#2, que va al revés que él
+    (1976.00, 1981.00, 1975.50, 1980.00),  # a3 verde · CONSTITUYE ID#1 bajista; ancla 1995,
+    #                                            extremo 1976. 1975.50 > 1975: no estira el UL
+    (1980.00, 1998.00, 1979.00, 1997.00),  # a4 verde · cierra 1997 > 1995: ROTURA_EN_CONTRA por
+    #                                            línea, que es lo único que tiene el primer ID
+    # --- ID#2 alcista: nace del giro, así que su PUL es el CUERPO de a2 -------
+    (1997.00, 2006.00, 1996.00, 2005.00),  # a5 verde · extremo del ID#2. Su cuerpo llega a 2005 y
+    #                                            su MECHA sube a 2006: ése será el UL del ID#2 y,
+    #                                            tal cual, el PUL del ID#3
+    (2005.00, 2006.00, 2002.00, 2003.00),  # a6 roja · CASO 11a: CONSTITUYE ID#2; ancla 1976,
+    #                                            extremo 2005. El ID#1 iba AL REVÉS, así que lo que
+    #                                            mira a este ID es el cuerpo: PUL#2 = [1986, 1976]
+    (2003.00, 2010.00, 2002.00, 2009.00),  # a7 verde · cierra 2009 > 2006 (borde del UL#2):
+    #                                            ROTURA_A_FAVOR. La pierna sigue ALCISTA
+    # --- ID#3 alcista: continúa, así que su PUL es la MECHA del extremo de #2 -
+    (2009.00, 2016.00, 2008.00, 2015.00),  # a8 verde · extremo del ID#3
+    (2015.00, 2016.00, 2012.00, 2013.00),  # a9 roja · CASO 11b: CONSTITUYE ID#3; ancla 2003,
+    #                                            extremo 2015. El ID#2 iba en su MISMO sentido, así
+    #                                            que lo que mira a este ID es su mecha:
+    #                                            PUL#3 = mecha de a5 = [2005, 2006], interior 2006
+    #                                            y exterior 2005
+    (2007.00, 2008.00, 2004.00, 2005.50),  # a10 roja · CASO 12: la mecha 2004 PERFORA el borde
+    #                                            exterior 2005 y el cierre 2005.50 se queda dentro
+    #                                            de la zona. SOBREVIVE
+    (2005.50, 2006.00, 2003.50, 2004.00),  # a11 roja · CASO 13: cierra 2004 < 2005.
+    #                                            ROTURA_EN_CONTRA por PUL, y ANTES de que el precio
+    #                                            llegue a la línea del ancla (2003)
 )
+
+
+#: Casos 14, 15 y 16: el **APUL**. Un ID#1 alcista muere por rotura EN CONTRA y
+#: el ID bajista que tenía que nacer de esa rotura NO nace: la vela contraria
+#: llega con fuerza y cierra ya más allá de su nivel en contra, así que aborta la
+#: constitución y gira la pierna otra vez. El ID#2 nace ALCISTA, en el mismo
+#: sentido que el #1, sin que eso sea una continuación: falta el ID de en medio.
+#:
+#: Ahí el PUL no vale —el extremo del ID#1 queda en el lado a favor del #2— y el
+#: nivel se va a buscar donde estaba el ID que no llegó: dentro del retroceso del
+#: ID#1, corriendo la misma máquina sobre las mismas velas. Ese retroceso lleva
+#: un ID interior bajista con extremo en `f5`, y su mecha es el APUL del ID#2.
+#:
+#:   14. el ID#2 lleva APUL y no PUL ..................... f10
+#:   15. cierre dentro de ese APUL ....................... f11, sobrevive
+#:   16. cierre más allá de su borde exterior ............ f12, ROTURA_EN_CONTRA
+#:
+#: Como el PUL de mecha, el APUL cae **dentro** del rango del ID#2 y por encima
+#: de la línea de su ancla (2009 contra 1991): la zona no evita la rotura en
+#: contra, la ADELANTA. Es lo que la regla hace cuando el nivel viene de un
+#: extremo que quedó por detrás.
+SYNTHETIC_ABORTED_UP: tuple[Candle, ...] = (
+    # --- ID#1 alcista: el primero del histórico, sin ninguna zona en contra ---
+    (2000.00, 2001.00, 1994.00, 1995.00),  # f0 roja · semilla bajista; su cuerpo bajo (1995) es
+    #                                            el ancla del ID#1
+    (1995.00, 2011.00, 1994.00, 2010.00),  # f1 verde · abre la pierna alcista
+    (2010.00, 2022.00, 2009.00, 2020.00),  # f2 verde · extremo del ID#1 (cuerpo 2020, mecha 2022)
+    (2020.00, 2021.00, 2016.00, 2017.00),  # f3 roja · CONSTITUYE ID#1; ancla 1995, extremo 2020.
+    #                                            2021 < 2022: no estira el UL. Y aquí ARRANCA el
+    #                                            retroceso: la máquina interior abre su pierna
+    #                                            bajista en esta misma vela
+    (2017.00, 2018.00, 2012.00, 2013.00),  # f4 roja · el retroceso sigue; 2013 está dentro del ID
+    (2013.00, 2014.00, 2009.00, 2010.00),  # f5 roja · extremo del ID INTERIOR bajista: cuerpo
+    #                                            2010, mecha 2009. ESTA es la vela del APUL del
+    #                                            ID#2, y el ID#1 sigue vivo porque 2010 > 1995
+    (2010.00, 2016.00, 2010.00, 2015.00),  # f6 verde · constituye ese ID interior bajista (ancla
+    #                                            2020, extremo 2010) sin tocar al ID#1: 2015 sigue
+    #                                            dentro de su rango
+    (2015.00, 2016.00, 1990.00, 1991.00),  # f7 roja · cierra 1991 < 1995: ROTURA_EN_CONTRA del
+    #                                            ID#1 por línea, la única que tiene el primer ID.
+    #                                            Dentro del retroceso mata a favor al ID interior,
+    #                                            que se queda como el ÚLTIMO contrario de ahí
+    # --- La constitución que no fue: el ID bajista no llega a nacer ----------
+    (1991.00, 2023.00, 1990.00, 2021.00),  # f8 verde · tenía que constituir el ID bajista con
+    #                                            ancla 2015 y cierra en 2021, ya más allá: ABORTA
+    #                                            y gira la pierna a alcista. Con break_by_zone el
+    #                                            nivel es el PUL de f2 —cuerpo [2010, 2020]— y
+    #                                            2021 también lo pasa: aborta en las dos reglas
+    # --- ID#2 alcista: mismo sentido que el #1, pero con APUL ---------------
+    (2021.00, 2030.00, 2019.00, 2029.00),  # f9 verde · extremo del ID#2 (cuerpo 2029, mecha 2030)
+    (2029.00, 2030.00, 2024.00, 2025.00),  # f10 roja · CASO 14: CONSTITUYE ID#2; ancla 1991,
+    #                                            extremo 2029. El ID#1 va en su MISMO sentido y en
+    #                                            medio se abortó una constitución, así que su lado
+    #                                            en contra es el APUL = mecha de f5, interior 2010
+    #                                            y exterior 2009
+    (2025.00, 2026.00, 2008.00, 2009.50),  # f11 · CASO 15: la mecha 2008 PERFORA el borde exterior
+    #                                            2009 y el cierre 2009.50 se queda dentro de la
+    #                                            zona. SOBREVIVE
+    (2009.50, 2010.00, 2005.00, 2006.00),  # f12 · CASO 16: cierra 2006 < 2009. ROTURA_EN_CONTRA
+    #                                            por APUL, y muy por encima de la línea del ancla
+    #                                            (1991): la zona ADELANTA la rotura
+)
+
+
+#: Casos 17 a 20: el **APUL HEREDADO** y la punta que se estira a toda la vida
+#: del ID. Tres impulsos: el ID#1 bajista, el ID#2 bajista que continúa —y que
+#: por eso lleva PUL— y el ID#3 alcista, que nace de la rotura EN CONTRA del #2.
+#: Ahí el ID anterior va al revés, su extremo es el ancla de éste y no hay PUL:
+#: el nivel en contra es el que llevaba aquel ID, HEREDADO tal cual.
+#:
+#:   17. la punta del PUL pasa de la mecha del extremo a la de g4 ... PUL#2
+#:   18. el ID#3 no tiene PUL sino el APUL heredado ................. g11
+#:   19. cierre dentro de ese APUL -> no muere ..................... g12
+#:   20. cierre más allá de ese APUL -> muere ...................... g13
+#:
+#: El caso 17 es el ajuste del propietario: el UL#1 mide [1977, 1975] —su vela
+#: del extremo, g2— pero cuando esa zona pasa a ser el PUL del ID#2 se lleva la
+#: mecha de g4, que bajó a 1974 con el ID#1 todavía vivo. La vela que lo rompió,
+#: g5, queda fuera de la ventana a propósito.
+SYNTHETIC_INHERITED_UP: tuple[Candle, ...] = (
+    # --- ID#1 bajista: el primero, sin ninguna zona en contra ----------------
+    (1990.00, 1996.00, 1989.00, 1995.00),  # g0 verde · semilla alcista; su cuerpo alto (1995) es
+    #                                            el ancla del ID#1
+    (1995.00, 1996.00, 1985.00, 1986.00),  # g1 roja · abre la pierna bajista
+    (1986.00, 1987.00, 1975.00, 1977.00),  # g2 roja · extremo del ID#1 (cuerpo 1977, mecha 1975).
+    #                                            UL#1 = [1977, 1975]
+    (1978.00, 1981.00, 1975.50, 1980.00),  # g3 verde · CONSTITUYE ID#1; ancla 1995, extremo 1977.
+    #                                            1975.50 > 1975: no estira el UL
+    (1980.00, 1981.00, 1974.00, 1979.00),  # g4 roja · la mecha 1974 PERFORA el borde exterior 1975
+    #                                            y el cierre 1979 se queda dentro: SOBREVIVE. Esa
+    #                                            mecha es la que se llevará el PUL del ID#2
+    (1979.00, 1980.00, 1973.00, 1974.50),  # g5 roja · cierra 1974.50 < 1975: ROTURA_A_FAVOR por
+    #                                            zona. Su mecha 1973 NO cuenta: es la vela que rompe
+    # --- ID#2 bajista: continúa, así que lleva PUL de mecha ------------------
+    (1974.50, 1975.00, 1966.00, 1967.00),  # g6 roja · extremo del ID#2 (cuerpo 1967, mecha 1966)
+    (1967.00, 1972.00, 1966.50, 1971.00),  # g7 verde · CONSTITUYE ID#2; ancla 1980, extremo 1967.
+    #                                            PUL#2 = la zona de g2 con la punta en g4:
+    #                                            interior 1974, exterior 1977
+    (1971.00, 1976.50, 1970.00, 1976.00),  # g8 verde · cierra 1976, dentro del PUL: SOBREVIVE
+    (1976.00, 1978.00, 1975.00, 1977.50),  # g9 verde · cierra 1977.50 > 1977: ROTURA_EN_CONTRA por
+    #                                            zona, y ANTES de llegar a la línea del ancla (1980)
+    # --- ID#3 alcista: el anterior iba al revés, así que HEREDA su zona ------
+    (1977.50, 1990.00, 1977.00, 1989.00),  # g10 verde · extremo del ID#3 (cuerpo 1989, mecha 1990)
+    (1989.00, 1990.00, 1985.00, 1986.00),  # g11 roja · CONSTITUYE ID#3; ancla 1967, extremo 1989.
+    #                                            El ID#2 iba AL REVÉS: no hay PUL y el lado en
+    #                                            contra es su zona heredada, leída del otro lado:
+    #                                            interior 1977, exterior 1974. Empate en 1990: no
+    #                                            estira el UL
+    (1986.00, 1987.00, 1973.50, 1975.00),  # g12 roja · la mecha 1973.50 PERFORA el borde exterior
+    #                                            1974 y el cierre 1975 se queda dentro: SOBREVIVE
+    (1975.00, 1976.00, 1972.00, 1973.00),  # g13 roja · cierra 1973 < 1974: ROTURA_EN_CONTRA por el
+    #                                            APUL heredado, con el ancla (1967) todavía lejos
+)
+
+
+#: Casos 21 a 23: el **APUL DEL EXTREMO CONTRARIO**. Dos impulsos: el ID#1
+#: bajista, que muere por rotura A FAVOR —el precio siguió bajando—, y el ID#2
+#: alcista, que nace después de que una vela se cargue la constitución del ID
+#: bajista que venía. Ahí el ID anterior va al revés, pero su extremo NO es el
+#: ancla de éste: el ancla se fijó más abajo, así que aquel extremo quedó por
+#: detrás y su UL es el nivel en contra. No se hereda nada.
+#:
+#:   21. el ID#2 lleva el UL del ID#1 como APUL .................... h8
+#:   22. cierre dentro de ese APUL -> no muere ..................... h9
+#:   23. cierre más allá de ese APUL -> muere ...................... h10
+#:
+#: Las cuatro primeras velas son las de `SYNTHETIC_INHERITED_UP`: el mismo ID#1
+#: bajista con su UL en [1977, 1975]. Lo que cambia es cómo muere —a favor, no en
+#: contra— y lo que viene después.
+SYNTHETIC_COUNTER_EXTREME_UP: tuple[Candle, ...] = (
+    # --- ID#1 bajista: el primero, sin ninguna zona en contra ----------------
+    (1990.00, 1996.00, 1989.00, 1995.00),  # h0 verde · semilla alcista; su cuerpo alto (1995) es
+    #                                            el ancla del ID#1
+    (1995.00, 1996.00, 1985.00, 1986.00),  # h1 roja · abre la pierna bajista
+    (1986.00, 1987.00, 1975.00, 1977.00),  # h2 roja · extremo del ID#1 (cuerpo 1977, mecha 1975).
+    #                                            UL#1 = [1977, 1975]
+    (1978.00, 1981.00, 1975.50, 1980.00),  # h3 verde · CONSTITUYE ID#1; ancla 1995, extremo 1977.
+    #                                            1975.50 > 1975: no estira el UL
+    # --- Muere A FAVOR: el precio sigue bajando, no hay ningún giro ----------
+    (1980.00, 1981.00, 1973.00, 1974.00),  # h4 roja · cierra 1974 < 1975: ROTURA_A_FAVOR por zona
+    #                                            (y también por la línea 1977). La pierna que abre
+    #                                            sigue siendo BAJISTA
+    (1974.00, 1975.00, 1970.00, 1971.00),  # h5 roja · la pierna baja hasta 1971; de su cuerpo bajo
+    #                                            saldrá el ancla del ID#2
+    # --- La constitución que no fue: el ID bajista no llega a nacer ----------
+    (1971.00, 1990.00, 1970.00, 1989.00),  # h6 verde · tenía que constituir el ID bajista con
+    #                                            ancla 1980 y cierra en 1989, ya más allá: ABORTA
+    #                                            y gira la pierna a alcista. Con break_by_zone el
+    #                                            nivel es el PUL de h2 —exterior 1977— y 1989
+    #                                            también lo pasa: aborta en las dos reglas
+    # --- ID#2 alcista: el anterior iba al revés y su extremo quedó DETRÁS ----
+    (1989.00, 1996.00, 1988.00, 1995.00),  # h7 verde · extremo del ID#2 (cuerpo 1995, mecha 1996)
+    (1995.00, 1996.00, 1990.00, 1991.00),  # h8 roja · CASO 21: CONSTITUYE ID#2; ancla 1971 —el
+    #                                            cuerpo bajo de h5—, extremo 1995. El extremo del
+    #                                            ID#1 (1977) quedó POR ENCIMA de ese ancla, así que
+    #                                            no se hereda nada: el lado en contra es el UL del
+    #                                            ID#1, interior 1977 y exterior 1975. Empate en
+    #                                            1996: no estira el UL
+    (1991.00, 1992.00, 1974.50, 1976.00),  # h9 · CASO 22: la mecha 1974.50 PERFORA el borde
+    #                                            exterior 1975 y el cierre 1976 se queda dentro de
+    #                                            la zona. SOBREVIVE
+    (1976.00, 1977.00, 1972.00, 1974.00),  # h10 · CASO 23: cierra 1974 < 1975. ROTURA_EN_CONTRA
+    #                                            por ese APUL, con la línea del ancla (1971) aún
+    #                                            lejos
+)
+
 
 #: Caso 8. Un hueco a la baja se salta el ancla y deja un ID de **rango
 #: negativo**: su extremo (2040) queda por debajo de su ancla (2090). Ahí, y sólo
-#: ahí, los dos bordes exteriores se invierten —el del UL en 2050, el del OB en
-#: 2080— y una vela puede cerrar más allá de los dos a la vez.
+#: ahí, los dos niveles se invierten —el borde exterior del UL en 2050 y la línea
+#: del ancla en 2090— y una vela puede cerrar más allá de los dos a la vez.
+#:
+#: La vela que constituye vuelve con otro hueco por encima de esa línea (cierra
+#: en 2091, sobre el ancla 2090). No es adorno: si cerrase por debajo, el ID
+#: nacería ya roto y la regla no lo dejaría nacer, así que el conflicto no
+#: existiría. Y por eso entre el extremo y la constitución hay una vela de margen
+#: (d3): con la constituyente pegada al extremo, su propia mecha estiraría el UL
+#: y volvería a cerrar la ventana del conflicto.
 SYNTHETIC_OVERLAP_UP: tuple[Candle, ...] = (
-    (2100.00, 2105.00, 2080.00, 2090.00),  # d0 roja · semilla bajista; ancla del ID#1 = 2090 y su
-    #                                            vela entera es el OB: [2080, 2105]
-    (2000.00, 2106.00, 1995.00, 2010.00),  # d1 verde · HUECO A LA BAJA; abre la pierna alcista.
-    #                                            Su mecha 2106 > 2105 CONFIRMA el OB#1 sin que su
-    #                                            cuerpo llegue a ninguna parte
+    (2100.00, 2105.00, 2080.00, 2090.00),  # d0 roja · semilla bajista; ancla del ID#1 = 2090
+    (2000.00, 2106.00, 1995.00, 2010.00),  # d1 verde · HUECO A LA BAJA; abre la pierna alcista
     (2010.00, 2050.00, 2008.00, 2040.00),  # d2 verde · extremo del ID#1 (cuerpo 2040, mecha 2050)
-    (2040.00, 2045.00, 2035.00, 2038.00),  # d3 roja · CONSTITUYE ID#1; rango 2040 - 2090 = -50
-    (2038.00, 2070.00, 2035.00, 2060.00),  # d4 verde · CASO 8: 2060 > 2050 (borde del UL) y
-    #                                            2060 < 2080 (borde del OB) A LA VEZ.
+    (2020.00, 2030.00, 2015.00, 2035.00),  # d3 verde · no mejora el extremo (2035 < 2040) y su
+    #                                            mecha 2030 no estira el UL: es la vela de margen
+    (2095.00, 2096.00, 2082.00, 2091.00),  # d4 roja · HUECO AL ALZA; CONSTITUYE ID#1.
+    #                                            rango 2040 - 2090 = -50. Cierra en 2091, sobre la
+    #                                            línea 2090: el ID#1 es el primero del histórico y
+    #                                            no tiene PUL, así que ese lado lo manda el ancla
+    (2038.00, 2070.00, 2035.00, 2060.00),  # d5 verde · CASO 8: 2060 > 2050 (borde del UL) y
+    #                                            2060 < 2090 (línea del ancla) A LA VEZ.
     #                                            a_favor_primero   -> ROTURA_A_FAVOR
     #                                            en_contra_primero -> ROTURA_EN_CONTRA
 )
 
 #: Los mismos casos del revés. No se escriben a mano a propósito (§5.10).
 SYNTHETIC_BREAK_DOWN: tuple[Candle, ...] = mirror(SYNTHETIC_BREAK_UP, MIRROR_CENTRE)
-SYNTHETIC_ORDER_BLOCK_DOWN: tuple[Candle, ...] = mirror(
-    SYNTHETIC_ORDER_BLOCK_UP, MIRROR_CENTRE
-)
-SYNTHETIC_WITHOUT_ORDER_BLOCK_DOWN: tuple[Candle, ...] = mirror(
-    SYNTHETIC_WITHOUT_ORDER_BLOCK_UP, MIRROR_CENTRE
+SYNTHETIC_PENULTIMATE_DOWN: tuple[Candle, ...] = mirror(
+    SYNTHETIC_PENULTIMATE_UP, MIRROR_CENTRE
 )
 SYNTHETIC_OVERLAP_DOWN: tuple[Candle, ...] = mirror(SYNTHETIC_OVERLAP_UP, MIRROR_CENTRE)
+SYNTHETIC_SAME_DOWN: tuple[Candle, ...] = mirror(SYNTHETIC_SAME_UP, MIRROR_CENTRE)
+SYNTHETIC_ABORTED_DOWN: tuple[Candle, ...] = mirror(SYNTHETIC_ABORTED_UP, MIRROR_CENTRE)
+SYNTHETIC_INHERITED_DOWN: tuple[Candle, ...] = mirror(
+    SYNTHETIC_INHERITED_UP, MIRROR_CENTRE
+)
+SYNTHETIC_COUNTER_EXTREME_DOWN: tuple[Candle, ...] = mirror(
+    SYNTHETIC_COUNTER_EXTREME_UP, MIRROR_CENTRE
+)
 
 #: Viernes, igual que en las fases anteriores.
 SYNTHETIC_BREAK_START = datetime(2024, 3, 8, 0, 0, tzinfo=UTC)
@@ -167,13 +388,19 @@ SYNTHETIC_BREAK_START = datetime(2024, 3, 8, 0, 0, tzinfo=UTC)
 
 __all__ = [
     "MIRROR_CENTRE",
+    "SYNTHETIC_ABORTED_DOWN",
+    "SYNTHETIC_ABORTED_UP",
     "SYNTHETIC_BREAK_DOWN",
     "SYNTHETIC_BREAK_START",
     "SYNTHETIC_BREAK_UP",
-    "SYNTHETIC_ORDER_BLOCK_DOWN",
-    "SYNTHETIC_ORDER_BLOCK_UP",
+    "SYNTHETIC_COUNTER_EXTREME_DOWN",
+    "SYNTHETIC_COUNTER_EXTREME_UP",
+    "SYNTHETIC_INHERITED_DOWN",
+    "SYNTHETIC_INHERITED_UP",
     "SYNTHETIC_OVERLAP_DOWN",
     "SYNTHETIC_OVERLAP_UP",
-    "SYNTHETIC_WITHOUT_ORDER_BLOCK_DOWN",
-    "SYNTHETIC_WITHOUT_ORDER_BLOCK_UP",
+    "SYNTHETIC_PENULTIMATE_DOWN",
+    "SYNTHETIC_PENULTIMATE_UP",
+    "SYNTHETIC_SAME_DOWN",
+    "SYNTHETIC_SAME_UP",
 ]

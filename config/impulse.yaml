@@ -114,9 +114,14 @@ aggregation:
 # EL ID VIVE SÓLO EN EL DIARIO Y EN H4. H1 y M15 no tienen impulso propio: son
 # las temporalidades en las que se mira cómo llega el precio a la zona, y sobre
 # ellas se dibuja el ID de H4 como contexto y nada más.
+#
+# EL DIARIO SE DIBUJA SÓLO EN SU GRÁFICO. En H4 no se ve nada del Diario —ni su
+# ID, ni su marco, ni sus zonas—: lo que manda ahí es el ID de H4, y la caja
+# diaria encima tapaba el precio a una escala que no es la suya. El veto del
+# Diario de la fase 3.0 se mira en el gráfico del Diario.
 charts:
   D: [D]
-  H4: [H4, D]
+  H4: [H4]
   H1: [H4]
   M15: [H4]
 
@@ -241,6 +246,30 @@ rules:
 # el detector ya registra, sin holguras ni umbrales que ajustar. Por eso este
 # bloque no entra en el `config_hash`.
 zones:
+  enabled: false
+
+# SETUP 1 — LA ENTRADA ENTERA. Interruptor de todo lo que se montó sobre la
+# estructura para operar: el ID propio de H1, la cascada H4 → H1 con el veto del
+# Diario, los patrones de M15 que afinan el límite y las operaciones con su stop
+# y su objetivo.
+#
+# APAGADO. Lo que queda dibujado es la ESTRUCTURA y nada más: ID en el Diario y
+# en H4 con sus tres zonas —UL, PUL y APUL—; H1 y M15 se quedan sin ID propio y
+# sin ninguna marca del motor. Ése es el punto de partida del SETUP 2, que se va
+# a escribir desde ahí.
+#
+# No se ha borrado nada: `chronos structure entradas` y `chronos structure
+# operaciones` siguen en su sitio y con sus tests, y avisan de que el setup está
+# apagado en vez de dibujar un explorador vacío. Poner `true` los devuelve tal
+# cual estaban.
+#
+# El dibujo de partida del setup 2 lo escribe `chronos structure setup2`, que no
+# depende de este interruptor: dibuja la estructura esté el setup 1 encendido o
+# apagado.
+#
+# No entra en el `config_hash`: lo que mueve los impulsos es encender el detector
+# de H1, y el reparto de gráficos ya está en el hash por su cuenta.
+setup1:
   enabled: false
 
 # Verificación empírica de zona horaria (§1.1). OBLIGATORIA antes de calcular
