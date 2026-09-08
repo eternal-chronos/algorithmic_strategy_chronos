@@ -1873,7 +1873,15 @@
     var vividas = visible.filter(function (item) { return !sameBar(item); });
     var relampago = visible.filter(function (item) { return sameBar(item); });
     return [
-      entryPatternTrace(visible, edges),
+      entryPatternTrace(visible.filter(function (item) {
+        return item.f !== "ZONA_ATRAS";
+      }), edges, "Patrón M15 de la entrada", COLORS.muted, "dot"),
+      // Los de detrás de la zona van en su propia traza y con su color: el
+      // recuadro cae FUERA de la zona de H1 y con el mismo gris se leería como
+      // un patrón mal colocado en vez de como la regla que es.
+      entryPatternTrace(visible.filter(function (item) {
+        return item.f === "ZONA_ATRAS";
+      }), edges, "Patrón M15 detrás de la zona", COLORS.behind, "dashdot"),
       entryBoxTrace(vividas, edges, "objetivo", "t", COLORS.bullish, false),
       entryBoxTrace(vividas, edges, "riesgo", "s", COLORS.bearish, false),
       entryBoxTrace(relampago, edges, "objetivo", "t", COLORS.bullish, true),
@@ -1891,7 +1899,7 @@
   /* El patrón de M15 que afina la entrada: el OB o el FVG, del que sale el
    * precio del límite. Se dibuja desde la vela que lo define —que queda por
    * detrás— hasta que la operación entra o el límite se quita. */
-  function entryPatternTrace(entries, edges) {
+  function entryPatternTrace(entries, edges, name, colour, dash) {
     var bucket = { x: [], y: [], text: [] };
     entries.forEach(function (item) {
       var end = entryEnd(item);
@@ -1904,11 +1912,11 @@
     });
     if (!bucket.x.length) { return null; }
     return {
-      type: "scatter", mode: "lines", name: "Patrón M15 de la entrada",
+      type: "scatter", mode: "lines", name: name,
       x: bucket.x, y: bucket.y, text: bucket.text,
       hoverinfo: "text", hoverlabel: { align: "left" }, connectgaps: false,
-      fill: "toself", fillcolor: rgba(COLORS.muted, 0.12),
-      line: { color: COLORS.muted, width: 1, dash: "dot" }
+      fill: "toself", fillcolor: rgba(colour, 0.12),
+      line: { color: colour, width: 1, dash: dash }
     };
   }
 
@@ -2111,7 +2119,10 @@
 
   var ENTRY_FORM = {
     ZONA: "el ID de H1 va en la dirección que se busca: se mira su zona en contra",
-    RECHAZO_UL: "el ID de H1 va al revés pero RECHAZÓ SU UL: se mira ese UL"
+    RECHAZO_UL: "el ID de H1 va al revés pero RECHAZÓ SU UL: se mira ese UL",
+    ZONA_ATRAS: "el ID de H1 va en la dirección que se busca pero DENTRO DE SU " +
+      "ZONA NO HABÍA NI UN OB NI UN FVG: el sitio es el patrón que quedó DETRÁS " +
+      "de la zona, el más reciente que seguía en pie al armar"
   };
 
   var ENTRY_PATTERN = {
@@ -2143,6 +2154,11 @@
    * quedaba a demasiada distancia. Se dice en el globo porque es lo que se
    * audita: el mismo dibujo con el stop en el otro borde es otra operación. */
   function entryStopRule(item) {
+    if (item.f === "ZONA_ATRAS") {
+      return " · EL STOP NO VA A LA ZONA: el patrón está detrás de ella y su " +
+        "borde exterior queda al otro lado del límite · va al BORDE LEJANO DEL " +
+        "PATRÓN, que es donde el sitio deja de ser un sitio";
+    }
     if (item.f !== "RECHAZO_UL" || item.pat !== "OB") {
       return " · el stop va a su borde exterior";
     }
@@ -2253,8 +2269,11 @@
     if (!hasEntries()) { return null; }
     var visible = visibleEntries(window_(range));
     var stake = entryStake();
-    var counts = { fill: 0, win: 0, loss: 0, week: 0, off: 0, offWeek: 0, flash: 0 };
+    var counts = {
+      fill: 0, win: 0, loss: 0, week: 0, off: 0, offWeek: 0, flash: 0, behind: 0
+    };
     visible.forEach(function (item) {
+      if (item.f === "ZONA_ATRAS") { counts.behind += 1; }
       if (item.xf === undefined) {
         counts.off += 1;
         if (item.why === "CIERRE_SEMANAL") { counts.offWeek += 1; }
@@ -2272,6 +2291,9 @@
       counts.off + " se quitaron sin entrar (" + counts.offWeek + " el viernes)" +
       " · " + counts.flash + " entraron y salieron en la misma vela (rectángulo " +
       "punteado: ocupa esa vela para poder verse)" +
+      " · " + counts.behind + " se afinaron DETRÁS de la zona de H1 (recuadro " +
+      "punteado y raya, en otro color: dentro de la zona no había ningún patrón, " +
+      "y ahí el stop va al borde lejano del patrón y no a la zona)" +
       " · todas 1:" + decimal(riskReward()) + ", una por ID de H1 y nunca dos vivas" +
       " · cada una se juega " + money(stake.risk) + " para ganar " +
       money(stake.reward) + " con el capital de la barra" +
@@ -3801,6 +3823,23 @@
         : " · todas las capas encendidas");
   }
 
+  /* SETUP 1 —la cascada H4 → H1, el ID propio de H1, lo que se afina en M15 y
+   * las operaciones—. Apagado, ninguna de sus capas está en el payload, y una
+   * capa ausente se lee como que ahí no pasó nada: el explorador tiene que
+   * DECIR que no se ha calculado. `null` es una corrida que no habla de setups
+   * —las fases 1 y 2— y entonces no se dice nada. */
+  function setupCaption() {
+    if (DATA.setup1 === undefined || DATA.setup1 === null) { return ""; }
+    if (DATA.setup1) {
+      return "SETUP 1 ENCENDIDO: cascada H4 → H1 con el veto del Diario, ID " +
+        "propio de H1, patrones de M15 y entradas";
+    }
+    return "SETUP 1 APAGADO: no se han calculado ni la cascada, ni el ID de H1, " +
+      "ni nada de M15, ni una sola entrada · lo que se dibuja es la " +
+      "ESTRUCTURA: ID del Diario y de H4 con sus zonas UL, PUL y APUL, y H1 y " +
+      "M15 con el ID de H4 de contexto y ninguna marca propia";
+  }
+
   function notes(range, cut) {
     var b = bars();
     var visible = cut.end - cut.start;
@@ -3857,6 +3896,8 @@
     if (state.zoom.x || state.zoom.y) {
       text += " · encuadre manual: el zoom se mantiene entre pasos (Ajustar para soltarlo)";
     }
+    var setup = setupCaption();
+    if (setup) { text += " · " + setup; }
     text += " · " + noiseCaption();
     if (dibujados.length) { text += " · impulsos dibujados: " + dibujados.join(", "); }
     if (state.visible !== "all") {

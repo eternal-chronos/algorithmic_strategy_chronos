@@ -130,10 +130,13 @@ def render_explorer(
     zones: ZonesRun | None = None,
     cascade: CascadeRun | None = None,
     entries: EntriesRun | None = None,
+    setup1: bool | None = None,
 ) -> str:
     """Devuelve el HTML completo del explorador."""
     generated_at = generated_at or SystemClock().now()
-    payload = build_payload(run, max_bars, lateralization, variants, zones, cascade, entries)
+    payload = build_payload(
+        run, max_bars, lateralization, variants, zones, cascade, entries, setup1
+    )
     # El JSON viaja dentro de un <script>: escapar `</` evita que un texto
     # cualquiera pueda cerrar la etiqueta antes de tiempo.
     data = json.dumps(payload, separators=(",", ":"), ensure_ascii=False, default=str).replace(
@@ -162,6 +165,7 @@ def build_payload(
     zones: ZonesRun | None = None,
     cascade: CascadeRun | None = None,
     entries: EntriesRun | None = None,
+    setup1: bool | None = None,
 ) -> dict[str, Any]:
     """Serializa la corrida a la estructura que consume el explorador.
 
@@ -223,6 +227,10 @@ def build_payload(
             #: Un tono por temporalidad para el marco del ID: el de H4 sobre H1
             #: y el de H1 sobre M15 tienen que distinguirse de un vistazo.
             "timeframes": dict(TIMEFRAME_COLORS),
+            #: El patrón de M15 que afina una entrada cuando dentro de la zona
+            #: de H1 no había ninguno: va DETRÁS de ella y con su propio stop,
+            #: así que no puede dibujarse con el mismo gris que los de dentro.
+            "behind": theme.SERIES[3],
             #: Los recuadros que el propietario planta a mano para marcar un
             #: PUL, un UL o un APUL. Ninguna capa del motor usa estos tonos: con
             #: ellos sólo se dibuja lo que ha puesto una mano.
@@ -268,6 +276,12 @@ def build_payload(
         "entries": _entries(entries),
         "regimes": _regimes(entries),
         "hasEntries": entries is not None and not entries.empty,
+        #: SETUP 1 —la cascada, el ID de H1, lo de M15 y las operaciones—: `True`
+        #: encendido, `False` apagado y `None` en las corridas que no hablan de
+        #: setups (las fases 1 y 2). Apagado no basta con que las capas no estén:
+        #: el explorador lo tiene que DECIR, porque una capa ausente se lee como
+        #: que ahí no pasó nada.
+        "setup1": setup1,
         #: El R:R con el que se calcularon. El explorador lo escribe, no lo elige.
         "riskReward": entries.risk_reward if entries is not None else None,
         #: La holgura del límite del rechazo con OB: ese límite cae FUERA del

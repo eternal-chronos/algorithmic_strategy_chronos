@@ -352,6 +352,28 @@ class ZonesConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class Setup1Config:
+    """SETUP 1 — la entrada entera: la cascada H4 → H1 y las operaciones.
+
+    Es el interruptor de TODO lo que cuelga de la entrada: el **ID propio de
+    H1**, la cascada con el veto del Diario, los patrones de M15 que afinan el
+    límite y las operaciones con su stop y su objetivo.
+
+    Con `enabled: False` no se calcula nada de eso y el proyecto se queda en la
+    estructura: ID en el Diario y en H4 con sus zonas —UL, PUL y APUL— y nada en
+    H1 ni en M15, que es el punto de partida del setup 2. Apagarlo no borra ni
+    una línea de código: los comandos de la entrada siguen ahí y avisan de que
+    el setup está apagado en vez de dibujar un explorador vacío.
+
+    No entra en `fingerprint()`. Lo que mueve los impulsos es el reparto de
+    gráficos —encender el detector de H1 mete su temporalidad en el hash— y eso
+    ya viaja por su cuenta: el interruptor sólo decide si se pide ese reparto.
+    """
+
+    enabled: bool = True
+
+
+@dataclass(frozen=True, slots=True)
 class TimezoneAuditConfig:
     """Verificación empírica de zona horaria (§1.1). Obligatoria antes de calcular."""
 
@@ -400,6 +422,9 @@ class ImpulseConfig:
     rules: ImpulseRulesConfig = field(default_factory=ImpulseRulesConfig)
     #: Fase 2.0. Apagadas por defecto: encenderlas no puede mover ni un impulso.
     zones: ZonesConfig = field(default_factory=ZonesConfig)
+    #: SETUP 1 —la cascada y las entradas—. Encendido por defecto: apagarlo es
+    #: una decisión del fichero de configuración, no del motor.
+    setup1: Setup1Config = field(default_factory=Setup1Config)
     timezone_audit: TimezoneAuditConfig = field(default_factory=TimezoneAuditConfig)
     reporting: StructureReportingConfig = field(default_factory=StructureReportingConfig)
 

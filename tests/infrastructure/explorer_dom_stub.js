@@ -607,6 +607,14 @@ const rechazo = operaciones.filter(function (item) {
 })[0];
 unDia(rechazo, rechazo && rechazo.x, 'entradas-rechazo-ob');
 
+// El patrón de DETRÁS de la zona: el recuadro cae fuera de la zona de H1 y el
+// stop no va a la zona sino al borde lejano del patrón. Se retrata el día en que
+// se armó, que es donde se ve el hueco entre la zona y el sitio.
+const detras = operaciones.filter(function (item) {
+  return item.f === 'ZONA_ATRAS';
+})[0];
+unDia(detras, detras && detras.x, 'entradas-detras-zona');
+
 // El CIERRE DEL VIERNES: la posición que no llegó ni al stop ni al objetivo
 // porque cerró el mercado, y el límite que se quitó por lo mismo. Son lo único
 // que sale del gráfico sin que el precio haya llegado a ningún sitio.

@@ -661,22 +661,89 @@ def entries_command(
                 lateralization=measure(run),
                 zones=zones,
                 cascade=cascade,
+                setup1=True,
             ),
             encoding="utf-8",
         )
         console.print(f"\nExplorador: [bold]{explorer}[/bold]")
 
 
+def _owner_run(
+    run_config: ImpulseConfig, skip_tz_audit: bool, *, hourly: bool
+) -> tuple[ImpulseRun, ZonesRun]:
+    """La corrida con la regla del propietario y las zonas encendidas.
+
+    A FAVOR manda el UL y EN CONTRA el ancla: el ID no cambia mientras una vela
+    de su misma temporalidad no CIERRE más allá del borde exterior del UL
+    —atravesando la zona entera, así que perforarla con mecha y volver a cerrar
+    dentro no rompe nada— o más allá de la línea del ancla. La zona en contra
+    —el PUL o el APUL— se sigue clasificando y dibujando, pero no mata al ID.
+
+    Con `hourly` se añade el **ID propio de H1**, que es lo que pide el setup 1
+    y sólo él: apagado, H1 y M15 se quedan con el ID de H4 de contexto y nada
+    más. Encenderlo mete la temporalidad en el `config_hash`, así que las dos
+    corridas no se pueden confundir.
+    """
+    history = load_history(run_config.data, run_config.structure_side)
+    audit = _audit_or_stop(run_config, history, skip_tz_audit)
+    series, skipped = _aggregate_available(history, run_config)
+    aggregated = {tf: item.frame for tf, item in series.items()}
+    notes = [item.description for item in series.values()] + skipped
+    provenance = f"{history.provenance} · lado efectivo: {history.side}"
+
+    tuned = replace(
+        run_config,
+        rules=replace(
+            run_config.rules, break_by_zone=True, break_against_by_zone=False
+        ),
+        zones=ZonesConfig(enabled=True),
+        charts=with_hourly_structure(run_config.charts) if hourly else run_config.charts,
+    )
+    detector = "el ID de H1" if hourly else "el ID sólo en el Diario y en H4"
+    console.print(
+        "[dim]Corrida con el UL mandando a favor, el ancla en contra, las zonas "
+        f"encendidas y {detector}...[/dim]"
+    )
+    run = DetectDominantImpulses(tuned).execute(
+        aggregated, audit=audit, provenance=provenance, aggregation_notes=notes
+    )
+    return run, detect_zones(run)
+
+
+def _structure_pipeline(
+    config: Path, skip_tz_audit: bool
+) -> tuple[ImpulseConfig, ImpulseRun, ZonesRun] | None:
+    """La ESTRUCTURA sola: ID de Diario y H4 con sus zonas UL, PUL y APUL.
+
+    Es la corrida del setup 2 mientras el setup 2 no tenga ninguna regla propia,
+    y no mira el interruptor del setup 1: dibuja la estructura esté encendido o
+    apagado. Ni cascada, ni entradas, ni nada en H1 ni en M15.
+
+    Devuelve `None` con el módulo apagado, que no es un error.
+    """
+    run_config = load_impulse_config(config)
+    if not run_config.enabled:
+        console.print(
+            "[yellow]El módulo de impulso dominante está desactivado "
+            "(`enabled: false`). No hay nada que dibujar.[/yellow]"
+        )
+        return None
+    run, zones = _owner_run(run_config, skip_tz_audit, hourly=False)
+    return run_config, run, zones
+
+
 def _cascade_pipeline(
     config: Path, skip_tz_audit: bool
 ) -> tuple[ImpulseConfig, ImpulseRun, ZonesRun, CascadeRun] | None:
-    """La corrida de la fase 3.0: rotura por línea, zonas encendidas e ID en H1.
+    """La corrida del SETUP 1: la regla del propietario, las zonas y el ID de H1.
 
-    La comparten el explorador de la cascada y su estadística: son la misma
-    corrida vista de dos maneras, y calcularla con configuraciones distintas
-    haría que el dibujo y los números hablaran de señales distintas.
+    La comparten el explorador de la cascada, el de las operaciones y su
+    estadística: son la misma corrida vista de tres maneras, y calcularla con
+    configuraciones distintas haría que el dibujo y los números hablaran de
+    señales distintas.
 
-    Devuelve `None` con el módulo apagado, que no es un error.
+    Devuelve `None` con el módulo apagado o con el **setup 1 apagado**, y
+    ninguna de las dos cosas es un error.
     """
     run_config = load_impulse_config(config)
     if not run_config.enabled:
@@ -685,36 +752,18 @@ def _cascade_pipeline(
             "(`enabled: false`). No hay nada que buscar.[/yellow]"
         )
         return None
-
-    history = load_history(run_config.data, run_config.structure_side)
-    audit = _audit_or_stop(run_config, history, skip_tz_audit)
-    series, skipped = _aggregate_available(history, run_config)
-    aggregated = {tf: item.frame for tf, item in series.items()}
-    notes = [item.description for item in series.values()] + skipped
-    provenance = f"{history.provenance} · lado efectivo: {history.side}"
-
-    cascade_config = replace(
-        run_config,
-        # La regla del propietario: A FAVOR manda el UL y EN CONTRA el ancla. Lo
-        # mata una vela de SU MISMA temporalidad que CIERRA más allá del borde
-        # exterior del UL —atravesando la zona entera, así que perforarla con
-        # mecha y volver a cerrar dentro no rompe nada— o más allá de la línea
-        # del ancla. La zona en contra sigue encendida porque de ella cuelgan el
-        # toque y el veto diario, pero no decide la vida del ID.
-        rules=replace(
-            run_config.rules, break_by_zone=True, break_against_by_zone=False
-        ),
-        zones=ZonesConfig(enabled=True),
-        charts=with_hourly_structure(run_config.charts),
-    )
-    console.print(
-        "[dim]Corrida con el UL mandando a favor, el ancla en contra, las zonas "
-        "encendidas y el ID de H1...[/dim]"
-    )
-    run = DetectDominantImpulses(cascade_config).execute(
-        aggregated, audit=audit, provenance=provenance, aggregation_notes=notes
-    )
-    zones = detect_zones(run)
+    if not run_config.setup1.enabled:
+        console.print(
+            "[yellow]EL SETUP 1 ESTÁ APAGADO (`setup1.enabled: false`).[/yellow]\n"
+            "Con él se apagan la cascada H4 → H1, el ID propio de H1, lo que se "
+            "afinaba en M15 y las operaciones: este comando no tiene nada que "
+            "calcular.\nLo que queda dibujado es la estructura —ID de Diario y "
+            "H4 con sus zonas UL, PUL y APUL—, y eso lo escribe "
+            "[bold]chronos structure setup2[/bold].\nPara devolver el setup 1, "
+            "`setup1.enabled: true` en el YAML."
+        )
+        return None
+    run, zones = _owner_run(run_config, skip_tz_audit, hourly=True)
     return run_config, run, zones, detect_cascade(run, zones)
 
 
@@ -784,6 +833,7 @@ def trades_command(
                 zones=zones,
                 cascade=cascade,
                 entries=entries,
+                setup1=True,
             ),
             encoding="utf-8",
         )
@@ -823,6 +873,51 @@ def _print_entries(entries: EntriesRun) -> None:
         "[dim]SIN MÉTRICAS a propósito: lo que se entrega es el dibujo. Se "
         "auditan en el explorador, capa «Entradas», con el replay.[/dim]"
     )
+
+
+@structure_app.command("setup2")
+def setup2_command(
+    config: Annotated[Path, typer.Option("--config", "-c")] = DEFAULT_CONFIG,
+    output: Annotated[Path, typer.Option("--salida", "-o")] = Path("now/setup2"),
+    skip_tz_audit: Annotated[bool, typer.Option("--skip-tz-audit")] = False,
+) -> None:
+    """SETUP 2 — el punto de partida: la ESTRUCTURA y nada más.
+
+    ID en el **Diario** y en **H4** con sus tres zonas —el UL a favor y el PUL o
+    el APUL en contra—, con la regla del propietario: el UL manda el lado a
+    favor y el ancla el lado en contra.
+
+    **Ni cascada, ni entradas, ni ID en H1, ni nada en M15**: H1 y M15 se dibujan
+    con el ID de H4 encima como contexto y ninguna marca propia. Eso es lo que
+    hay que auditar antes de escribir la primera regla del setup 2, y por eso
+    este comando no depende del interruptor del setup 1: dibuja la estructura
+    esté aquél encendido o apagado.
+    """
+    with _handled():
+        corrida = _structure_pipeline(config, skip_tz_audit)
+        if corrida is None:
+            return
+        run_config, run, zones = corrida
+        _print_summary(run)
+        _print_zones(zones)
+
+        output.mkdir(parents=True, exist_ok=True)
+        explorer = output / "explorador_setup2.html"
+        explorer.write_text(
+            render_explorer(
+                run,
+                run_config.reporting.max_explorer_bars,
+                lateralization=measure(run),
+                zones=zones,
+                setup1=run_config.setup1.enabled,
+            ),
+            encoding="utf-8",
+        )
+        console.print(f"\nExplorador: [bold]{explorer}[/bold]")
+        console.print(
+            "[dim]Sólo estructura: ID de Diario y H4 con UL, PUL y APUL. No hay "
+            "cascada, ni entradas, ni ID de H1, ni nada de M15.[/dim]"
+        )
 
 
 @structure_app.command("entradas-estadisticas")

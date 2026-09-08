@@ -66,6 +66,21 @@ De los patrones disponibles se coge el **más reciente**: es "lo más cercano qu
 hay ahí". Un patrón que el precio ya ha atravesado —una vela posterior fue más
 allá de su borde lejano— deja de valer y no se vuelve a mirar.
 
+**Y si en la zona no hay ninguno, se busca DETRÁS de ella.** Es la forma
+`ZONA_ATRAS`. Pasa cuando el precio llega a la zona de H1 y ahí no reacciona: no
+deja ni un OB ni un FVG, así que no hay nada que afinar. Entonces el sitio es el
+patrón anterior que quede al otro lado del borde exterior —por debajo en una
+compra, por encima en una venta— todavía en pie, y se coge el más reciente. Ahí
+el **stop va al borde lejano del patrón** y no al de la zona: el borde exterior
+de la zona queda al otro lado del límite y con él no habría riesgo que medir,
+sino una operación del revés. Lo pidió el propietario mirando el ID de H1 del
+2023-01-19: el precio entró en el PUL, no dejó nada dentro y el sitio bueno era
+un FVG que se había quedado cuatro dólares más abajo.
+
+**Se mira dentro de la zona primero y detrás sólo si dentro no hay nada**, y eso
+se decide en cada vela: que más tarde nazca un patrón dentro de la zona no borra
+el límite que ya se puso detrás, porque cuando se puso no existía.
+
 ## 4. Una y sólo una
 
 - **Una operación por ID de H1.** Entrada la que entra: hasta que no nazca otro
@@ -94,6 +109,12 @@ Lo dice el propietario: *"pon el stop loss donde mejor lo veas y luego iremos
 afinando"*. Queda declarado aquí y no escondido en el código:
 
 - el **stop** es el borde lejano del patrón de M15, sin holgura;
+- **cuánto se mira hacia atrás** para el patrón de detrás de la zona: un día de
+  M15 desde la vela que define la zona, y los tres más recientes que sigan en
+  pie. Son números puestos para poder verlo dibujado, no medidos;
+- el patrón de detrás **no tiene tope de distancia**: puede quedar lejos de la
+  zona, y entonces el límite se queda puesto sin llenarse hasta que muere el ID
+  de H1. Se ve en el dibujo y se afina después;
 - el **límite** es el borde cercano del patrón, no un precio dentro de él, salvo
   en el rechazo del UL con OB, donde es el cierre de la vela que lo crea más la
   holgura;
@@ -182,6 +203,9 @@ class EntryForm(StrEnum):
     ZONA = "ZONA"
     #: El ID de H1 va al revés pero ha rechazado su UL: se mira ese UL.
     RECHAZO_UL = "RECHAZO_UL"
+    #: Igual que ZONA, pero dentro de la zona no había ningún patrón: el límite
+    #: sale del que queda DETRÁS de ella, y el stop se va con él.
+    ZONA_ATRAS = "ZONA_ATRAS"
 
 
 class OrderEnd(StrEnum):
@@ -336,6 +360,13 @@ class EntriesConfig:
     #: Cuánto se separa el límite del rechazo del cierre de la vela que crea el
     #: OB, en dólares. Por delante del precio: arriba en venta y abajo en compra.
     rejection_offset: float = REJECTION_OFFSET
+    #: Velas de M15 que se miran hacia atrás —desde la vela que define la zona de
+    #: H1— buscando un patrón DETRÁS de ella. **Parámetro abierto**: acota la
+    #: búsqueda para que no se rescate un sitio de hace una semana. 96 es un día.
+    behind_lookback: int = 96
+    #: Cuántos patrones de detrás se guardan. Se cogen los más recientes que
+    #: siguen en pie; los demás son recambio por si el precio se lleva el primero.
+    behind_limit: int = 3
 
 
 def detect_entries(
@@ -634,6 +665,16 @@ class _Entries:
                     position=position,
                 )
             )
+            found.extend(
+                self._candidates_behind(
+                    zone=against,
+                    direction=zoned.direction,
+                    since=_bar_of(self._fine, against.ts_defining),
+                    armed=birth,
+                    death=death,
+                    position=position,
+                )
+            )
         rejection = self._rejections.get(zoned.id_num)
         if rejection is not None and birth <= rejection <= death:
             found.extend(
@@ -692,6 +733,77 @@ class _Entries:
                 )
             )
         return found
+
+    def _candidates_behind(
+        self,
+        *,
+        zone: Zone,
+        direction: ImpulseDirection,
+        since: int,
+        armed: int,
+        death: int,
+        position: int,
+    ) -> list[_Candidate]:
+        """Los patrones que quedan DETRÁS de la zona, para cuando dentro no hay.
+
+        Es lo que hace el propietario a mano: si el precio llega a la zona de H1
+        y ahí no se formó ni un OB ni un FVG, el sitio no es la zona —no hay nada
+        que afinar— sino el patrón anterior que todavía no ha usado nadie, más
+        atrás. **Sólo se usan si en la zona no hay ninguno disponible**, y eso se
+        decide vela a vela en `_pick`, no aquí: mirar la vida entera del ID para
+        saber si más tarde aparecerá uno dentro sería adelantar el futuro.
+
+        «Detrás» es del lado exterior de la zona, el contrario al que va el
+        precio: por debajo en una compra y por encima en una venta. Un patrón del
+        otro lado no es un sitio al que volver, es un sitio por el que ya se pasó.
+
+        Se cogen los **más recientes que sigan en pie cuando el setup se arma**,
+        y sólo ésos: `behind_limit` de recambio por si el precio se lleva el
+        primero. Los que nazcan después no cuentan —un OB que se forma cuando el
+        precio ya se fue de la zona no es el sitio que se quedó sin usar, es otra
+        historia—, y contarlos además haría que un patrón futuro echara del cupo
+        al que sí estaba ahí cuando había que decidir.
+
+        La mitigación se mide desde que el patrón nació —y no desde que se arma,
+        como en la zona—, porque estos vienen de mucho más atrás y uno ya
+        atravesado no es un sitio, es un nivel roto.
+        """
+        found: list[_Candidate] = []
+        first = max(since - self._config.behind_lookback, 0)
+        if armed > death:
+            return found
+        for pattern in reversed(self._between(direction, first, armed)):
+            if len(found) >= self._config.behind_limit:
+                break
+            if pattern.height <= 0 or not _behind(pattern, zone, direction):
+                continue
+            if not self._alive(pattern, armed):
+                continue
+            if not _risky(
+                self._limit_price(pattern, EntryForm.ZONA_ATRAS, direction),
+                self._stop_price(pattern, EntryForm.ZONA_ATRAS, zone),
+                direction,
+            ):
+                continue
+            found.append(
+                _Candidate(
+                    pattern=pattern,
+                    form=EntryForm.ZONA_ATRAS,
+                    direction=direction,
+                    zone=zone,
+                    h1_index=position,
+                    since=armed,
+                    until=self._mitigated(pattern, armed, death),
+                )
+            )
+        return found
+
+    def _alive(self, pattern: PricePattern, index: int) -> bool:
+        """`True` si en `index` el precio todavía no ha atravesado el borde lejano."""
+        window = slice(pattern.index_known + 1, index + 1)
+        if pattern.direction is ImpulseDirection.BAJISTA:
+            return not bool(np.any(self._fine.high[window] > pattern.far))
+        return not bool(np.any(self._fine.low[window] < pattern.far))
 
     def _between(
         self, direction: ImpulseDirection, first: int, last: int
@@ -902,10 +1014,32 @@ class _Entries:
         Del más nuevo al más viejo: "lo más cercano que hay ahí". Tiene que estar
         vivo, ir en la dirección que se busca y quedar **al otro lado del
         precio**, porque un límite se pone donde el precio todavía no está.
+
+        **Primero se mira dentro de la zona y sólo después detrás de ella.** Es
+        la regla del patrón de detrás: se usa cuando en la zona no hay nada, y
+        «no hay nada» es una pregunta de ESTA vela —el patrón de dentro puede no
+        existir todavía, o haberse roto— y no de la vida entera del ID.
         """
         if direction is None:
             return None
+        picked = self._pick_among(candidates, index, direction, close, behind=False)
+        if picked is not None:
+            return picked
+        return self._pick_among(candidates, index, direction, close, behind=True)
+
+    def _pick_among(
+        self,
+        candidates: tuple[_Candidate, ...],
+        index: int,
+        direction: ImpulseDirection,
+        close: float,
+        *,
+        behind: bool,
+    ) -> _Candidate | None:
+        """Lo mismo que `_pick`, mirando sólo dentro de la zona o sólo detrás."""
         for candidate in reversed(candidates):
+            if (candidate.form is EntryForm.ZONA_ATRAS) is not behind:
+                continue
             if candidate.direction is not direction:
                 continue
             if not candidate.since <= index <= candidate.until:
@@ -945,15 +1079,21 @@ class _Entries:
         """Dónde va el stop.
 
         Por defecto, el borde **exterior** de la zona de H1: el sitio en el que
-        el setup deja de existir. La excepción es el **rechazo del UL afinado
-        con un OB**, donde va al borde **interior** —donde arranca la mecha, que
-        es la línea del extremo del ID de H1—.
+        el setup deja de existir. Hay dos excepciones:
 
-        Lo pidió el propietario: en ese setup se baja a M15 a esperar el OB, y
-        para entonces la punta de la mecha del UL queda tan arriba que el riesgo
-        es casi todo mecha vieja. El borde interior es lo que hay que perder para
-        que el rechazo deje de ser un rechazo, y está mucho más cerca.
+        - el **rechazo del UL afinado con un OB** va al borde **interior** —donde
+          arranca la mecha, que es la línea del extremo del ID de H1—. Lo pidió el
+          propietario: en ese setup se baja a M15 a esperar el OB, y para entonces
+          la punta de la mecha del UL queda tan arriba que el riesgo es casi todo
+          mecha vieja. El borde interior es lo que hay que perder para que el
+          rechazo deje de ser un rechazo, y está mucho más cerca;
+        - el **patrón de detrás de la zona** lleva el stop a su propio borde
+          **lejano**. Ahí el borde exterior de la zona no sirve de stop: queda al
+          otro lado del límite —por encima en una compra— y no habría riesgo que
+          medir, sino una operación del revés.
         """
+        if form is EntryForm.ZONA_ATRAS:
+            return pattern.far
         if form is EntryForm.RECHAZO_UL and pattern.kind is PatternKind.ORDER_BLOCK:
             return zone.inner
         return zone.outer
@@ -1191,6 +1331,17 @@ def _risky(entry: float, stop: float, direction: ImpulseDirection) -> bool:
     if direction is ImpulseDirection.BAJISTA:
         return stop > entry
     return stop < entry
+
+
+def _behind(pattern: PricePattern, zone: Zone, direction: ImpulseDirection) -> bool:
+    """`True` si el patrón queda entero al otro lado del borde exterior de la zona.
+
+    En una compra, por debajo del suelo de la zona; en una venta, por encima de
+    su techo. Tocar el borde ya es estar dentro: eso lo resuelve `_candidates_in`.
+    """
+    if direction is ImpulseDirection.ALCISTA:
+        return pattern.high < zone.outer
+    return pattern.low > zone.outer
 
 
 def _beyond(price: float, outer: float, direction: ImpulseDirection) -> bool:

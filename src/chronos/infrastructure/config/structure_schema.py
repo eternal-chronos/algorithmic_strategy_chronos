@@ -16,6 +16,7 @@ from chronos.application.structure.config import (
     ChartsConfig,
     ImpulseConfig,
     ImpulseRulesConfig,
+    Setup1Config,
     StructureDataConfig,
     StructureReportingConfig,
     TimezoneAuditConfig,
@@ -92,6 +93,15 @@ class ZonesSchema(_Strict):
         return ZonesConfig(**self.model_dump())
 
 
+class Setup1Schema(_Strict):
+    #: SETUP 1: la cascada H4 → H1, el ID propio de H1, lo de M15 y las
+    #: operaciones. Encendido por defecto; el fichero del proyecto lo apaga.
+    enabled: bool = True
+
+    def to_domain(self) -> Setup1Config:
+        return Setup1Config(**self.model_dump())
+
+
 class TimezoneAuditSchema(_Strict):
     enabled: bool = True
     expected_peak_utc: str = "13:30"
@@ -126,6 +136,7 @@ class ImpulseSchema(_Strict):
     charts: dict[str, list[str]] | None = None
     rules: ImpulseRulesSchema = Field(default_factory=ImpulseRulesSchema)
     zones: ZonesSchema = Field(default_factory=ZonesSchema)
+    setup1: Setup1Schema = Field(default_factory=Setup1Schema)
     timezone_audit: TimezoneAuditSchema = Field(default_factory=TimezoneAuditSchema)
     reporting: StructureReportingSchema = Field(default_factory=StructureReportingSchema)
 
@@ -145,6 +156,7 @@ class ImpulseSchema(_Strict):
             ),
             rules=self.rules.to_domain(),
             zones=self.zones.to_domain(),
+            setup1=self.setup1.to_domain(),
             timezone_audit=self.timezone_audit.to_domain(),
             reporting=self.reporting.to_domain(),
         )

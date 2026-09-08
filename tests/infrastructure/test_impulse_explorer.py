@@ -318,6 +318,7 @@ def _draw(
     zones: ZonesRun | None = None,
     cascade: CascadeRun | None = None,
     entries: EntriesRun | None = None,
+    setup1: bool | None = None,
 ) -> dict:
     node = shutil.which("node")
     if node is None:
@@ -333,6 +334,7 @@ def _draw(
                 zones=zones,
                 cascade=cascade,
                 entries=entries,
+                setup1=setup1,
             ),
             default=str,
         ),
@@ -3529,6 +3531,7 @@ ENTRY_TRACES = (
     "Operación · riesgo · en una vela",
     "Operación · objetivo · en una vela",
     "Patrón M15 de la entrada",
+    "Patrón M15 detrás de la zona",
 )
 
 
@@ -3820,6 +3823,69 @@ def test_el_globo_del_rechazo_con_ob_dice_a_que_borde_va_su_stop(
     assert "donde arranca la mecha" in dicho[0]
 
 
+def _globos(paso: dict) -> list[str]:
+    return [
+        texto
+        for traza in paso["plot"]["traces"]
+        if traza["name"] in ENTRY_TRACES
+        for texto in (traza["captions"] or [])
+    ]
+
+
+def test_el_patron_de_detras_de_la_zona_va_en_su_propia_traza(
+    entries_run: ImpulseRun, entries_zones: ZonesRun, trades: EntriesRun, tmp_path: Path
+) -> None:
+    """El recuadro cae FUERA de la zona de H1: con el mismo gris que los de
+    dentro se leería como un patrón mal colocado, no como la regla que es."""
+    payload = build_payload(entries_run, zones=entries_zones, entries=trades)
+    detras = [item for item in payload["entries"] if item["f"] == "ZONA_ATRAS"]
+    assert detras, "la fixture tiene que traer alguna afinada detrás de la zona"
+
+    paso = _step(
+        _draw(entries_run, tmp_path, zones=entries_zones, entries=trades),
+        "entradas-detras-zona",
+    )
+    trazas = [
+        traza
+        for traza in paso["plot"]["traces"]
+        if traza["name"] == "Patrón M15 detrás de la zona"
+    ]
+
+    assert trazas, _trace_names(paso)
+    assert trazas[0]["dash"] == "dashdot", "tiene que distinguirse de los de dentro"
+
+
+def test_el_globo_del_patron_de_detras_dice_por_que_y_donde_va_su_stop(
+    entries_run: ImpulseRun, entries_zones: ZonesRun, trades: EntriesRun, tmp_path: Path
+) -> None:
+    """Un límite con el stop en otro sitio que el resto tiene que decirlo."""
+    globos = _globos(
+        _step(
+            _draw(entries_run, tmp_path, zones=entries_zones, entries=trades),
+            "entradas-detras-zona",
+        )
+    )
+
+    assert globos
+    dicho = [texto for texto in globos if "EL STOP NO VA A LA ZONA" in texto]
+    assert dicho, globos[:2]
+    assert "DENTRO DE SU ZONA NO HABÍA NI UN OB NI UN FVG" in dicho[0]
+    assert "BORDE LEJANO DEL PATRÓN" in dicho[0]
+
+
+def test_las_notas_cuentan_las_afinadas_detras_de_la_zona(
+    entries_run: ImpulseRun, entries_zones: ZonesRun, trades: EntriesRun, tmp_path: Path
+) -> None:
+    """Una operación con otro stop no puede contarse con las demás y callarse."""
+    notas = _step(
+        _draw(entries_run, tmp_path, zones=entries_zones, entries=trades),
+        "entradas-detras-zona",
+    )["notes"]
+
+    assert "se afinaron DETRÁS de la zona de H1" in notas
+    assert "el stop va al borde lejano del patrón y no a la zona" in notas
+
+
 def test_la_posicion_cerrada_el_viernes_tiene_su_marca_y_su_globo(
     entries_run: ImpulseRun, entries_zones: ZonesRun, trades: EntriesRun, tmp_path: Path
 ) -> None:
@@ -3935,3 +4001,41 @@ def test_sin_operaciones_la_cuenta_no_cambia_de_riesgo(
     cuenta = _step(_draw(run, tmp_path), "ruido-de-salida")["account"]
 
     assert cuenta["risk"] == "2"
+
+
+# --- Setup 1: el interruptor, dicho en el dibujo ----------------------------
+
+
+def test_una_corrida_que_no_habla_de_setups_no_dice_nada(run: ImpulseRun) -> None:
+    """Las fases 1 y 2 no saben qué es un setup: su explorador no lo menciona."""
+    assert build_payload(run)["setup1"] is None
+
+
+def test_con_el_setup_1_apagado_el_explorador_lo_dice(
+    run: ImpulseRun, zones: ZonesRun, tmp_path: Path
+) -> None:
+    """Las capas ausentes no bastan: una capa que no está se lee como que ahí
+    no pasó nada. El texto de estado tiene que decir qué NO se ha calculado."""
+    payload = build_payload(run, zones=zones, setup1=False)
+    assert payload["setup1"] is False
+    assert payload["hasCascade"] is False
+    assert payload["hasEntries"] is False
+
+    notas = _step(_draw(run, tmp_path, zones=zones, setup1=False), "todo")["notes"]
+    assert "SETUP 1 APAGADO" in notas
+    assert "ni la cascada" in notas and "ni el ID de H1" in notas
+    assert "UL, PUL y APUL" in notas
+
+
+def test_con_el_setup_1_encendido_el_explorador_tambien_lo_dice(
+    run: ImpulseRun, zones: ZonesRun, tmp_path: Path
+) -> None:
+    notas = _step(_draw(run, tmp_path, zones=zones, setup1=True), "todo")["notes"]
+    assert "SETUP 1 ENCENDIDO" in notas
+
+
+def test_sin_setup_declarado_el_dibujo_no_menciona_ninguno(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    notas = _step(_draw(run, tmp_path), "todo")["notes"]
+    assert "SETUP 1" not in notas

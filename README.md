@@ -63,16 +63,25 @@ chronos structure zonas --config config/impulse.yaml
 # para y avisa.
 chronos structure rotura-por-zona --config config/impulse.yaml
 
-# Fase 3.0: la cascada H4 -> H1 (el Diario sólo veta), sólo señales: ni entradas
-# ni métricas
+# SETUP 1: la cascada H4 -> H1 (el Diario sólo veta) y las operaciones. Se
+# enciende y se apaga entero con `setup1.enabled` en el YAML; APAGADO los dos
+# comandos avisan y no calculan nada.
 chronos structure entradas --config config/impulse.yaml
+chronos structure operaciones --config config/impulse.yaml
+
+# SETUP 2: el punto de partida. La ESTRUCTURA y nada más: ID del Diario y de H4
+# con sus zonas UL, PUL y APUL. Ni cascada, ni entradas, ni ID de H1, ni nada de
+# M15. No depende del interruptor del setup 1.
+chronos structure setup2 --config config/impulse.yaml
 ```
 
 El módulo de estructura detecta **el impulso dominante del Diario y de H4** y
 **no emite señales**: sin entradas, sin stops, sin targets y sin medición de
 rentabilidad. H1 y M15 no llevan detector —no se les marca ID— y sobre ellas se
-dibuja el de H4 como contexto; la única excepción es la fase 3.0, que enciende el
-ID de H1 porque su cascada lo necesita para confirmar. Ver
+dibuja el de H4 como contexto; la única excepción es el **setup 1**, que enciende
+el ID de H1 porque su cascada lo necesita para confirmar —y ahora mismo está
+**apagado** (`setup1.enabled: false`), así que el proyecto está en la estructura
+sola, preparando el setup 2. Ver
 [`docs/MODULO_1_IMPULSO_DOMINANTE.md`](docs/MODULO_1_IMPULSO_DOMINANTE.md) y
 [`docs/MODULO_2_ZONAS.md`](docs/MODULO_2_ZONAS.md).
 

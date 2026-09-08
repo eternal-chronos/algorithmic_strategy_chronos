@@ -350,3 +350,87 @@ def test_las_operaciones_salen_dibujadas_y_sin_una_sola_metrica(
     assert '"marketWeek":' in explorador
     # La cuenta con la que se auditan viaja con la corrida, no con el explorador.
     assert '"account":{"initial":50.0,"mode":"percent","risk":17.0}' in explorador
+
+
+# --- Setup 1: el interruptor de la entrada ----------------------------------
+
+
+def test_el_yaml_del_proyecto_trae_el_setup_1_apagado() -> None:
+    """El proyecto está en la ESTRUCTURA: ni cascada, ni ID de H1, ni entradas.
+
+    Es una decisión del propietario escrita en el fichero, no un defecto del
+    motor: el dataclass nace encendido y lo apaga el YAML.
+    """
+    assert load_impulse_config(Path("config/impulse.yaml")).setup1.enabled is False
+    assert ImpulseConfig().setup1.enabled is True
+
+
+def test_con_el_setup_1_apagado_las_operaciones_no_se_calculan(workspace: Path) -> None:
+    """Y se dice por qué, en vez de escribir un explorador vacío."""
+    _write_run(
+        workspace, make_m1_history(weeks=10), setup1={"enabled": False}
+    )
+    result = runner.invoke(
+        app,
+        [
+            "structure",
+            "operaciones",
+            "--config",
+            str(workspace / "impulse.yaml"),
+            "--salida",
+            str(workspace / "fase31"),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "SETUP 1 ESTÁ APAGADO" in result.stdout
+    assert "setup2" in result.stdout
+    assert not (workspace / "fase31").exists()
+
+
+def test_con_el_setup_1_apagado_la_cascada_tampoco(workspace: Path) -> None:
+    _write_run(workspace, make_m1_history(weeks=10), setup1={"enabled": False})
+    result = runner.invoke(
+        app,
+        [
+            "structure",
+            "entradas",
+            "--config",
+            str(workspace / "impulse.yaml"),
+            "--salida",
+            str(workspace / "fase30"),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "SETUP 1 ESTÁ APAGADO" in result.stdout
+    assert not (workspace / "fase30").exists()
+
+
+def test_setup2_dibuja_la_estructura_con_el_setup_1_apagado(workspace: Path) -> None:
+    """El punto de partida: ID de Diario y H4 con sus zonas, y nada más.
+
+    No depende del interruptor —dibuja la estructura esté encendido o apagado— y
+    no enciende el detector de H1: el explorador no puede traer ni una entrada.
+    """
+    _write_run(workspace, make_m1_history(weeks=10), setup1={"enabled": False})
+    result = runner.invoke(
+        app,
+        [
+            "structure",
+            "setup2",
+            "--config",
+            str(workspace / "impulse.yaml"),
+            "--salida",
+            str(workspace / "setup2"),
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    html = (workspace / "setup2" / "explorador_setup2.html").read_text(encoding="utf-8")
+    assert '"hasEntries":false' in html
+    assert '"hasCascade":false' in html
+    assert '"setup1":false' in html
+    assert '"hasZones":true' in html
+    # H1 no lleva detector: en el reparto por defecto sólo hay ID de D y de H4.
+    assert '"charts":["D","H4","H1","M15"]' in html

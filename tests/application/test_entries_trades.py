@@ -19,8 +19,14 @@ import pandas as pd
 import pytest
 
 from chronos.application.entries.cascade import detect_cascade
+
+# `_Entries` y `_bar_of` son privados a propósito: la regla del patrón de detrás
+# es "sólo si en la zona no había nada EN ESA VELA", y eso no se puede comprobar
+# desde fuera con la lista de operaciones: hace falta preguntarle al recorrido
+# qué tenía a mano en esa vela.
 from chronos.application.entries.trades import (
     REJECTION_OFFSET,
+    EntriesConfig,
     EntriesRun,
     Entry,
     EntryForm,
@@ -28,6 +34,8 @@ from chronos.application.entries.trades import (
     RegimeEdge,
     RegimeKind,
     TradeOutcome,
+    _bar_of,
+    _Entries,
     detect_entries,
 )
 from chronos.application.entries.trading_window import (
@@ -48,6 +56,7 @@ from chronos.application.structure.config import (
     with_hourly_structure,
 )
 from chronos.application.structure.detect_impulses import DetectDominantImpulses, ImpulseRun
+from chronos.application.structure.zone_signals import detect_zone_signals
 from chronos.application.structure.zones import ZonesRun, detect_zones
 from chronos.domain.entries.patterns import PatternKind
 from chronos.domain.structure.enums import ImpulseDirection
@@ -240,6 +249,9 @@ def test_el_stop_va_a_un_borde_de_la_zona_de_h1(
     rechazos = 0
 
     for entry in trades.entries:
+        # El patrón de detrás lleva el stop a su propio borde: tiene su test.
+        if entry.form is EntryForm.ZONA_ATRAS:
+            continue
         zone = _zona_de(zones, entry)
         assert zone is not None
         if _es_rechazo_con_ob(entry):
@@ -326,10 +338,107 @@ def test_el_rechazo_con_fvg_y_la_forma_zona_no_cambian(trades: EntriesRun) -> No
 
 
 def test_el_patron_cae_dentro_de_la_zona_de_h1(trades: EntriesRun) -> None:
-    """La entrada se afina DENTRO de la zona, no en cualquier sitio de M15."""
+    """La entrada se afina DENTRO de la zona, no en cualquier sitio de M15.
+
+    Salvo cuando dentro no había nada: ésa es la forma `ZONA_ATRAS` y va aparte.
+    """
     for entry in trades.entries:
+        if entry.form is EntryForm.ZONA_ATRAS:
+            continue
         assert entry.pattern_low <= entry.zone_high
         assert entry.zone_low <= entry.pattern_high
+
+
+# --- El patrón de DETRÁS de la zona -----------------------------------------
+
+
+def _atras(trades: EntriesRun) -> list[Entry]:
+    return [item for item in trades.entries if item.form is EntryForm.ZONA_ATRAS]
+
+
+def test_la_corrida_trae_patrones_de_detras_de_la_zona(trades: EntriesRun) -> None:
+    """Sin ninguno, los tests de esta sección no comprobarían nada."""
+    assert _atras(trades)
+
+
+def test_el_patron_de_detras_queda_entero_al_otro_lado_del_borde_exterior(
+    trades: EntriesRun, zones: ZonesRun
+) -> None:
+    """Detrás es detrás: por debajo del suelo en una compra y por encima del
+    techo en una venta. Uno que rozara la zona habría entrado por la vía normal.
+    """
+    for entry in _atras(trades):
+        zone = _zona_de(zones, entry)
+        assert zone is not None
+        if entry.direction is ImpulseDirection.ALCISTA:
+            assert entry.pattern_high < zone.outer
+        else:
+            assert entry.pattern_low > zone.outer
+        # Y por tanto no solapa la zona por ningún lado.
+        assert entry.pattern_high < entry.zone_low or entry.pattern_low > entry.zone_high
+
+
+def test_el_stop_del_patron_de_detras_va_a_su_borde_lejano(
+    trades: EntriesRun,
+) -> None:
+    """El borde de la zona no sirve ahí: queda al otro lado del límite."""
+    for entry in _atras(trades):
+        lejano = (
+            entry.pattern_high
+            if entry.direction is ImpulseDirection.BAJISTA
+            else entry.pattern_low
+        )
+        cercano = (
+            entry.pattern_low
+            if entry.direction is ImpulseDirection.BAJISTA
+            else entry.pattern_high
+        )
+        assert entry.stop == pytest.approx(lejano)
+        assert entry.entry == pytest.approx(cercano)
+        assert entry.risk == pytest.approx(entry.pattern_high - entry.pattern_low)
+
+
+def test_el_patron_de_detras_se_conocia_antes_de_armar_el_limite(
+    trades: EntriesRun,
+) -> None:
+    """El sitio se elige con lo que había, no con lo que llegó después."""
+    for entry in _atras(trades):
+        assert entry.ts_pattern_known <= entry.ts_armed
+
+
+def test_solo_se_busca_detras_si_en_la_zona_no_habia_nada_en_esa_vela(
+    run: ImpulseRun, zones: ZonesRun, trades: EntriesRun
+) -> None:
+    """La regla entera: detrás es el recambio, no una alternativa a elegir.
+
+    Se comprueba vela a vela y no sobre la vida del ID: que más tarde nazca un
+    patrón dentro de la zona no invalida el límite que se puso cuando no había
+    ninguno.
+    """
+    builder = _Entries(
+        run,
+        zones,
+        detect_zone_signals(run, zones),
+        TRADING_WINDOW,
+        MARKET_WEEK,
+        EntriesConfig(),
+    )
+    posiciones = {
+        item.id_num: position
+        for position, item in enumerate(zones.per_timeframe[H1].items)
+    }
+
+    for entry in _atras(trades):
+        position = posiciones[entry.h1_id]
+        index = _bar_of(builder._fine, entry.ts_armed)
+        dentro = builder._pick_among(
+            builder._candidates_of(position),
+            index,
+            entry.direction,
+            float(builder._fine.close[index]),
+            behind=False,
+        )
+        assert dentro is None, entry
 
 
 def test_el_setup_del_rechazo_solo_sale_de_un_id_de_h1_que_va_al_reves(
@@ -339,10 +448,11 @@ def test_el_setup_del_rechazo_solo_sale_de_un_id_de_h1_que_va_al_reves(
 
     for entry in trades.entries:
         zoned = por_id[entry.h1_id]
-        if entry.form is EntryForm.ZONA:
-            assert zoned.direction is entry.direction
-        else:
+        if entry.form is EntryForm.RECHAZO_UL:
             assert zoned.direction is entry.direction.opposite()
+        else:
+            # ZONA y ZONA_ATRAS son el mismo setup: cambia dónde está el patrón.
+            assert zoned.direction is entry.direction
 
 
 def test_nada_ocurre_antes_de_que_el_limite_exista(trades: EntriesRun) -> None:
