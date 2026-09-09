@@ -74,21 +74,21 @@
       limbo: false, marks: true, contacts: false, mid: false, wrong: false,
       frame: true, zones: true,
       signals: false, cascade: false, avoided: false, steps: false,
-      entries: true, regime: true
+      entries: true, regime: true, crt: true
     },
     normal: {
       visible: "pair",
       limbo: true, marks: true, contacts: false, mid: false, wrong: true,
       frame: true, zones: true,
       signals: true, cascade: true, avoided: true, steps: true,
-      entries: true, regime: true
+      entries: true, regime: true, crt: true
     },
     all: {
       visible: "all",
       limbo: true, marks: true, contacts: true, mid: true, wrong: true,
       frame: true, zones: true,
       signals: true, cascade: true, avoided: true, steps: true,
-      entries: true, regime: true
+      entries: true, regime: true, crt: true
     }
   };
 
@@ -155,6 +155,11 @@
      * ella la línea del extremo cambia de precio a mitad del ID sin decir por
      * qué, y eso se lee como un error de dibujo. */
     steps: true,
+    /* SETUP 2. La lectura CRT del Diario: el rango, con su mitad alta y su
+     * mitad baja, y el objetivo que deja una rotura. Nace encendida en los tres
+     * niveles de ruido: en el Diario es LO ÚNICO que se dibuja —ahí el ID ya no
+     * se lee— y apagarla dejaría el gráfico con las velas peladas. */
+    crt: true,
     blind: false,      // auditoría ciega en curso (F.1)
     revealed: false,
     seed: null,
@@ -192,9 +197,6 @@
      * nadie y el motor no se entera de que existe. */
     sim: null,
     arming: null,
-    /* El R:R con el que se planta y al que vuelve el objetivo cuando se mueve el
-     * stop. `null` es «a mano»: lo dejó ahí un arrastre del objetivo. */
-    ratio: 2,
     /* Recuadros marcados a mano (I.3). Cada uno es un rectángulo —`kind`,
      * `from`, `to`, `low`, `high`— que planta el PROPIETARIO para señalar dónde
      * ve un PUL, un UL o un APUL. No salen del explorador y el motor no los ve:
@@ -202,6 +204,13 @@
      * `arming === "rect:PUL"` es el botón de ese nombre esperando el clic que
      * planta el siguiente. */
     rects: [],
+    /* Líneas trazadas a mano (I.4). Cada una es un segmento —`kind`, `from`,
+     * `to` y el precio de cada extremo, `left` y `right`— que planta el
+     * PROPIETARIO para señalar lo que quiere explicar: un nivel, un tramo, de
+     * dónde a dónde mira. Cada una lleva el nombre de la TEMPORALIDAD que se
+     * está marcando con ella. Tampoco salen del explorador ni las ve el motor.
+     * `arming === "line:H4"` es el botón de esa temporalidad esperando el clic. */
+    lines: [],
     /* Cuenta simulada (I.2). El capital de partida, cómo se mide el riesgo de
      * cada operación y las que se llevan apuntadas. De cada una se guarda su
      * MÚLTIPLO DE RIESGO, no los euros: el dinero se recalcula entero en cada
@@ -383,8 +392,16 @@
    * que marcó el módulo— y por eso el apagón se hace aquí, en un único sitio, y
    * no casilla por casilla. */
   function blindfolded() { return state.blind && !state.revealed; }
+
+  /* SETUP 2 — el gráfico que se lee con CRT no dibuja NADA del ID: ni su línea,
+   * ni su marco, ni su limbo, ni sus marcadores, ni sus zonas UL, PUL y APUL.
+   * Se apaga aquí, en el mismo sitio que la venda de la auditoría ciega, y no
+   * capa por capa: una a una siempre se queda alguna encendida. */
+  function idlessChart() { return crtOn(); }
+
   function isVisible(timeframe) {
-    return !blindfolded() && !state.hidden[state.chart + ":" + timeframe];
+    return !blindfolded() && !idlessChart() &&
+      !state.hidden[state.chart + ":" + timeframe];
   }
 
   /* B.2 — qué ID se dibujan. El "actual" es el último constituido en o antes del
@@ -1065,6 +1082,154 @@
         dash: before ? "dot" : ZONE_DASH[kind]
       }
     };
+  }
+
+  /* --- SETUP 2 · la lectura CRT del Diario ----------------------------------
+   *
+   * En el Diario ya NO se lee el ID: ni su línea, ni su marco, ni su limbo, ni
+   * sus zonas UL, PUL y APUL. Lo que se dibuja ahí es lo que el motor leyó vela
+   * contra vela anterior, y son dos cosas:
+   *
+   *   · RANGO — una vela barrió un extremo de la anterior y volvió a CERRAR
+   *     DENTRO de ella. El rango es la vela MANIPULADA, dibujada como caja y
+   *     partida por su 50 %: la mitad alta en verde y la baja en rojo, SIEMPRE
+   *     así, mire la lectura hacia donde mire. El tramo atenuado va de la vela
+   *     manipulada a la que manipula: ahí el rango todavía no se había leído.
+   *   · OBJETIVO — una vela cerró MÁS ALLÁ del extremo de la anterior. Se marca
+   *     SU propio extremo como una línea: el nivel que se espera ver manipulado
+   *     y rechazado.
+   *
+   * Sólo se dibujan la lectura VIGENTE y la ANTERIOR. Más atrás no se deja nada
+   * marcado: un rango completado —o roto— cuenta su historia una lectura más y
+   * desaparece. No es un filtro que se pueda soltar como el de los ID.
+   *
+   * Todo viene calculado de Python: los dos bordes, el 50 %, cuál es el extremo
+   * manipulado y hasta qué vela estuvo vigente cada lectura. Aquí sólo se pinta.
+   */
+  function hasCrt() {
+    return !!(DATA.crt && DATA.crt.items && DATA.crt.items.length);
+  }
+
+  function crtChart() { return DATA.crt ? DATA.crt.tf : null; }
+
+  /* El gráfico que se lee con CRT. Es el mismo sitio del que sale que ahí el ID
+   * no se dibuja: `isVisible` lo apaga entero. */
+  function crtOn() { return hasCrt() && state.chart === crtChart(); }
+
+  /* La lectura vigente y la anterior en el borde derecho de la ventana. Mismo
+   * criterio que el par de ID de B.2 —lo que estaba puesto en la fecha que se
+   * está mirando—, salvo que aquí no hay filtro que soltar: más atrás de la
+   * anterior no se marca nada. */
+  function visibleCrt(edges) {
+    if (!hasCrt()) { return []; }
+    var until = knownUntil(crtChart(), edges);
+    var known = DATA.crt.items.filter(function (item) { return item.x0 <= until; });
+    return known.slice(Math.max(known.length - 2, 0)).filter(function (item) {
+      return item.x1 >= edges.lo && item.xs <= edges.hi;
+    });
+  }
+
+  var CRT_ALPHA = { alta: 0.16, baja: 0.16 };
+
+  function crtTraces(range) {
+    if (blindfolded() || !state.crt || !crtOn()) { return []; }
+    var edges = window_(range);
+    var items = visibleCrt(edges);
+    var buckets = { alta: shape(), baja: shape(), antes: shape() };
+    var level = segment();
+
+    items.forEach(function (item, position) {
+      var caption = crtCaption(item, position === items.length - 1);
+      var to = clip(item.x1, edges);
+      if (item.k === "RANGO") {
+        pushCrtBox(buckets.alta, item.x0, to, item.mid, item.hi, caption);
+        pushCrtBox(buckets.baja, item.x0, to, item.lo, item.mid, caption);
+        // La vela manipulada es anterior a la lectura: hasta que cerró la que
+        // manipula, ese rango no lo había leído nadie.
+        pushCrtBox(buckets.antes, item.xs, item.x0, item.lo, item.hi, caption);
+      } else {
+        push(level, item.x0, to, item.tgt, caption);
+      }
+    });
+
+    var traces = [];
+    if (buckets.antes.x.length) {
+      traces.push(crtBoxTrace(
+        "Antes de leerse · rango del Diario", buckets.antes, COLORS.muted, null, 0.35, "dot"
+      ));
+    }
+    if (buckets.baja.x.length) {
+      traces.push(crtBoxTrace(
+        "Rango del Diario · mitad baja", buckets.baja, COLORS.bearish,
+        rgba(COLORS.bearish, CRT_ALPHA.baja), 1, "solid"
+      ));
+    }
+    if (buckets.alta.x.length) {
+      traces.push(crtBoxTrace(
+        "Rango del Diario · mitad alta", buckets.alta, COLORS.bullish,
+        rgba(COLORS.bullish, CRT_ALPHA.alta), 1, "solid"
+      ));
+    }
+    if (level.x.length) {
+      traces.push(lineTrace(
+        "Objetivo del Diario", level,
+        { color: COLORS.crtTarget, width: 2, dash: "solid" }, 1
+      ));
+    }
+    return traces;
+  }
+
+  /* Un rectángulo cerrado, en el orden que espera `fill: toself`, más el nulo
+   * que lo separa del siguiente. Igual que las cajas de las zonas. */
+  function pushCrtBox(bucket, from, to, lo, hi, caption) {
+    var a = iso(from), b = iso(to);
+    bucket.x.push(a, b, b, a, a, null);
+    bucket.y.push(lo, lo, hi, hi, lo, null);
+    bucket.text.push(caption, caption, caption, caption, caption, "");
+  }
+
+  function crtBoxTrace(name, bucket, colour, fillcolor, opacity, dash) {
+    return {
+      type: "scatter", mode: "lines", name: name,
+      x: bucket.x, y: bucket.y, text: bucket.text,
+      hoverinfo: "text", hoverlabel: { align: "left" }, connectgaps: false,
+      fill: fillcolor ? "toself" : "none",
+      fillcolor: fillcolor || undefined,
+      opacity: opacity,
+      line: { color: colour, width: fillcolor ? 1.3 : 1, dash: dash }
+    };
+  }
+
+  var CRT_END = {
+    COMPLETADO: "COMPLETADO: el precio llegó al extremo contrario al manipulado",
+    ROTO: "ROTO: una vela cerró fuera del rango por el lado manipulado"
+  };
+
+  function crtCaption(item, current) {
+    var alcista = item.d === "alcista";
+    var head = (current ? "LECTURA ACTUAL" : "LECTURA ANTERIOR") + " · Diario · " + item.d;
+    if (item.k === "RANGO") {
+      return head +
+        "<br>RANGO: la vela de " + stamp(item.xs) + " es la MANIPULADA" +
+        "<br>la vela de " + stamp(item.x0) + " le barrió el " +
+        (alcista ? "bajo" : "alto") + " y volvió a cerrar dentro" +
+        "<br>rango " + price(item.lo) + " — " + price(item.hi) +
+        " · 50 % en " + price(item.mid) +
+        "<br>manipulado " + price(item.man) + " · se mira hacia " + price(item.tgt) +
+        "<br>mitad alta en verde y mitad baja en rojo, siempre: el sentido lo dice " +
+        "cuál es el extremo manipulado" +
+        "<br>" + (item.v
+          ? "VIGENTE: ni ha llegado al extremo contrario ni ha cerrado fuera"
+          : (CRT_END[item.end] || "cerrado") + ", en la vela de " + stamp(item.x1));
+    }
+    return head +
+      "<br>OBJETIVO: la vela de " + stamp(item.x0) + " cerró más allá del " +
+      (alcista ? "alto" : "bajo") + " de la anterior" +
+      "<br>nivel " + price(item.tgt) + ": su propio " + (alcista ? "alto" : "bajo") +
+      "<br>lo que se espera ver es que lo MANIPULEN y lo RECHACEN" +
+      "<br>" + (item.v
+        ? "VIGENTE: todavía no hay otra lectura"
+        : "sustituido por la lectura de " + stamp(item.x1));
   }
 
   /* --- El marco del ID ------------------------------------------------------
@@ -2508,12 +2673,12 @@
    * que se usa al hablar de un stop. */
   var PIP = Math.pow(10, -DECIMALS);
 
-  /* R:R de salida y los que ofrece el control. Con uno puesto, el objetivo es
-   * SIEMPRE el riesgo por ese número: mover el stop arrastra el objetivo con él.
-   * Arrastrar el objetivo suelta el candado y deja el ratio «a mano», igual que
-   * tocar una casilla suelta el nivel de ruido: el control no puede decir 1:3 si
-   * lo que hay dibujado es otra cosa. */
-  var SIM_RATIOS = [1, 2, 3, 4];
+  /* A cuántos riesgos NACE el objetivo de una caja recién plantada. No es un
+   * R:R elegido ni un candado: es de dónde parte el arrastre, porque la caja
+   * tiene que salir con algo dibujado. Desde el primer arrastre el R:R es
+   * SIEMPRE el que se mida entre el stop y el objetivo que hay puestos: no hay
+   * ningún botón que lo escriba. */
+  var SIM_START_REWARD = 2;
 
   var GRAB = 9;          // píxeles de tolerancia para agarrar un borde
 
@@ -2538,6 +2703,16 @@
   function pips(distance) { return Math.round(Math.abs(distance) / PIP); }
 
   function decimal(value) { return value.toFixed(1).replace(".", ","); }
+
+  /* El R:R tal y como sale de la caja: dos decimales como mucho y sin ceros de
+   * relleno. Lo que se dibuja a ojo casi nunca cae en un número redondo, así que
+   * 1:3 se lee «1:3» y un objetivo arrastrado un poco más allá, «1:2,25» —no
+   * «1:2,3», que es otra distancia—. El número SIEMPRE sale de medir la caja:
+   * ningún botón lo escribe. */
+  function ratioLabel(value) {
+    var text = value.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+    return "1:" + text.replace(".", ",");
+  }
 
   function simRisk() { return Math.abs(state.sim.entry - state.sim.stop); }
 
@@ -2581,7 +2756,7 @@
         x0: x0, x1: x1, y0: sim.entry, y1: sim.entry,
         line: { color: COLORS.ink, width: 1.2 }, layer: "above",
         label: {
-          text: sideLabel(sim.side).toUpperCase() + " · R:R 1:" + decimal(simRatio()),
+          text: sideLabel(sim.side).toUpperCase() + " · R:R " + ratioLabel(simRatio()),
           textposition: "end", font: { size: 11, color: COLORS.ink }
         }
       }
@@ -2594,10 +2769,12 @@
   }
 
   /* El botón que está armado, cuando es de los del simulador: `arming` lo
-   * comparten la caja simulada y los recuadros a mano (I.3) —no se puede estar
-   * esperando dos clics a la vez— y los controles de cada uno sólo pueden
-   * hablar del suyo. */
-  function simArming() { return armedRect() ? null : state.arming; }
+   * comparten la caja simulada, los recuadros a mano (I.3) y las líneas a mano
+   * (I.4) —no se puede estar esperando dos clics a la vez— y los controles de
+   * cada uno sólo pueden hablar del suyo. */
+  function simArming() {
+    return armedRect() || armedLine() ? null : state.arming;
+  }
 
   function clearSim() {
     state.sim = null;
@@ -2618,28 +2795,11 @@
       side: side,
       entry: round_(point.price),
       stop: round_(point.price - dir * risk),
-      target: round_(point.price + (state.ratio || 2) * dir * risk),
+      target: round_(point.price + SIM_START_REWARD * dir * risk),
       from: point.minute,
       to: point.minute + Math.max(1, Math.round((x[1] - x[0]) * 0.25))
     };
     state.arming = null;
-    draw();
-  }
-
-  /* El objetivo a la distancia que manda el ratio, contada desde la entrada y
-   * en riesgos. Sin ratio puesto no se toca: lo que hay dibujado lo puso una
-   * mano. */
-  function applyRatio() {
-    var sim = state.sim;
-    if (!sim || !state.ratio) { return; }
-    var dir = sim.side === "long" ? 1 : -1;
-    sim.target = round_(sim.entry + dir * simRisk() * state.ratio);
-  }
-
-  function setRatio(value) {
-    state.ratio = value;
-    applyRatio();
-    normalizeSim();
     draw();
   }
 
@@ -2649,8 +2809,6 @@
    * infinito. */
   function normalizeSim() {
     var sim = state.sim;
-    // Sin caja no hay nada que enderezar: el ratio se puede fijar antes de
-    // plantar —y así se planta la siguiente—, y eso no puede romper el dibujo.
     if (!sim) { return; }
     var dir = sim.side === "long" ? 1 : -1;
     if (dir * (sim.entry - sim.stop) < PIP) {
@@ -2750,6 +2908,8 @@
     if (event.stopPropagation) { event.stopPropagation(); }
     var armed = armedRect();
     if (armed) { plantRect(armed, point); return; }
+    var traced = armedLine();
+    if (traced) { plantLine(traced, point); return; }
     plantSim(state.arming, point);
   }
 
@@ -2811,14 +2971,12 @@
     var dy = point.price - simDrag.origin.price;
     var dx = point.minute - simDrag.origin.minute;
     if (part === "stop") {
+      // El stop es una decisión sola: mueve el riesgo y deja el objetivo donde
+      // está. El R:R no se defiende —se vuelve a medir— y por eso alejar el
+      // stop lo baja: es lo que ha pasado en el dibujo.
       sim.stop = round_(point.price);
-      // Con un R:R puesto, mover el stop es mover el objetivo: el ratio es lo
-      // que se ha fijado y la distancia al objetivo, su consecuencia.
-      applyRatio();
     } else if (part === "target") {
       sim.target = round_(point.price);
-      // Lo que se arrastra manda: a partir de aquí el ratio es el que se vea.
-      state.ratio = null;
     } else if (part === "from") {
       sim.from = point.minute;
     } else if (part === "to") {
@@ -2845,6 +3003,7 @@
       draw();
       return;
     }
+    syncRatioReadout();
     var update = {};
     simShapes().forEach(function (shape, position) {
       var key = "shapes[" + (simIndex + position) + "]";
@@ -2868,14 +3027,18 @@
   function hoverSim(event) {
     var chart = document.getElementById("chart");
     if (!chart || !chart.style || state.arming) { return; }
-    if (!state.sim && !state.rects.length) { return; }
+    if (!state.sim && !state.rects.length && !state.lines.length) { return; }
     var box = chartBox();
     var part = box && state.sim ? simHandleAt(box, event.clientX, event.clientY) : null;
     if (part) { chart.style.cursor = SIM_CURSORS[part] || ""; return; }
     var hit = box && state.rects.length
       ? rectHandleAt(box, event.clientX, event.clientY)
       : null;
-    chart.style.cursor = hit ? (RECT_CURSORS[hit.part] || "") : "";
+    if (hit) { chart.style.cursor = RECT_CURSORS[hit.part] || ""; return; }
+    var stroke = box && state.lines.length
+      ? lineHandleAt(box, event.clientX, event.clientY)
+      : null;
+    chart.style.cursor = stroke ? (LINE_CURSORS[stroke.part] || "") : "";
   }
 
   /* Qué caja hay puesta. Un rectángulo de colores sobre el precio se lee como
@@ -2890,10 +3053,9 @@
     return "simulación " + sideLabel(sim.side).toUpperCase() + " · entrada " +
       price(sim.entry) + " · stop " + price(sim.stop) + " (" + pips(simRisk()) +
       " pips) · objetivo " + price(sim.target) + " (" + pips(simReward()) +
-      " pips) · R:R 1:" + decimal(simRatio()) +
-      (state.ratio
-        ? " (fijo: mover el stop mueve el objetivo)"
-        : " (a mano: lo dejó ahí un arrastre del objetivo)") +
+      " pips) · R:R " + ratioLabel(simRatio()) +
+      " (automático: es la distancia que hay dibujada del stop al objetivo, y" +
+      " se vuelve a medir en cuanto se arrastra cualquiera de los dos)" +
       " · un pip es la última cifra del precio · ES DIBUJO A MANO: no hay orden, " +
       "ni ejecución, ni resultado; nadie mira si el precio llegó y el motor no la ve";
   }
@@ -2912,19 +3074,27 @@
     });
   }
 
-  function buildRatioButtons() {
-    var container = document.getElementById("sim-ratio");
-    if (!container) { return; }
-    SIM_RATIOS.forEach(function (value) {
-      var button = document.createElement("button");
-      button.type = "button";
-      button.textContent = "1:" + value;
-      button.dataset.ratio = String(value);
-      button.title = "Fija el objetivo a " + value + " veces el riesgo. Con esto puesto, " +
-        "mover el stop mueve el objetivo. Arrastrar el objetivo suelta el candado.";
-      button.addEventListener("click", function () { setRatio(value); });
-      container.appendChild(button);
-    });
+  /* El R:R que hay DIBUJADO, en el panel y no sólo dentro del gráfico.
+   *
+   * NO SE ELIGE: se mide. Entrada -> stop es el 1 y entrada -> objetivo lo que
+   * salga, así que el número dice lo que hay puesto —1:3, 1:4 o 1:2,44— sin que
+   * nadie lo escriba. Se rehace en cada píxel del arrastre —también mientras se
+   * coloca el objetivo, que es cuando se mira—, y mover el stop o el objetivo
+   * lo cambia porque lo que ha cambiado es la caja. */
+  function syncRatioReadout() {
+    var node = document.getElementById("sim-rr");
+    if (!node) { return; }
+    if (!state.sim) {
+      node.textContent = "R:R —";
+      node.dataset.source = "";
+      node.title = "Sin caja dibujada no hay distancias que medir.";
+      return;
+    }
+    node.textContent = "R:R " + ratioLabel(simRatio()) + " · automático";
+    node.dataset.source = "auto";
+    node.title = "Sale de medir la caja: " + pips(simRisk()) + " pips de riesgo contra " +
+      pips(simReward()) + " pips de objetivo.\nNo hay ratio que poner a mano: " +
+      "arrastrar el stop o el objetivo lo vuelve a medir.";
   }
 
   function bindSim() {
@@ -3227,6 +3397,296 @@
     document.addEventListener("mouseup", endRectDrag);
   }
 
+  /* --- Las líneas a mano (I.4) ----------------------------------------------
+   *
+   * Tres LÍNEAS que traza el PROPIETARIO encima del gráfico para señalar lo que
+   * todavía no tiene regla: por dónde pasa un nivel, qué dos puntos une, de
+   * dónde a dónde mira. No son capa del motor —como los recuadros de I.3—: no
+   * las ha calculado nadie, el motor no se entera de que existen y no salen de
+   * la pantalla. Existen para poder mandar una captura señalando lo que se
+   * quiere explicar.
+   *
+   * El NOMBRE de cada una es la TEMPORALIDAD que se está marcando con ella —el
+   * nivel que se ve en el Diario, el de H4, el de H1—, que es lo que se quiere
+   * decir al señalarla: el color es sólo para distinguirlas. Los tonos son los
+   * tres de la mano, los mismos que los recuadros y NO los que el motor usa por
+   * temporalidad, para que una línea de H4 no se confunda con el marco de H4
+   * que sí ha calculado alguien. Lo que las separa de los recuadros es el
+   * TRAZO: continuo la línea, punteado el recuadro.
+   *
+   * Se plantan HORIZONTALES —marcar un nivel es lo que más se hace— y se
+   * inclinan arrastrando un extremo: los dos se mueven en precio y en tiempo, y
+   * por dentro se desplaza entera. El gesto es el de los recuadros y comparten
+   * `arming` con ellos y con la caja simulada.
+   */
+  var LINE_KINDS = [
+    { id: "D", label: "Diario", name: "línea de Diario" },
+    { id: "H4", label: "H4", name: "línea de H4" },
+    { id: "H1", label: "H1", name: "línea de H1" }
+  ];
+
+  var LINE_ARM = "line:";
+
+  function armedLine() {
+    var arming = state.arming;
+    if (!arming || String(arming).indexOf(LINE_ARM) !== 0) { return null; }
+    return String(arming).slice(LINE_ARM.length);
+  }
+
+  function lineColor(kind) { return COLORS.lines[kind]; }
+
+  function lineName(kind) {
+    var found = LINE_KINDS.filter(function (item) { return item.id === kind; })[0];
+    return found ? found.name : kind;
+  }
+
+  var LINE_CURSORS = { left: "ew-resize", right: "ew-resize", body: "move" };
+
+  /* Dónde empiezan las líneas dentro de `layout.shapes`, igual que los
+   * recuadros: es lo que permite mover sólo la que se arrastra. */
+  var lineIndex = null;
+
+  var lineDrag = null;
+
+  /* Se numeran POR TEMPORALIDAD: la segunda de H4 es «H4 2» aunque entre las
+   * dos se haya trazado una del Diario. */
+  function lineShapes() {
+    var seen = {};
+    return state.lines.map(function (line, position) {
+      var color = lineColor(line.kind);
+      seen[line.kind] = (seen[line.kind] || 0) + 1;
+      return {
+        type: "line", name: "line-" + position, xref: "x", yref: "y",
+        x0: iso(line.from), x1: iso(line.to), y0: line.left, y1: line.right,
+        line: { color: color, width: 2.2 },
+        layer: "above",
+        label: {
+          text: lineName(line.kind) + " " + seen[line.kind] + " (a mano)",
+          textposition: "top left",
+          font: { size: 11, color: color }
+        }
+      };
+    });
+  }
+
+  function armLine(kind) {
+    state.arming = armedLine() === kind ? null : LINE_ARM + kind;
+    draw();
+  }
+
+  /* La línea de salida: HORIZONTAL al precio del clic y de media ventana de
+   * ancho, centrada en él. Es un punto de partida para arrastrar, no una
+   * propuesta: el motor no ha dicho nada de ese precio. */
+  function plantLine(kind, point) {
+    var x = viewRange("x");
+    if (!x) { return; }
+    var half = Math.max(span(state.chart), Math.round((x[1] - x[0]) * 0.25));
+    var level = round_(point.price);
+    state.lines.push({
+      kind: kind,
+      from: point.minute - half,
+      to: point.minute + half,
+      left: level,
+      right: level
+    });
+    state.arming = null;
+    draw();
+  }
+
+  function undoLine() {
+    if (!state.lines.length) { return; }
+    state.lines.pop();
+    draw();
+  }
+
+  function clearLines() {
+    state.lines = [];
+    if (armedLine()) { state.arming = null; }
+    draw();
+  }
+
+  /* Una línea no puede darse la vuelta: el arrastre que cruza el otro extremo se
+   * queda a una vela, que es lo que impide un segmento de ancho cero o del
+   * revés. En vertical no hay nada que impedir: horizontal es justo como nace. */
+  function normalizeLine(line) {
+    if (line.to <= line.from) {
+      if (lineDrag && lineDrag.part === "left") {
+        line.from = line.to - span(state.chart);
+      } else {
+        line.to = line.from + span(state.chart);
+      }
+    }
+  }
+
+  /* Distancia del ratón al trazo, en píxeles: su proyección sobre el segmento,
+   * recortada a los extremos. Sin esto una línea inclinada sólo se dejaría
+   * agarrar en el punto donde coincide con el ratón en horizontal. */
+  function strokeDistance(cx, cy, a, b) {
+    var dx = b.x - a.x, dy = b.y - a.y;
+    var length = dx * dx + dy * dy;
+    var t = length ? ((cx - a.x) * dx + (cy - a.y) * dy) / length : 0;
+    t = Math.max(0, Math.min(1, t));
+    var x = a.x + t * dx, y = a.y + t * dy;
+    return Math.sqrt((cx - x) * (cx - x) + (cy - y) * (cy - y));
+  }
+
+  function nearPixel(cx, cy, point) {
+    return Math.abs(cx - point.x) <= GRAB && Math.abs(cy - point.y) <= GRAB;
+  }
+
+  /* Qué parte de una línea hay bajo el ratón. Los extremos ganan al trazo: son
+   * lo que la inclina, y con la línea corta todo ella cae dentro de la
+   * tolerancia de los dos. */
+  function linePartAt(box, line, cx, cy) {
+    var a = pixelAt(box, line.from, line.left);
+    var b = pixelAt(box, line.to, line.right);
+    if (!a || !b) { return null; }
+    if (nearPixel(cx, cy, a)) { return "left"; }
+    if (nearPixel(cx, cy, b)) { return "right"; }
+    return strokeDistance(cx, cy, a, b) <= GRAB ? "body" : null;
+  }
+
+  /* La última trazada está encima, así que se busca del final al principio. */
+  function lineHandleAt(box, cx, cy) {
+    for (var index = state.lines.length - 1; index >= 0; index -= 1) {
+      var part = linePartAt(box, state.lines[index], cx, cy);
+      if (part) { return { index: index, part: part }; }
+    }
+    return null;
+  }
+
+  function startLineDrag(event) {
+    // La caja simulada y los recuadros se registran antes y tienen preferencia:
+    // si uno de ellos ha agarrado el gesto, aquí no hay nada que hacer.
+    if (simDrag || rectDrag || axisDrag || state.arming || !state.lines.length) { return; }
+    var box = chartBox();
+    if (!box) { return; }
+    var hit = lineHandleAt(box, event.clientX, event.clientY);
+    if (!hit) { return; }
+    var origin = dataAt(box, event.clientX, event.clientY, true);
+    if (!origin) { return; }
+    var line = state.lines[hit.index];
+    lineDrag = {
+      index: hit.index, part: hit.part, origin: origin,
+      base: { from: line.from, to: line.to, left: line.left, right: line.right }
+    };
+    if (event.preventDefault) { event.preventDefault(); }
+    if (event.stopPropagation) { event.stopPropagation(); }
+  }
+
+  function moveLineDrag(event) {
+    if (simDrag || rectDrag || !lineDrag) { return; }
+    var box = chartBox();
+    var point = box && dataAt(box, event.clientX, event.clientY, true);
+    if (!point) { return; }
+    applyLineDrag(point);
+    if (event.preventDefault) { event.preventDefault(); }
+  }
+
+  function applyLineDrag(point) {
+    var line = state.lines[lineDrag.index], base = lineDrag.base, part = lineDrag.part;
+    if (part === "left") {
+      line.from = point.minute;
+      line.left = round_(point.price);
+    } else if (part === "right") {
+      line.to = point.minute;
+      line.right = round_(point.price);
+    } else {
+      // Por dentro se mueve la línea ENTERA: su inclinación es lo que se acaba
+      // de decidir y recolocarla no puede cambiarla por su cuenta.
+      var dy = point.price - lineDrag.origin.price;
+      var dx = point.minute - lineDrag.origin.minute;
+      line.from = base.from + dx;
+      line.to = base.to + dx;
+      line.left = round_(base.left + dy);
+      line.right = round_(base.right + dy);
+    }
+    normalizeLine(line);
+    redrawLines();
+  }
+
+  /* Igual que los recuadros: durante el arrastre se mueven sólo las formas de
+   * las líneas, no la figura entera. */
+  function redrawLines() {
+    var chart = document.getElementById("chart");
+    if (lineIndex === null || !chart || typeof Plotly === "undefined" || !Plotly.relayout) {
+      draw();
+      return;
+    }
+    var update = {};
+    lineShapes().forEach(function (shape, position) {
+      var key = "shapes[" + (lineIndex + position) + "]";
+      update[key + ".x0"] = shape.x0;
+      update[key + ".x1"] = shape.x1;
+      update[key + ".y0"] = shape.y0;
+      update[key + ".y1"] = shape.y1;
+    });
+    Plotly.relayout(chart, update);
+  }
+
+  function endLineDrag() {
+    if (!lineDrag) { return; }
+    lineDrag = null;
+    draw();
+  }
+
+  /* Cuántas hay de cada temporalidad, en el orden de los botones y sin nombrar
+   * las que no se han trazado. */
+  function lineCounts() {
+    var counts = {};
+    state.lines.forEach(function (line) {
+      counts[line.kind] = (counts[line.kind] || 0) + 1;
+    });
+    return LINE_KINDS.filter(function (kind) {
+      return counts[kind.id];
+    }).map(function (kind) {
+      return counts[kind.id] + " " + kind.label;
+    }).join(" · ");
+  }
+
+  /* Qué líneas hay trazadas. Un trazo sobre el precio se lee como un nivel que
+   * ha encontrado alguien: el estado tiene que decir que lo ha puesto una mano y
+   * que detrás no hay ninguna regla. */
+  function lineCaption() {
+    var armed = armedLine();
+    if (armed) {
+      return lineName(armed).toUpperCase() + " ARMADA: pulsa sobre el gráfico " +
+        "para plantarla, o Escape para dejarla";
+    }
+    if (!state.lines.length) { return null; }
+    return "líneas marcadas a mano: " + state.lines.length +
+      " (" + lineCounts() + ")" +
+      " · las traza el propietario para señalar lo que quiere explicar: NO las " +
+      "ha dibujado el motor, no hay ninguna regla detrás y no salen de la pantalla";
+  }
+
+  function buildLineButtons() {
+    var container = document.getElementById("line-buttons");
+    if (!container) { return; }
+    LINE_KINDS.forEach(function (kind) {
+      var button = document.createElement("button");
+      button.type = "button";
+      button.textContent = kind.label;
+      button.dataset.kind = kind.id;
+      button.title = "Arma la " + kind.name + ": el clic siguiente sobre el\n" +
+        "gráfico la planta ahí, horizontal al precio pulsado. Escape desarma.\n" +
+        "El nombre dice la temporalidad que estás marcando; la dibujas tú y el\n" +
+        "motor no la ve.";
+      button.addEventListener("click", function () { armLine(kind.id); });
+      container.appendChild(button);
+    });
+  }
+
+  function bindLines() {
+    var chart = document.getElementById("chart");
+    document.getElementById("line-undo").addEventListener("click", undoLine);
+    document.getElementById("line-clear").addEventListener("click", clearLines);
+    if (!chart || !chart.addEventListener || !document.addEventListener) { return; }
+    chart.addEventListener("mousedown", startLineDrag, true);
+    document.addEventListener("mousemove", moveLineDrag);
+    document.addEventListener("mouseup", endLineDrag);
+  }
+
   /* --- Cuenta simulada (I.2) -------------------------------------------------
    *
    * Un capital de partida, un riesgo por operación y tres botones: la caja que
@@ -3489,7 +3949,7 @@
         pad(index + 1, 4) + pad(trade.at.slice(0, 16), 21) + pad(label(trade.chart), 9) +
         pad(sideLabel(trade.box.side).toUpperCase(), 7) +
         pad(price(trade.box.entry), 9) + pad(price(trade.box.stop), 9) +
-        pad(price(trade.box.target), 10) + pad("1:" + decimal(trade.ratio), 8) +
+        pad(price(trade.box.target), 10) + pad(ratioLabel(trade.ratio), 8) +
         pad(RESULT_NAMES[trade.result], 12) + pad(signedR(trade.r).replace(" R", ""), 7) +
         pad(signedMoney(row.delta), 12) + money(row.balance)
       );
@@ -3713,6 +4173,15 @@
     return shapes.concat(boxes);
   }
 
+  /* Y por encima de los recuadros, las líneas a mano (I.4): son lo último que
+   * se planta y lo que se está señalando. Se apunta dónde empiezan por lo mismo
+   * que los recuadros: para arrastrar una sin rehacer la figura entera. */
+  function lineShapes_(shapes) {
+    var strokes = lineShapes();
+    lineIndex = strokes.length ? shapes.length : null;
+    return shapes.concat(strokes);
+  }
+
   function layout(range) {
     var x = xRange(range);
     return {
@@ -3730,7 +4199,9 @@
       dragmode: "pan",
       showlegend: true,
       legend: { orientation: "h", y: 1.04, x: 0, font: { size: 11 } },
-      shapes: rectShapes_(simShapes_(regimeShapes(range).concat(limboShapes(range)))),
+      shapes: lineShapes_(
+        rectShapes_(simShapes_(regimeShapes(range).concat(limboShapes(range))))
+      ),
       xaxis: {
         type: "date", gridcolor: COLORS.grid, rangeslider: { visible: false },
         // El rango va siempre con su `autorange`: si se diera uno sin apagar el
@@ -3760,6 +4231,10 @@
       // Las zonas van las primeras: son cajas con relleno y encima de cualquier
       // línea taparían justo lo que se audita.
       .concat(zoneTraces(range))
+      // La lectura CRT va con las zonas y por el mismo motivo: son cajas con
+      // relleno y encima de cualquier línea taparían lo que se audita. En el
+      // gráfico que la lleva no hay zonas, así que nunca se pisan.
+      .concat(crtTraces(range))
       .concat(frameTraces(range))
       .concat(impulseTraces(range))
       .concat(stepTraces(range))
@@ -3805,7 +4280,8 @@
     ["entries", "entradas (límite, stop y objetivo)", hasEntries],
     ["regime", "régimen de H4", hasEntries],
     ["avoided", "roturas evitadas", hasAvoided],
-    ["steps", "escalera del extremo", hasSteps]
+    ["steps", "escalera del extremo", hasSteps],
+    ["crt", "rango del Diario (CRT)", hasCrt]
   ];
 
   /* Qué nivel de ruido está puesto y qué se está dejando fuera por él. Un
@@ -3835,9 +4311,54 @@
         "propio de H1, patrones de M15 y entradas";
     }
     return "SETUP 1 APAGADO: no se han calculado ni la cascada, ni el ID de H1, " +
-      "ni nada de M15, ni una sola entrada · lo que se dibuja es la " +
-      "ESTRUCTURA: ID del Diario y de H4 con sus zonas UL, PUL y APUL, y H1 y " +
-      "M15 con el ID de H4 de contexto y ninguna marca propia";
+      "ni nada de M15, ni una sola entrada · lo que se dibuja es la ESTRUCTURA: " +
+      (hasCrt()
+        // Con la lectura CRT puesta el Diario ya no lleva ID: decir aquí que lo
+        // lleva mandaría a buscar en ese gráfico algo que no está.
+        ? "el DIARIO leído con CRT —rango u objetivo, sin ID ni zonas— y el ID " +
+          "de H4 con sus zonas UL, PUL y APUL"
+        : "ID del Diario y de H4 con sus zonas UL, PUL y APUL") +
+      ", y H1 y M15 con el ID de H4 de contexto y ninguna marca propia";
+  }
+
+  /* Qué se está viendo en el Diario y qué no. La lectura CRT sustituye al ID en
+   * ese gráfico, así que hay que decir las dos cosas: que ahí no hay ID —ni
+   * marco, ni zonas— y cuál es la lectura vigente. Y en los demás gráficos, que
+   * la lectura existe pero no se dibuja: si no, su ausencia se lee como que el
+   * Diario no leyó nada. */
+  function crtNote(edges) {
+    if (!crtOn()) {
+      return "la lectura CRT del " + label(crtChart()) + " sólo se dibuja en su " +
+        "gráfico: aquí manda el ID";
+    }
+    var head = "EL " + label(crtChart()).toUpperCase() + " SE LEE CON CRT: aquí no " +
+      "se dibuja el ID, ni su marco, ni sus zonas UL, PUL y APUL";
+    if (!state.crt) {
+      return head + " · y la capa del rango está APAGADA: lo que queda son las " +
+        "velas peladas";
+    }
+    var items = visibleCrt(edges);
+    if (!items.length) {
+      return head + " · sin lectura a la vista en este tramo: o no había cerrado " +
+        "todavía ninguna vela que manipulara o rompiera, o la que hay queda fuera " +
+        "de la ventana";
+    }
+    var actual = items[items.length - 1];
+    return head + " · lecturas dibujadas: " + items.length +
+      " (la vigente y la anterior, y más atrás no se marca nada) · la vigente es " +
+      (actual.k === "RANGO"
+        ? "un RANGO " + actual.d + " de " + price(actual.lo) + " a " + price(actual.hi) +
+          " (la vela manipulada es la de " + stamp(actual.xs) + ") " +
+          (actual.v
+            ? "todavía VIGENTE"
+            : (actual.end === "COMPLETADO" ? "ya COMPLETADO" : "ya ROTO") +
+              " en " + stamp(actual.x1))
+        : "un OBJETIVO " + actual.d + " en " + price(actual.tgt) +
+          " (el " + (actual.d === "alcista" ? "alto" : "bajo") + " de la vela de " +
+          stamp(actual.x0) + " que rompió), a la espera de que lo manipulen y lo " +
+          "rechacen") +
+      " · la mitad alta del rango va en VERDE y la baja en ROJO, siempre · ES " +
+      "DIBUJO: no hay entradas, ni stops, ni objetivos de precio detrás";
   }
 
   function notes(range, cut) {
@@ -3855,6 +4376,8 @@
     // propietario y en la ciega marcar dónde se ve una zona es justo el gesto
     // de la prueba.
     var recuadros = rectCaption();
+    // Y las líneas, por lo mismo que los recuadros.
+    var lineas = lineCaption();
     if (blindfolded()) {
       return "AUDITORÍA CIEGA · semilla " + state.seed + " · " + label(state.chart) + " · " +
         range.from + " → " + range.to + " · " + visible.toLocaleString("es-ES") +
@@ -3862,6 +4385,7 @@
         state.scope.from + " → " + state.scope.to + "." +
         (simulada ? " · " + simulada : "") +
         (recuadros ? " · " + recuadros : "") +
+        (lineas ? " · " + lineas : "") +
         (cuenta ? " · " + cuenta : "");
     }
     var dibujados = overlays().filter(isVisible).map(function (timeframe) {
@@ -3905,6 +4429,10 @@
         (state.visible === "current" ? "ID actual" : "ID actual + anterior") +
         "»: los demás siguen en los datos y en los informes";
     }
+    // SETUP 2 — lo primero que hay que decir en el Diario es que ahí ya no se
+    // lee el ID: un gráfico sin marco ni zonas se leería como un fallo del
+    // motor, no como otra forma de leerlo.
+    if (hasCrt()) { text += " · " + crtNote(edges); }
     if (state.frame) {
       // De quién son los marcos que se están viendo. En este gráfico hay hasta
       // dos temporalidades y sin decirlo, un marco ausente se lee como que ahí
@@ -4075,6 +4603,7 @@
     }
     if (simulada) { text += " · " + simulada; }
     if (recuadros) { text += " · " + recuadros; }
+    if (lineas) { text += " · " + lineas; }
     if (cuenta) { text += " · " + cuenta; }
     return text;
   }
@@ -4317,6 +4846,7 @@
     if (!hasCascade()) { state.cascade = false; }
     if (!hasSteps()) { state.steps = false; }
     if (!hasAvoided()) { state.avoided = false; }
+    if (!hasCrt()) { state.crt = false; }
   }
 
   /* Sin zonas en la corrida no hay ni un recuadro que pintar, y una casilla que
@@ -4348,6 +4878,13 @@
   function buildEntryLayers() {
     if (hasEntries()) { return; }
     hide("entry-layers");
+  }
+
+  /* SETUP 2, mismo criterio: sin lectura CRT en el payload —una corrida de las
+   * fases 1, 2 o 3— no hay ni un rango que dibujar. */
+  function buildCrtLayers() {
+    if (hasCrt()) { return; }
+    hide("crt-layers");
   }
 
   function buildBreakLayers() {
@@ -4438,6 +4975,9 @@
   function buildImpulseLayers() {
     var container = document.getElementById("impulse-layers");
     container.innerHTML = "";
+    // En el gráfico que se lee con CRT no hay ID que encender: una casilla que
+    // no puede dibujar nada sólo hace dudar de si está fallando.
+    if (idlessChart()) { return; }
     overlays().forEach(function (timeframe, position) {
       var key = state.chart + ":" + timeframe;
       var id = "layer-id-" + timeframe;
@@ -4528,9 +5068,7 @@
       button.setAttribute("aria-pressed", String(button.dataset.side === state.arming));
     });
     document.getElementById("sim-clear").disabled = !state.sim && !simArming();
-    document.querySelectorAll("#sim-ratio button").forEach(function (button) {
-      button.setAttribute("aria-pressed", String(Number(button.dataset.ratio) === state.ratio));
-    });
+    syncRatioReadout();
     // Armado, el gráfico deja de ser sólo para mirar: el cursor lo dice.
     var canvas = document.getElementById("chart");
     if (canvas && canvas.style) { canvas.style.cursor = state.arming ? "crosshair" : ""; }
@@ -4548,6 +5086,18 @@
     });
     document.getElementById("rect-undo").disabled = !state.rects.length;
     document.getElementById("rect-clear").disabled = !state.rects.length;
+
+    // I.4 — las líneas a mano: lo mismo, cada botón con el color de su línea.
+    document.querySelectorAll("#line-buttons button").forEach(function (button) {
+      var kind = button.dataset.kind;
+      var pressed = armedLine() === kind;
+      button.setAttribute("aria-pressed", String(pressed));
+      button.style.color = pressed ? COLORS.surface : lineColor(kind);
+      button.style.background = pressed ? lineColor(kind) : "";
+      button.style.borderColor = pressed ? lineColor(kind) : "";
+    });
+    document.getElementById("line-undo").disabled = !state.lines.length;
+    document.getElementById("line-clear").disabled = !state.lines.length;
 
     document.getElementById("layer-frame").checked = state.frame;
     if (hasZones()) {
@@ -4578,6 +5128,12 @@
     }
     if (hasSteps()) {
       document.getElementById("layer-steps").checked = state.steps;
+    }
+    if (hasCrt()) {
+      // Sólo hay algo que encender en el gráfico que se lee con CRT: en los
+      // demás la casilla se queda apagada en vez de mentir.
+      document.getElementById("layer-crt").disabled = !crtOn();
+      document.getElementById("layer-crt").checked = state.crt;
     }
     syncAccount();
     seedInput().value = state.seed === null ? "" : String(state.seed);
@@ -4646,7 +5202,8 @@
       ["layer-entries", "entries"],
       ["layer-regime", "regime"],
       ["layer-avoided", "avoided"],
-      ["layer-steps", "steps"]
+      ["layer-steps", "steps"],
+      ["layer-crt", "crt"]
     ].forEach(function (pair) {
       document.getElementById(pair[0]).addEventListener("change", function (event) {
         state[pair[1]] = event.target.checked;
@@ -4751,6 +5308,7 @@
   buildSignalLayers();
   buildCascadeLayers();
   buildEntryLayers();
+  buildCrtLayers();
   buildBreakLayers();
   buildNoiseButtons();
   // El nivel de salida se aplica aquí, con el payload ya leído: así lo que no
@@ -4761,13 +5319,14 @@
   buildImpulseLayers();
   buildSimButtons();
   buildRectButtons();
-  buildRatioButtons();
+  buildLineButtons();
   buildAccountButtons();
   buildRiskModes();
   bindControls();
   bindAxisScaling();
   bindSim();
   bindRects();
+  bindLines();
   bindAccount();
   draw();
 })();

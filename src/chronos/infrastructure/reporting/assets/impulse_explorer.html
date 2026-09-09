@@ -47,6 +47,14 @@ input[type="date"], input[type="number"], select {
   background: var(--page); border: 1px solid var(--grid); border-radius: 6px;
 }
 .buttons button[disabled] { opacity: .45; cursor: default; }
+#sim-rr {
+  font-size: 13px; padding: 6px 10px; white-space: nowrap;
+  background: var(--page); color: var(--muted);
+  border: 1px solid var(--grid); border-radius: 6px;
+}
+#sim-rr[data-source="auto"] {
+  color: var(--ink); border-color: var(--ink); font-weight: 600;
+}
 input[disabled], select[disabled] { opacity: .45; }
 #replay-group.on > span { color: var(--ink); font-weight: 600; }
 #chart { background: var(--surface); border: 1px solid var(--grid); border-radius: 10px; }
@@ -292,6 +300,19 @@ se estaba buscando en cada tramo, según dónde estaba el precio dentro del ID d
 Una compra dibujada sobre fondo rojo es un error, y sin el fondo no hay forma de verlo.">
             <input type="checkbox" id="layer-regime" checked> Régimen de H4</label>
         </span>
+        <span id="crt-layers" style="display:flex; gap:16px; flex-wrap:wrap;">
+          <label class="toggle" title="SETUP 2 — la lectura CRT del Diario, que ahí SUSTITUYE al ID:
+en ese gráfico no se dibuja ni el ID, ni su marco, ni sus zonas UL, PUL y APUL.
+Se lee vela contra vela anterior y son dos cosas.
+RANGO: una vela barrió un extremo de la anterior y volvió a CERRAR DENTRO. El rango es la vela
+MANIPULADA, dibujada como caja y partida por su 50 %: la mitad alta en verde y la baja en rojo,
+siempre así. Deja de existir cuando el precio llega al extremo contrario (completado) o cuando
+una vela cierra fuera por el lado manipulado (roto).
+OBJETIVO: una vela cerró MÁS ALLÁ del extremo de la anterior. Se marca SU propio extremo como
+una línea: el nivel que se espera ver manipulado y rechazado.
+Sólo se dibujan la lectura vigente y la anterior: más atrás no se deja nada marcado.">
+            <input type="checkbox" id="layer-crt" checked> Rango del Diario (CRT)</label>
+        </span>
         <span id="break-layers" style="display:flex; gap:16px; flex-wrap:wrap;">
           <span id="avoided-layer">
             <label class="toggle" title="Fase 2.1: velas que bajo la regla antigua habrían roto el ID
@@ -357,6 +378,9 @@ Después se arrastra: el borde de fuera de cada caja mueve el objetivo o el stop
 de la entrada mueve el conjunto entero, los bordes de los lados alargan el tramo y el
 interior lo desplaza todo. La etiqueta dice los pips de cada lado y el R:R; un pip es la
 última cifra del precio. Escape desarma sin plantar nada.
+El R:R NO SE PONE A MANO: sale de medir la caja —del stop al objetivo— y se vuelve a medir
+en cuanto arrastras cualquiera de los dos, así que dice 1:3, 1:4 o 1:2,44 según lo que haya
+dibujado. La caja nace con el objetivo a dos riesgos sólo para tener de dónde arrastrar.
 ES DIBUJO A MANO Y NADA MÁS: no hay orden, ni ejecución, ni resultado. Nadie mira si el
 precio llegó al objetivo o al stop, no sale de la pantalla y el motor no la ve. El
 proyecto sigue sin entradas.">
@@ -364,10 +388,7 @@ proyecto sigue sin entradas.">
       </span>
       <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
         <div class="buttons" id="sim-buttons"></div>
-        <div class="buttons" id="sim-ratio" title="R:R fijo: el objetivo se pone a tantas veces
-el riesgo. Con uno puesto, mover el stop mueve el objetivo con él y el ratio no cambia.
-Arrastrar el objetivo suelta el candado y deja el ratio a mano: ningún botón queda pulsado
-y el estado lo dice."></div>
+        <span id="sim-rr" title="Sin caja dibujada no hay distancias que medir.">R:R —</span>
         <div class="buttons">
           <button type="button" id="sim-clear" title="Quita la caja simulada">Quitar</button>
         </div>
@@ -394,6 +415,32 @@ una captura señalando lo que aún no se detecta.">
             Quitar último</button>
           <button type="button" id="rect-clear" title="Quita todos los recuadros">
             Quitar todos</button>
+        </div>
+      </div>
+    </div>
+    <div class="group" id="line-group">
+      <span title="Tres LÍNEAS que trazas TÚ para marcar cosas sobre el gráfico —un nivel, un
+tramo, de dónde a dónde miras— y poder explicarlas. Una por TEMPORALIDAD —Diario, H4 y H1—:
+el nombre dice de dónde es el nivel que estás marcando. Cada botón ARMA la suya y el clic
+siguiente sobre el gráfico la PLANTA ahí, HORIZONTAL al precio pulsado; después se arrastra:
+los extremos la mueven y la inclinan, y por dentro se desplaza entera. Escape desarma sin
+plantar nada.
+Se trazan VARIAS de cada temporalidad y se numeran por temporalidad en el orden en que se
+plantan.
+Llevan los mismos tres tonos de la mano que los recuadros —y no los que el motor usa por
+temporalidad, para que una línea de H4 no se confunda con el marco de H4 que sí ha
+calculado alguien— y van CONTINUAS: punteado es recuadro, continuo es línea.
+NO SON CAPA DEL MOTOR: no las ha calculado nadie, no salen de la pantalla y el motor no se
+entera de que existen. Sirven para mandar una captura señalando lo que se quiere explicar.">
+        Línea
+      </span>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <div class="buttons" id="line-buttons"></div>
+        <div class="buttons">
+          <button type="button" id="line-undo" title="Quita la última línea trazada">
+            Quitar última</button>
+          <button type="button" id="line-clear" title="Quita todas las líneas">
+            Quitar todas</button>
         </div>
       </div>
     </div>
@@ -455,6 +502,21 @@ configuración, el historial y las estadísticas, en texto">Copiar</button>
   <div id="chart"></div>
 
   <div class="legend">
+    <span><i class="box" style="background:#1baf7a"></i>
+      <i class="box" style="background:#d03b3b"></i>SETUP 2 · RANGO DEL DIARIO (CRT): la
+      caja de la vela MANIPULADA —una vela le barrió un extremo y volvió a cerrar
+      dentro—, partida por su 50 %: mitad alta en VERDE y mitad baja en ROJO,
+      siempre así. En el Diario esto SUSTITUYE al ID: ahí no hay ni marco, ni
+      zonas UL, PUL o APUL</span>
+    <span>el recuadro ATENUADO del rango va de la vela manipulada a la que
+      manipula: hasta que aquélla cerró, ese rango no lo había leído nadie</span>
+    <span><i style="background:#6f4bd8"></i>OBJETIVO DEL DIARIO: el extremo de la vela
+      que ROMPIÓ —cerró más allá del alto (o del bajo) de la anterior—. Es el nivel
+      que se espera ver manipulado y rechazado</span>
+    <span>del Diario sólo se marcan la lectura VIGENTE y la ANTERIOR: un rango
+      deja de existir cuando el precio llega al extremo contrario al manipulado
+      (completado) o cuando una vela cierra fuera por el lado manipulado (roto), y
+      más atrás no se deja nada marcado</span>
     <span><i style="background:#1baf7a"></i>ID alcista (ancla y extremo)</span>
     <span><i style="background:#d03b3b"></i>ID bajista (ancla y extremo)</span>
     <span>línea continua = impulso de esta temporalidad · punteada = temporalidad superior</span>
@@ -549,9 +611,10 @@ configuración, el historial y las estadísticas, en texto">Copiar</button>
       línea de la entrada —al revés en corto—. El botón arma, el clic planta y después se
       arrastra: bordes de fuera = stop y objetivo, línea de la entrada = mover la caja
       entera, bordes de los lados = alargar el tramo. Escape desarma</span>
-    <span>los botones <b>1:1 · 1:2 · 1:3 · 1:4</b> fijan el R:R: el objetivo se planta a
-      esa distancia y mover el stop lo arrastra con él. Arrastrar el objetivo suelta el
-      candado —ningún botón queda pulsado— y el ratio pasa a ser el que se vea</span>
+    <span>el <b>R:R es automático</b>: no se elige, se mide. El panel y la caja dicen la
+      distancia que hay del stop al objetivo —1:3, 1:4 o 1:2,44— y la vuelven a medir en
+      cuanto se arrastra el stop o el objetivo. La caja nace con el objetivo a dos riesgos
+      sólo para tener de dónde arrastrar</span>
     <span>la caja simulada dice los pips de cada lado y el R:R; un pip es la última cifra
       del precio. NO ES UNA OPERACIÓN: no hay orden, ni ejecución, ni resultado, y nadie
       comprueba si el precio llegó al objetivo o al stop. Es lo único del gráfico que
@@ -566,6 +629,17 @@ configuración, el historial y las estadísticas, en texto">Copiar</button>
       detectado nada, no hay regla de PUL, UL ni APUL en el proyecto y no salen de la
       pantalla. Son, con la caja simulada, lo único del gráfico que dibuja el
       propietario</span>
+    <span><i style="background:#c0359a"></i><b>Diario</b>
+      <i style="background:#0b8fa8"></i><b>H4</b>
+      <i style="background:#7c8b12"></i><b>H1</b>: LÍNEAS marcadas A MANO («Línea»): un
+      trazo por temporalidad que planta el propietario para señalar el nivel que quiere
+      explicar; el nombre dice de dónde es y el color sólo sirve para distinguirlas. El
+      botón arma, el clic la planta HORIZONTAL al precio pulsado y después se arrastra: los
+      extremos la mueven y la inclinan, por dentro se desplaza entera. Escape desarma. Van
+      CONTINUAS —los recuadros a mano van punteados— y se numeran por temporalidad. Llevan
+      tonos de la mano y no los del motor: una línea de H4 no es el marco de H4. NO SON
+      CAPA DEL MOTOR: no las ha calculado nada, no hay ninguna regla detrás y no salen de
+      la pantalla</span>
     <span>con «Cuenta simulada» cada caja lleva además <b>el dinero que se juega</b>: la
       verde, lo que suma si llega el objetivo; la roja, lo que resta si toca el stop, con el
       capital y el riesgo puestos en la barra. Los botones <b>Ganada · Perdida · BE</b>

@@ -43,15 +43,18 @@ from chronos.application.structure.config import (
     ZonesConfig,
     with_hourly_structure,
 )
+from chronos.application.structure.crt import CrtRun, DatedReading, read_daily_crt
 from chronos.application.structure.detect_impulses import DetectDominantImpulses, ImpulseRun
 from chronos.application.structure.lateralization import measure
 from chronos.application.structure.zones import ZonesRun, detect_zones
-from chronos.domain.structure.enums import LegStartMode
+from chronos.domain.structure.crt import CrtRangeEnd, CrtReading, CrtReadingKind
+from chronos.domain.structure.enums import ImpulseDirection, LegStartMode
 from chronos.domain.structure.zone_signals import ZoneSignalKind
 from chronos.infrastructure.reporting.impulse_explorer import (
     ASSETS,
     BEARISH,
     BULLISH,
+    HAND_LINES,
     HAND_RECTS,
     TIMEFRAME_COLORS,
     ModeVariant,
@@ -319,6 +322,7 @@ def _draw(
     cascade: CascadeRun | None = None,
     entries: EntriesRun | None = None,
     setup1: bool | None = None,
+    crt: CrtRun | None = None,
 ) -> dict:
     node = shutil.which("node")
     if node is None:
@@ -335,6 +339,7 @@ def _draw(
                 cascade=cascade,
                 entries=entries,
                 setup1=setup1,
+                crt=crt,
             ),
             default=str,
         ),
@@ -2894,6 +2899,13 @@ def _niveles(step: dict) -> dict[str, float]:
     }
 
 
+def _rr(medido: float) -> str:
+    """El R:R medido, escrito como lo escribe el explorador: hasta dos decimales,
+    sin ceros de relleno y con coma."""
+    texto = f"{medido:.2f}".rstrip("0").rstrip(".")
+    return "1:" + texto.replace(".", ",")
+
+
 def test_el_boton_arma_y_lo_dice_antes_de_plantar_nada(
     run: ImpulseRun, tmp_path: Path
 ) -> None:
@@ -2933,7 +2945,7 @@ def test_la_caja_dice_los_pips_de_cada_lado_y_el_ratio(
     # 2 % son 1,00 $ de riesgo—, que es la razón de dibujarla.
     assert caja["sim-objetivo"]["label"] == "objetivo 300 pips · +2,00 $"
     assert caja["sim-riesgo"]["label"] == "riesgo 150 pips · -1,00 $"
-    assert caja["sim-entrada"]["label"] == "LARGO · R:R 1:2,0"
+    assert caja["sim-entrada"]["label"] == "LARGO · R:R 1:2"
 
 
 def test_las_notas_dicen_que_la_caja_no_es_una_operacion(
@@ -2945,16 +2957,17 @@ def test_las_notas_dicen_que_la_caja_no_es_una_operacion(
     assert "entrada 1.2000" in notas
     assert "stop 1.1850 (150 pips)" in notas
     assert "objetivo 1.2300 (300 pips)" in notas
-    assert "R:R 1:2,0" in notas
+    assert "R:R 1:2 (automático: es la distancia que hay dibujada" in notas
     assert "ES DIBUJO A MANO" in notas
     assert "no hay orden" in notas
 
 
-def test_arrastrar_el_stop_no_mueve_la_entrada_y_respeta_el_ratio(
+def test_arrastrar_el_stop_no_mueve_ni_la_entrada_ni_el_objetivo(
     run: ImpulseRun, tmp_path: Path
 ) -> None:
-    """Con un R:R fijo, el stop es lo que se decide y el objetivo su
-    consecuencia: se va con él y el ratio no se mueve."""
+    """El stop es una decisión sola: mueve el riesgo y deja el objetivo donde
+    está. El R:R no se defiende, se vuelve a medir, y por eso alejar el stop lo
+    baja: es lo que ha pasado en el dibujo."""
     resultado = _draw(run, tmp_path)
     paso = _step(resultado, "sim-stop-arrastrado")
     antes = _niveles(_step(resultado, "sim-largo"))
@@ -2962,12 +2975,15 @@ def test_arrastrar_el_stop_no_mueve_la_entrada_y_respeta_el_ratio(
 
     assert despues["entrada"] == antes["entrada"]
     assert despues["stop"] < antes["stop"], "el arrastre iba hacia abajo: más riesgo"
-    assert despues["objetivo"] > antes["objetivo"], "el objetivo sigue al stop"
+    assert despues["objetivo"] == antes["objetivo"], "el objetivo no lo mueve el stop"
     # El dinero en juego no lo mueve el stop: el riesgo es del capital y lo que
     # cambia con los pips es el tamaño de la posición, no lo que se arriesga.
     assert _caja(paso)["sim-riesgo"]["label"] == "riesgo 332 pips · -1,00 $"
-    assert _caja(paso)["sim-entrada"]["label"] == "LARGO · R:R 1:2,0"
-    assert paso["simRatio"] == "2"
+    medido = (despues["objetivo"] - despues["entrada"]) / (
+        despues["entrada"] - despues["stop"]
+    )
+    assert medido < 1, "con más riesgo y el mismo objetivo el R:R baja"
+    assert _caja(paso)["sim-entrada"]["label"] == "LARGO · R:R " + _rr(medido)
 
 
 def test_arrastrar_la_entrada_mueve_la_caja_entera(
@@ -3022,69 +3038,90 @@ def test_la_caja_simulada_no_cuenta_como_capa_del_motor(
     )
 
 
-def test_el_ratio_recoloca_el_objetivo_sin_tocar_el_stop(
+def test_arrastrar_el_objetivo_vuelve_a_medir_el_rr(
     run: ImpulseRun, tmp_path: Path
 ) -> None:
+    """Manda la distancia que se ve: mover el objetivo cambia el R:R y no toca
+    ni la entrada ni el stop."""
     resultado = _draw(run, tmp_path)
     antes = _niveles(_step(resultado, "sim-entrada-arrastrada"))
-    paso = _step(resultado, "sim-ratio-1-3")
-    despues = _niveles(paso)
-
-    assert paso["simRatio"] == "3"
-    assert (despues["stop"], despues["entrada"]) == (antes["stop"], antes["entrada"])
-    riesgo = despues["entrada"] - despues["stop"]
-    assert despues["objetivo"] - despues["entrada"] == pytest.approx(3 * riesgo, abs=1e-4)
-    assert _caja(paso)["sim-entrada"]["label"] == "LARGO · R:R 1:3,0"
-
-
-def test_con_el_ratio_puesto_el_stop_arrastra_al_objetivo(
-    run: ImpulseRun, tmp_path: Path
-) -> None:
-    resultado = _draw(run, tmp_path)
-    antes = _niveles(_step(resultado, "sim-ratio-1-3"))
-    paso = _step(resultado, "sim-stop-con-candado")
-    despues = _niveles(paso)
-
-    assert despues["stop"] > antes["stop"], "el arrastre iba hacia arriba: menos riesgo"
-    assert despues["objetivo"] < antes["objetivo"], "el objetivo se acerca con él"
-    riesgo = despues["entrada"] - despues["stop"]
-    assert despues["objetivo"] - despues["entrada"] == pytest.approx(3 * riesgo, abs=1e-4)
-    assert paso["simRatio"] == "3"
-
-
-def test_arrastrar_el_objetivo_suelta_el_candado(run: ImpulseRun, tmp_path: Path) -> None:
-    """Manda lo que se ve: si el objetivo se mueve a mano, ningún botón puede
-    seguir diciendo que el ratio es suyo."""
-    resultado = _draw(run, tmp_path)
-    antes = _niveles(_step(resultado, "sim-stop-con-candado"))
     paso = _step(resultado, "sim-objetivo-a-mano")
     despues = _niveles(paso)
 
-    assert paso["simRatio"] is None
     assert (despues["stop"], despues["entrada"]) == (antes["stop"], antes["entrada"])
-    assert despues["objetivo"] < antes["objetivo"]
-    assert "a mano" in paso["notes"]
+    assert despues["objetivo"] < antes["objetivo"], "el arrastre acercaba el objetivo"
+    medido = (despues["objetivo"] - despues["entrada"]) / (
+        despues["entrada"] - despues["stop"]
+    )
+    assert _caja(paso)["sim-entrada"]["label"] == "LARGO · R:R " + _rr(medido)
+    assert "automático" in paso["notes"]
 
 
-def test_fijar_un_ratio_sin_caja_no_rompe_nada(run: ImpulseRun, tmp_path: Path) -> None:
-    """Elegir el R:R antes de plantar es el gesto natural: el botón se queda
-    pulsado y la caja siguiente nace con él."""
-    paso = _step(_draw(run, tmp_path), "ratio-sin-caja")
-
-    assert paso["simRatio"] == "2"
-    assert not paso["plot"]["sim"]
-
-
-def test_la_caja_nueva_se_planta_con_el_ratio_puesto(
+def test_el_panel_mide_el_rr_de_la_caja_dibujada(
     run: ImpulseRun, tmp_path: Path
 ) -> None:
+    """El R:R no se pone: sale de la distancia del stop al objetivo. Recién
+    plantada da el 1:2 con el que nace la caja; con el objetivo colocado a ojo,
+    lo que haya, aunque no sea un número redondo."""
+    resultado = _draw(run, tmp_path)
+    plantada = _step(resultado, "sim-largo")
+    a_mano = _step(resultado, "sim-objetivo-a-mano")
+    niveles = _niveles(a_mano)
+    medido = (niveles["objetivo"] - niveles["entrada"]) / (
+        niveles["entrada"] - niveles["stop"]
+    )
+
+    assert plantada["simReadout"] == "R:R 1:2 · automático"
+    assert plantada["simReadoutSource"] == "auto"
+    assert "150 pips de riesgo contra 300 pips de objetivo" in plantada[
+        "simReadoutTitle"
+    ]
+    assert "No hay ratio que poner a mano" in plantada["simReadoutTitle"]
+
+    assert a_mano["simReadoutSource"] == "auto"
+    texto, fuente = a_mano["simReadout"].split(" · ")
+    assert fuente == "automático"
+    # Un objetivo colocado a ojo no cae en un número redondo: el panel dice la
+    # distancia que hay, con dos decimales y sin ceros de relleno.
+    assert texto == "R:R " + _rr(medido)
+    assert float(texto.replace("R:R 1:", "").replace(",", ".")) == pytest.approx(
+        medido, abs=0.005
+    )
+
+
+def test_el_rr_se_mide_mientras_se_coloca_el_objetivo(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    """El número se mira COLOCANDO: si sólo se pusiera al día al soltar, llegaría
+    tarde a la única decisión que hay que tomar."""
+    resultado = _draw(run, tmp_path)
+    antes = _step(resultado, "sim-objetivo-a-mano")
+    paso = _step(resultado, "sim-objetivo-en-vuelo")
+
+    assert paso["simReadoutEnVuelo"] == paso["simReadout"]
+    assert paso["simReadoutEnVuelo"] != antes["simReadout"]
+
+
+def test_sin_caja_el_panel_no_dice_ningun_rr(run: ImpulseRun, tmp_path: Path) -> None:
+    quitado = _step(_draw(run, tmp_path), "sim-quitado")
+
+    assert quitado["simReadout"] == "R:R —"
+    assert quitado["simReadoutSource"] == ""
+
+
+def test_la_caja_nace_con_el_objetivo_a_dos_riesgos(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    """No es un R:R elegido: es de dónde parte el arrastre, porque la caja tiene
+    que salir con algo dibujado. Vale igual para la de después: cada caja nueva
+    nace ahí, se haya arrastrado lo que se haya arrastrado en la anterior."""
     corto = _step(_draw(run, tmp_path), "sim-corto")
     niveles = _niveles(corto)
 
-    assert corto["simRatio"] == "4"
     riesgo = niveles["stop"] - niveles["entrada"]
-    assert niveles["entrada"] - niveles["objetivo"] == pytest.approx(4 * riesgo, abs=1e-4)
-    assert _caja(corto)["sim-entrada"]["label"] == "CORTO · R:R 1:4,0"
+    assert niveles["entrada"] - niveles["objetivo"] == pytest.approx(2 * riesgo, abs=1e-4)
+    assert _caja(corto)["sim-entrada"]["label"] == "CORTO · R:R 1:2"
+    assert corto["simReadout"] == "R:R 1:2 · automático"
 
 
 # --- I.2 · la cuenta simulada -------------------------------------------------
@@ -3514,6 +3551,189 @@ def test_sin_recuadros_los_botones_de_quitar_estan_apagados(
 
     assert vacio["rectUndoDisabled"] and vacio["rectClearDisabled"]
     assert vacio["rectArmed"] is None
+
+
+# --- I.4 · las líneas a mano ---------------------------------------------------
+#
+# Tres LÍNEAS —Diario, H4 y H1— que traza el PROPIETARIO para señalar el nivel
+# que quiere explicar y de qué temporalidad es. No las ha calculado nadie: detrás
+# no hay ninguna regla, y el color no es el que el motor usa por temporalidad. Lo
+# que se comprueba aquí es que nacen horizontales donde se pulsa, que se inclinan
+# y se mueven como se dice, que se distinguen de los recuadros y de todo lo que
+# dibuja el motor, y que el estado deja claro de quién son.
+
+
+def _lineas(step: dict) -> list[dict]:
+    return step["plot"]["line"]
+
+
+def _pendiente(linea: dict) -> float:
+    return linea["y1"] - linea["y0"]
+
+
+def test_el_boton_de_la_linea_arma_y_lo_dice_antes_de_trazar_nada(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    armada = _step(_draw(run, tmp_path), "linea-armada")
+
+    assert armada["lineArmed"] == DAILY
+    assert not _lineas(armada), "armar no puede trazar todavía ninguna línea"
+    assert "LÍNEA DE DIARIO ARMADA" in armada["notes"]
+    assert armada["simCursor"] == "crosshair"
+
+
+def test_escape_desarma_la_linea_sin_trazarla(run: ImpulseRun, tmp_path: Path) -> None:
+    desarmada = _step(_draw(run, tmp_path), "linea-desarmada")
+
+    assert desarmada["lineArmed"] is None
+    assert not _lineas(desarmada)
+    assert "ARMADA" not in desarmada["notes"]
+
+
+def test_la_linea_nace_horizontal_al_precio_del_clic(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    """El recorrido pulsa en el centro del encuadre que él mismo ha fijado
+    (1,05 → 1,35), así que la línea tiene que salir plana en 1,2000."""
+    lineas = _lineas(_step(_draw(run, tmp_path), "linea-plantada"))
+
+    assert len(lineas) == 1
+    linea = lineas[0]
+    assert linea["type"] == "line"
+    assert linea["y0"] == pytest.approx(1.2000, abs=1e-3)
+    assert linea["y1"] == linea["y0"], "nace horizontal"
+    assert linea["x1"] > linea["x0"], "y con tramo"
+    assert linea["label"] == "línea de Diario 1 (a mano)"
+
+
+def test_la_linea_se_distingue_del_recuadro_y_de_lo_que_dibuja_el_motor(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    """Continua y con un tono de la mano: lo punteado es recuadro y ninguna capa
+    calculada usa estos colores. La línea del Diario NO va del color con el que
+    el motor dibuja el Diario: se llaman igual, pero una la ha puesto una mano y
+    la otra la ha calculado el motor."""
+    resultado = _draw(run, tmp_path)
+    linea = _lineas(_step(resultado, "linea-plantada"))[0]
+    recuadro = _recuadros(_step(resultado, "rect-plantado"))[0]
+
+    assert _rgb(linea["color"]) == _rgb(HAND_LINES[DAILY])
+    assert _rgb(linea["color"]) != _rgb(TIMEFRAME_COLORS[DAILY])
+    assert linea["dash"] is None, "la línea va continua"
+    assert recuadro["dash"] == "dot", "y el recuadro punteado"
+    del_motor = {_rgb(BULLISH), _rgb(BEARISH)} | {
+        _rgb(colour) for colour in TIMEFRAME_COLORS.values()
+    }
+    a_mano = {_rgb(colour) for colour in HAND_LINES.values()}
+    assert len(a_mano) == 3, "cada línea lleva su color"
+    assert not a_mano & del_motor
+
+
+def test_arrastrar_un_extremo_inclina_la_linea(run: ImpulseRun, tmp_path: Path) -> None:
+    resultado = _draw(run, tmp_path)
+    antes = _lineas(_step(resultado, "linea-plantada"))[0]
+    despues = _lineas(_step(resultado, "linea-inclinada"))[0]
+
+    assert despues["y1"] > antes["y1"], "el arrastre subía el extremo derecho"
+    assert despues["y0"] == antes["y0"], "el izquierdo se queda donde estaba"
+    assert despues["x0"] == antes["x0"]
+
+
+def test_arrastrar_el_trazo_mueve_la_linea_entera(run: ImpulseRun, tmp_path: Path) -> None:
+    resultado = _draw(run, tmp_path)
+    antes = _lineas(_step(resultado, "linea-inclinada"))[0]
+    despues = _lineas(_step(resultado, "linea-movida"))[0]
+
+    assert despues["y0"] < antes["y0"] and despues["y1"] < antes["y1"], "bajó entera"
+    assert _pendiente(despues) == pytest.approx(_pendiente(antes), abs=1e-3), (
+        "moverla no puede cambiar cómo está inclinada"
+    )
+    assert despues["x0"] > antes["x0"] and despues["x1"] > antes["x1"], "y se fue a la derecha"
+
+
+def test_se_trazan_lineas_de_colores_distintos(run: ImpulseRun, tmp_path: Path) -> None:
+    """Marcar el nivel del Diario y el de H4 a la vez es justo para lo que están:
+    cada una con su temporalidad y su color."""
+    segunda = _step(_draw(run, tmp_path), "linea-segunda")
+    lineas = _lineas(segunda)
+
+    assert [linea["label"] for linea in lineas] == [
+        "línea de Diario 1 (a mano)",
+        "línea de H4 1 (a mano)",
+    ]
+    assert _rgb(lineas[0]["color"]) == _rgb(HAND_LINES[DAILY])
+    assert _rgb(lineas[1]["color"]) == _rgb(HAND_LINES[H4])
+    assert lineas[1]["y0"] > lineas[0]["y0"], "la segunda se trazó más arriba"
+    assert "líneas marcadas a mano: 2 (1 Diario · 1 H4)" in segunda["notes"]
+
+
+def test_las_lineas_se_numeran_por_temporalidad(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    """La segunda del Diario es «Diario 2» aunque entre las dos se haya trazado
+    una de H4: lo que se cuenta al mirarlas es cuántas hay de cada una."""
+    tercera = _step(_draw(run, tmp_path), "linea-tercera")
+
+    assert [linea["label"] for linea in _lineas(tercera)] == [
+        "línea de Diario 1 (a mano)",
+        "línea de H4 1 (a mano)",
+        "línea de Diario 2 (a mano)",
+    ]
+    assert "líneas marcadas a mano: 3 (2 Diario · 1 H4)" in tercera["notes"]
+
+
+def test_quitar_la_ultima_linea_deja_las_demas(run: ImpulseRun, tmp_path: Path) -> None:
+    resultado = _draw(run, tmp_path)
+    deshecha = _step(resultado, "linea-deshecha")
+
+    assert [linea["label"] for linea in _lineas(deshecha)] == [
+        "línea de Diario 1 (a mano)",
+        "línea de H4 1 (a mano)",
+    ]
+    assert not deshecha["lineUndoDisabled"], "todavía quedan que quitar"
+
+
+def test_quitar_todas_borra_las_lineas_y_lo_que_decian(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    limpia = _step(_draw(run, tmp_path), "linea-limpia")
+
+    assert not _lineas(limpia)
+    assert limpia["lineUndoDisabled"] and limpia["lineClearDisabled"], (
+        "sin líneas no hay nada que quitar"
+    )
+    assert "líneas marcadas a mano" not in limpia["notes"]
+
+
+def test_las_notas_dicen_que_la_linea_no_la_ha_dibujado_el_motor(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    notas = _step(_draw(run, tmp_path), "linea-plantada")["notes"]
+
+    assert "líneas marcadas a mano: 1 (1 Diario)" in notas
+    assert "NO las ha dibujado el motor" in notas
+    assert "no hay ninguna regla detrás" in notas
+
+
+def test_las_lineas_no_cuentan_como_capa_del_motor(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    """Los trazos a mano no son capa calculada: los recuentos de formas del motor
+    tienen que seguir diciendo lo mismo con ellos puestos."""
+    resultado = _draw(run, tmp_path)
+
+    assert _step(resultado, "linea-tercera")["plot"]["shapes"] == (
+        _step(resultado, "linea-limpia")["plot"]["shapes"]
+    )
+
+
+def test_sin_lineas_los_botones_de_quitar_estan_apagados(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    vacio = _step(_draw(run, tmp_path), "linea-sin-nada")
+
+    assert vacio["lineUndoDisabled"] and vacio["lineClearDisabled"]
+    assert vacio["lineArmed"] is None
 
 
 # --- Fase 3.1 · las entradas -------------------------------------------------
@@ -4039,3 +4259,284 @@ def test_sin_setup_declarado_el_dibujo_no_menciona_ninguno(
 ) -> None:
     notas = _step(_draw(run, tmp_path), "todo")["notes"]
     assert "SETUP 1" not in notas
+
+
+# --- Setup 2 · el Diario se lee con CRT --------------------------------------
+#
+# En el Diario ya no se lee el ID: ni su línea, ni su marco, ni sus zonas UL, PUL
+# y APUL. Lo que se dibuja ahí es la lectura CRT —un RANGO o un OBJETIVO—, y sólo
+# la vigente y la anterior. Estos tests comprueban las dos mitades del rango, la
+# línea del objetivo, que el ID desaparece de ese gráfico y que el estado lo dice.
+
+
+def _dated(
+    stamps: pd.DatetimeIndex,
+    reading: CrtReading,
+) -> DatedReading:
+    return DatedReading(
+        reading=reading,
+        timestamp=stamps[reading.index].to_pydatetime(),
+        ts_source=stamps[reading.index_source].to_pydatetime(),
+        ts_end=(
+            None
+            if reading.index_end is None
+            else stamps[reading.index_end].to_pydatetime()
+        ),
+    )
+
+
+@pytest.fixture
+def crt(run: ImpulseRun) -> CrtRun:
+    """La lectura del motor sobre las velas diarias de la fixture."""
+    return read_daily_crt(run)
+
+
+@pytest.fixture
+def hand_crt(run: ImpulseRun) -> CrtRun:
+    """Tres lecturas escritas a mano sobre las últimas velas del Diario.
+
+    A mano y no las del motor porque hacen falta las dos clases a la vez y en un
+    orden concreto: la más vieja no se puede dibujar, la anterior es un objetivo
+    y la vigente un rango sin cerrar.
+    """
+    bars = run.chart_bars[DAILY]
+    stamps = pd.DatetimeIndex(bars.index)
+    high = bars["high"].to_numpy(dtype=float)
+    low = bars["low"].to_numpy(dtype=float)
+    last = len(stamps) - 1
+    vieja = CrtReading(
+        kind=CrtReadingKind.RANGO,
+        direction=ImpulseDirection.ALCISTA,
+        index=last - 8,
+        index_source=last - 9,
+        low=float(low[last - 9]),
+        high=float(high[last - 9]),
+        index_end=last - 7,
+        end=CrtRangeEnd.COMPLETADO,
+    )
+    anterior = CrtReading(
+        kind=CrtReadingKind.OBJETIVO,
+        direction=ImpulseDirection.ALCISTA,
+        index=last - 5,
+        index_source=last - 5,
+        low=float(high[last - 5]),
+        high=float(high[last - 5]),
+        index_end=last - 2,
+    )
+    vigente = CrtReading(
+        kind=CrtReadingKind.RANGO,
+        direction=ImpulseDirection.ALCISTA,
+        index=last - 2,
+        index_source=last - 3,
+        low=float(low[last - 3]),
+        high=float(high[last - 3]),
+    )
+    return CrtRun(
+        enabled=True,
+        timeframe=DAILY,
+        items=tuple(_dated(stamps, item) for item in (vieja, anterior, vigente)),
+    )
+
+
+def _crt_traces(step: dict) -> dict[str, dict]:
+    return {
+        trace["name"]: trace
+        for trace in step["plot"]["traces"]
+        if trace["name"].startswith("Rango del Diario")
+        or trace["name"].startswith("Objetivo del Diario")
+        or trace["name"].startswith("Antes de leerse")
+    }
+
+
+def test_sin_lectura_crt_el_payload_no_la_declara(run: ImpulseRun) -> None:
+    """Las fases anteriores no leen el Diario así: su explorador no la menciona."""
+    assert build_payload(run)["crt"] is None
+
+
+def test_la_lectura_del_diario_viaja_con_todo_lo_que_se_dibuja(
+    run: ImpulseRun, crt: CrtRun
+) -> None:
+    payload = build_payload(run, crt=crt)
+
+    assert payload["crt"]["tf"] == DAILY
+    items = payload["crt"]["items"]
+    assert items and len(items) == len(crt.items)
+    for item in items:
+        assert item["k"] in {"RANGO", "OBJETIVO"}
+        assert item["d"] in {"alcista", "bajista"}
+        # Las tres marcas de tiempo: la vela de la que salen los precios, la que
+        # produce la lectura y aquella en la que dejó de estar vigente.
+        assert item["xs"] <= item["x0"] <= item["x1"]
+        assert item["lo"] <= item["mid"] <= item["hi"]
+        # El extremo manipulado y el contrario son los dos bordes del rango.
+        assert {item["man"], item["tgt"]} == {item["lo"], item["hi"]}
+
+
+def test_el_rango_sale_de_la_vela_manipulada_y_el_objetivo_de_la_que_rompio(
+    run: ImpulseRun, crt: CrtRun
+) -> None:
+    """El rango es la vela ANTERIOR; el objetivo, el extremo de la vela misma."""
+    items = build_payload(run, crt=crt)["crt"]["items"]
+    rangos = [item for item in items if item["k"] == "RANGO"]
+    objetivos = [item for item in items if item["k"] == "OBJETIVO"]
+
+    assert rangos, "la fixture tiene que producir algún rango"
+    for item in rangos:
+        assert item["xs"] < item["x0"], "la vela manipulada es anterior a la lectura"
+        assert item["lo"] < item["hi"]
+    for item in objetivos:
+        # Es una línea: los dos bordes son el mismo precio, y sale de su propia vela.
+        assert item["xs"] == item["x0"]
+        assert item["lo"] == item["hi"] == item["tgt"]
+
+
+def test_un_rango_vigente_llega_hasta_la_ultima_vela_y_lo_dice(
+    run: ImpulseRun, hand_crt: CrtRun
+) -> None:
+    payload = build_payload(run, crt=hand_crt)
+    vigente = payload["crt"]["items"][-1]
+    ultima = payload["bars"][DAILY]["t"][-1]
+
+    assert vigente["v"] is True
+    assert vigente["end"] is None
+    assert vigente["x1"] == ultima
+    assert payload["crt"]["items"][0]["end"] == "COMPLETADO"
+
+
+def test_en_el_diario_no_se_dibuja_ni_el_id_ni_sus_zonas(
+    run: ImpulseRun, zones: ZonesRun, hand_crt: CrtRun, tmp_path: Path
+) -> None:
+    """Con la lectura CRT puesta, en ese gráfico el ID entero desaparece."""
+    resultado = _draw(run, tmp_path, zones=zones, crt=hand_crt)
+    nombres = _trace_names(_step(resultado, "crt-diario"))
+
+    assert nombres, "las velas se siguen dibujando"
+    assert not [nombre for nombre in nombres if nombre.startswith("ID ")]
+    assert not [nombre for nombre in nombres if nombre.startswith("Zona ")]
+    assert not [nombre for nombre in nombres if nombre.startswith("Marco ")]
+    assert not [nombre for nombre in nombres if nombre.startswith("Constitución")]
+    # Y su casilla tampoco se ofrece: no hay ID que encender.
+    assert _step(resultado, "crt-diario")["layerLabels"] == []
+
+
+def test_el_rango_va_partido_en_mitad_alta_verde_y_mitad_baja_roja(
+    run: ImpulseRun, hand_crt: CrtRun, tmp_path: Path
+) -> None:
+    paso = _step(_draw(run, tmp_path, crt=hand_crt), "crt-diario")
+    trazas = _crt_traces(paso)
+    alta = trazas["Rango del Diario · mitad alta"]
+    baja = trazas["Rango del Diario · mitad baja"]
+    vigente = hand_crt.items[-1].reading
+
+    assert (alta["color"], baja["color"]) == (BULLISH, BEARISH)
+    assert alta["fill"] == "toself" and baja["fill"] == "toself"
+    assert alta["fillcolor"].startswith("rgba(") and baja["fillcolor"].startswith("rgba(")
+    # La mitad alta va del 50 % al alto y la baja del bajo al 50 %.
+    alturas = {round(point[1], 4) for point in alta["segments"] if point[1] is not None}
+    assert alturas == {round(vigente.mid, 4), round(vigente.high, 4)}
+    bajuras = {round(point[1], 4) for point in baja["segments"] if point[1] is not None}
+    assert bajuras == {round(vigente.low, 4), round(vigente.mid, 4)}
+
+
+def test_el_objetivo_es_una_linea_en_el_extremo_de_la_vela_que_rompio(
+    run: ImpulseRun, hand_crt: CrtRun, tmp_path: Path
+) -> None:
+    paso = _step(_draw(run, tmp_path, crt=hand_crt), "crt-diario")
+    objetivo = _crt_traces(paso)["Objetivo del Diario"]
+    esperado = hand_crt.items[1].reading.target
+
+    assert objetivo["fill"] is None
+    assert {round(point[1], 4) for point in objetivo["segments"] if point[1] is not None} == {
+        round(esperado, 4)
+    }
+
+
+def test_solo_se_dibujan_la_lectura_vigente_y_la_anterior(
+    run: ImpulseRun, hand_crt: CrtRun, tmp_path: Path
+) -> None:
+    """La tercera lectura, la más vieja, no se dibuja: es un rango como el vigente.
+
+    Cada caja son cinco puntos y un nulo, así que con la vieja dentro la mitad
+    alta llevaría doce.
+    """
+    trazas = _crt_traces(_step(_draw(run, tmp_path, crt=hand_crt), "crt-diario"))
+
+    assert trazas["Rango del Diario · mitad alta"]["points"] == 6
+    assert trazas["Rango del Diario · mitad baja"]["points"] == 6
+
+
+def test_el_tramo_anterior_a_la_lectura_va_sin_relleno(
+    run: ImpulseRun, hand_crt: CrtRun, tmp_path: Path
+) -> None:
+    """De la vela manipulada a la que manipula el rango todavía no se había leído."""
+    trazas = _crt_traces(_step(_draw(run, tmp_path, crt=hand_crt), "crt-diario"))
+    antes = trazas["Antes de leerse · rango del Diario"]
+
+    assert antes["fill"] == "none"
+    assert antes["dash"] == "dot"
+
+
+def test_la_capa_del_rango_se_apaga(
+    run: ImpulseRun, hand_crt: CrtRun, tmp_path: Path
+) -> None:
+    resultado = _draw(run, tmp_path, crt=hand_crt)
+
+    assert _crt_traces(_step(resultado, "crt-diario"))
+    assert not _crt_traces(_step(resultado, "crt-apagado"))
+    assert _step(resultado, "crt-apagado")["boxes"]["layer-crt"] is False
+
+
+def test_la_lectura_del_diario_solo_se_dibuja_en_el_diario(
+    run: ImpulseRun, hand_crt: CrtRun, tmp_path: Path
+) -> None:
+    """En H4 manda el ID: ahí no se pinta ni una caja del Diario."""
+    paso = _step(_draw(run, tmp_path, crt=hand_crt), "crt-en-h4")
+
+    assert not _crt_traces(paso)
+    assert [nombre for nombre in _trace_names(paso) if nombre.startswith("ID H4")]
+    assert "sólo se dibuja en su gráfico" in paso["notes"]
+
+
+def test_el_estado_dice_que_el_diario_se_lee_con_crt(
+    run: ImpulseRun, hand_crt: CrtRun, tmp_path: Path
+) -> None:
+    """Un gráfico sin ID no puede quedarse callado: se leería como un fallo."""
+    notas = _step(_draw(run, tmp_path, crt=hand_crt), "crt-diario")["notes"]
+
+    assert "SE LEE CON CRT" in notas
+    assert "no se dibuja el ID" in notas
+    assert "lecturas dibujadas: 2" in notas
+    assert "la vigente y la anterior" in notas
+    assert "un RANGO alcista" in notas
+    assert "mitad alta del rango va en VERDE y la baja en ROJO" in notas
+    assert "ES DIBUJO" in notas
+
+
+def test_la_auditoria_ciega_tampoco_ensena_la_lectura_del_diario(
+    run: ImpulseRun, hand_crt: CrtRun, tmp_path: Path
+) -> None:
+    ciega = _step(_draw(run, tmp_path, crt=hand_crt), "ciega")
+
+    assert len(ciega["plot"]["traces"]) == 1, "no puede quedar ninguna capa del motor"
+    assert not _crt_traces(ciega)
+
+
+def test_el_replay_no_adelanta_la_lectura_del_diario(
+    run: ImpulseRun, crt: CrtRun, tmp_path: Path
+) -> None:
+    """Una lectura no existe hasta que cierra la vela que la produce.
+
+    Es el mismo filtro que el de las demás capas, medido igual: ningún punto de
+    la lectura puede caer más allá del reloj del replay.
+    """
+    resultado = _draw(run, tmp_path, crt=crt)
+    payload = build_payload(run, lateralization=measure(run), crt=crt)
+    pasos = [
+        paso
+        for paso in _replay_steps(resultado)
+        if paso["chart"] == DAILY and paso["plot"]["maxEngineX"] is not None
+    ]
+    assert pasos, "el recorrido tiene que pasar por el Diario durante el replay"
+
+    for paso in pasos:
+        assert _minute(paso["plot"]["maxEngineX"]) <= _clock(payload, paso), paso["label"]

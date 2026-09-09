@@ -64,10 +64,12 @@ function declare(id) {
  'signal-layers', 'layer-signals',
  'cascade-layers', 'layer-cascade',
  'entry-layers', 'layer-entries', 'layer-regime',
+ 'crt-layers', 'layer-crt',
  'break-layers', 'avoided-layer', 'layer-avoided', 'steps-layer', 'layer-steps',
  'blind-seed', 'blind-start', 'blind-reveal', 'blind-exit',
- 'sim-group', 'sim-buttons', 'sim-ratio', 'sim-clear',
+ 'sim-group', 'sim-buttons', 'sim-rr', 'sim-clear',
  'rect-group', 'rect-buttons', 'rect-undo', 'rect-clear',
+ 'line-group', 'line-buttons', 'line-undo', 'line-clear',
  'account-group', 'account-initial', 'account-mode', 'account-risk',
  'account-buttons', 'account-undo', 'account-reset', 'account-copy', 'account-summary',
  'replay-group', 'replay-date', 'replay-start', 'replay-back', 'replay-step',
@@ -116,8 +118,8 @@ global.document = {
     if (selector === '#mode-buttons button') { return elements['mode-buttons'].children; }
     if (selector === '#noise-buttons button') { return elements['noise-buttons'].children; }
     if (selector === '#sim-buttons button') { return elements['sim-buttons'].children; }
-    if (selector === '#sim-ratio button') { return elements['sim-ratio'].children; }
     if (selector === '#rect-buttons button') { return elements['rect-buttons'].children; }
+    if (selector === '#line-buttons button') { return elements['line-buttons'].children; }
   if (selector === '#account-buttons button') { return elements['account-buttons'].children; }
     if (selector === '#view-buttons button') { return viewButtons; }
     missing.push(selector);
@@ -153,8 +155,14 @@ function rectShape(shape) {
   return String(shape.name || '').indexOf('rect-') === 0;
 }
 
+// I.4 — las líneas de magenta, cian y oliva las traza el propietario a mano:
+// tampoco son capa del motor.
+function lineShape(shape) {
+  return String(shape.name || '').indexOf('line-') === 0;
+}
+
 function handDrawn(shape) {
-  return simShape(shape) || rectShape(shape);
+  return simShape(shape) || rectShape(shape) || lineShape(shape);
 }
 
 function furthest(traces, layout) {
@@ -237,6 +245,18 @@ global.Plotly = {
           label: (shape.label && shape.label.text) || null,
         };
       }),
+      // I.4 — las líneas trazadas a mano, con el color y el trazo que las
+      // separan de los recuadros y de todo lo que dibuja el motor.
+      line: (layout.shapes || []).filter(lineShape).map(function (shape) {
+        return {
+          name: shape.name, type: shape.type,
+          x0: shape.x0, x1: shape.x1, y0: shape.y0, y1: shape.y1,
+          color: (shape.line && shape.line.color) || null,
+          dash: (shape.line && shape.line.dash) || null,
+          width: (shape.line && shape.line.width) || null,
+          label: (shape.label && shape.label.text) || null,
+        };
+      }),
       yTickFormat: layout.yaxis && layout.yaxis.tickformat,
       xRange: (layout.xaxis && layout.xaxis.range) || null,
       yRange: (layout.yaxis && layout.yaxis.range) || null,
@@ -266,9 +286,10 @@ function snapshot(label) {
       return button.getAttribute('aria-pressed') === 'true';
     })[0] || {}).dataset?.side || null,
     simClearDisabled: elements['sim-clear'].disabled === true,
-    simRatio: (elements['sim-ratio'].children.filter(function (button) {
-      return button.getAttribute('aria-pressed') === 'true';
-    })[0] || {}).dataset?.ratio || null,
+    // El R:R que el panel dice que hay dibujado: siempre medido de la caja.
+    simReadout: elements['sim-rr'].textContent,
+    simReadoutSource: elements['sim-rr'].dataset.source || '',
+    simReadoutTitle: elements['sim-rr'].title,
     simCursor: elements['chart'].style.cursor || '',
     // I.3 — los recuadros a mano: qué botón espera el clic y si hay algo que quitar.
     rectArmed: (elements['rect-buttons'].children.filter(function (button) {
@@ -276,6 +297,12 @@ function snapshot(label) {
     })[0] || {}).dataset?.kind || null,
     rectUndoDisabled: elements['rect-undo'].disabled === true,
     rectClearDisabled: elements['rect-clear'].disabled === true,
+    // I.4 — las líneas a mano: qué botón espera el clic y si hay algo que quitar.
+    lineArmed: (elements['line-buttons'].children.filter(function (button) {
+      return button.getAttribute('aria-pressed') === 'true';
+    })[0] || {}).dataset?.kind || null,
+    lineUndoDisabled: elements['line-undo'].disabled === true,
+    lineClearDisabled: elements['line-clear'].disabled === true,
     // I.2 — la cuenta simulada: lo que dice la barra y lo que deja hacer.
     account: {
       summary: elements['account-summary'].textContent,
@@ -306,7 +333,7 @@ function snapshot(label) {
     boxes: ['layer-limbo', 'layer-marks', 'layer-contacts', 'layer-mid', 'layer-wrong',
       'layer-frame', 'layer-zones', 'layer-signals',
       'layer-cascade', 'layer-entries', 'layer-regime',
-      'layer-avoided', 'layer-steps']
+      'layer-avoided', 'layer-steps', 'layer-crt']
       .reduce(function (state, id) {
         state[id] = elements[id].checked === true;
         return state;
@@ -923,7 +950,8 @@ armar('long');
 clicGrafico(pixelOf(minutoSimulado, entradaSimulada));
 steps.push(snapshot('sim-largo'));
 
-// El borde de fuera de la caja roja mueve el stop y nada más.
+// El borde de fuera de la caja roja mueve el stop y nada más: el objetivo se
+// queda donde estaba y el R:R se vuelve a medir solo.
 const asaStop = asaDeLaCaja('stop');
 arrastrarCaja(asaStop, { x: asaStop.x, y: asaStop.y + 40 });
 steps.push(snapshot('sim-stop-arrastrado'));
@@ -933,29 +961,26 @@ const asaEntrada = asaDeLaCaja('entry');
 arrastrarCaja(asaEntrada, { x: asaEntrada.x, y: asaEntrada.y - 25 });
 steps.push(snapshot('sim-entrada-arrastrada'));
 
-// El R:R fijo: 1:3 recoloca el objetivo sin tocar el stop, y con el candado
-// puesto mover el stop arrastra el objetivo con él.
-const ratios = elements['sim-ratio'].children;
-
-function fijarRatio(value) {
-  ratios.filter(function (button) { return button.dataset.ratio === value; })
-    .forEach(function (button) { button.fire('click'); });
-}
-
-fijarRatio('3');
-steps.push(snapshot('sim-ratio-1-3'));
-
-const asaStopConCandado = asaDeLaCaja('stop');
-arrastrarCaja(asaStopConCandado, { x: asaStopConCandado.x, y: asaStopConCandado.y - 20 });
-steps.push(snapshot('sim-stop-con-candado'));
-
-// Arrastrar el objetivo suelta el candado: manda lo que se ve.
+// Arrastrar el objetivo cambia el R:R: manda la distancia que se ve.
 const asaObjetivo = asaDeLaCaja('target');
 arrastrarCaja(asaObjetivo, { x: asaObjetivo.x, y: asaObjetivo.y + 30 });
 steps.push(snapshot('sim-objetivo-a-mano'));
 
+// El R:R del panel se mide MIENTRAS se coloca el objetivo, no al soltarlo: se
+// suelta el botón del ratón cuando el número ya dice lo que se buscaba.
+const asaEnVuelo = asaDeLaCaja('target');
+elements['chart'].fire('mousedown', {
+  clientX: asaEnVuelo.x, clientY: asaEnVuelo.y,
+  preventDefault() {}, stopPropagation() {},
+});
+fireDocument('mousemove', {
+  clientX: asaEnVuelo.x, clientY: asaEnVuelo.y - 18, preventDefault() {},
+});
+const rrEnVuelo = elements['sim-rr'].textContent;
+fireDocument('mouseup', {});
+steps.push(Object.assign(snapshot('sim-objetivo-en-vuelo'), { simReadoutEnVuelo: rrEnVuelo }));
+
 // En corto el objetivo va por debajo de la entrada y el riesgo por encima.
-fijarRatio('4');
 armar('short');
 clicGrafico(pixelOf(minutoSimulado, entradaSimulada));
 steps.push(snapshot('sim-corto'));
@@ -965,9 +990,10 @@ steps.push(snapshot('sim-quitado'));
 
 
 // I.2 — la cuenta simulada: el capital, el riesgo y los tres botones que apuntan
-// la caja dibujada. El encuadre y el ratio son los mismos que usa el bloque de
-// arriba, así que el R:R de cada caja es 1:2 exacto y las cifras se pueden
-// comprobar a mano: 50 $ al 2 % son 1,00 $ de riesgo y 2,00 $ de objetivo.
+// la caja dibujada. El encuadre es el mismo que usa el bloque de arriba y las
+// cajas se plantan y se cobran sin arrastrar nada, así que su R:R es el 1:2 con
+// el que nacen y las cifras se pueden comprobar a mano: 50 $ al 2 % son 1,00 $
+// de riesgo y 2,00 $ de objetivo.
 const resultados = elements['account-buttons'].children;
 
 function apuntar(result) {
@@ -980,10 +1006,6 @@ function plantarCaja(side) {
   clicGrafico(pixelOf(minutoSimulado, entradaSimulada));
 }
 
-// Fijar un R:R sin caja plantada deja el ratio puesto para la siguiente y no
-// puede romper nada: es el gesto natural antes de dibujar.
-fijarRatio('2');
-steps.push(snapshot('ratio-sin-caja'));
 steps.push(snapshot('cuenta-sin-nada'));
 plantarCaja('long');
 steps.push(snapshot('cuenta-con-caja'));
@@ -1087,6 +1109,95 @@ elements['rect-undo'].fire('click');
 steps.push(snapshot('rect-deshecho'));
 elements['rect-clear'].fire('click');
 steps.push(snapshot('rect-limpio'));
+
+// I.4 — las líneas a mano: tres botones —Diario, H4 y H1— que arman, un clic que
+// planta la suya HORIZONTAL al precio pulsado y arrastres que la mueven y la
+// inclinan. Es dibujo del propietario: no la ha calculado el motor y no cuenta
+// como capa.
+function botonLinea(kind) {
+  return elements['line-buttons'].children.filter(function (button) {
+    return button.dataset.kind === kind;
+  })[0];
+}
+
+function armarLinea(kind) {
+  botonLinea(kind).fire('click');
+}
+
+function lineas() {
+  return (plotCalls[plotCalls.length - 1].line || []).map(function (shape) {
+    return {
+      name: shape.name,
+      left: shape.y0,
+      right: shape.y1,
+      from: minuteOf(shape.x0),
+      to: minuteOf(shape.x1),
+    };
+  });
+}
+
+function asaDeLinea(index, extremo) {
+  const line = lineas()[index];
+  if (extremo === 'left') { return pixelOf(line.from, line.left); }
+  if (extremo === 'right') { return pixelOf(line.to, line.right); }
+  return pixelOf(
+    Math.round((line.from + line.to) / 2),
+    (line.left + line.right) / 2
+  );
+}
+
+steps.push(snapshot('linea-sin-nada'));
+armarLinea('D');
+steps.push(snapshot('linea-armada'));
+// Escape suelta el botón sin plantar nada, igual que en los recuadros.
+pressKey('Escape');
+steps.push(snapshot('linea-desarmada'));
+
+armarLinea('D');
+clicGrafico(pixelOf(minutoSimulado, entradaSimulada));
+steps.push(snapshot('linea-plantada'));
+
+// El extremo derecho la INCLINA: sube ese lado y el izquierdo se queda.
+const asaDerecha = asaDeLinea(0, 'right');
+arrastrarCaja(asaDerecha, { x: asaDerecha.x, y: asaDerecha.y - 30 });
+steps.push(snapshot('linea-inclinada'));
+
+// Por dentro se mueve entera: la inclinación no cambia.
+const asaTrazo = asaDeLinea(0, 'body');
+arrastrarCaja(asaTrazo, { x: asaTrazo.x + 40, y: asaTrazo.y + 30 });
+steps.push(snapshot('linea-movida'));
+
+// Se trazan varias, una por temporalidad: cada una con su nombre y su color.
+const precioAlto = (simY[1] + entradaSimulada) / 2;
+armarLinea('H4');
+clicGrafico(pixelOf(minutoSimulado, precioAlto));
+steps.push(snapshot('linea-segunda'));
+
+// Y se numeran POR TEMPORALIDAD: la segunda del Diario es «Diario 2» aunque
+// entre medias haya una de H4.
+armarLinea('D');
+clicGrafico(pixelOf(minutoSimulado, (simY[1] + precioAlto) / 2));
+steps.push(snapshot('linea-tercera'));
+
+elements['line-undo'].fire('click');
+steps.push(snapshot('linea-deshecha'));
+elements['line-clear'].fire('click');
+steps.push(snapshot('linea-limpia'));
+
+// SETUP 2 — la lectura CRT del Diario. Se mira en SU gráfico y con el histórico
+// entero, que es donde está la lectura vigente; en H4 no se dibuja nada suyo.
+// Sin `crt` en el payload los tres pasos salen iguales, que es lo que comprueba
+// el test de la corrida sin lectura.
+elements['line-clear'].fire('click');
+tabs[0].fire('click');
+presets[0].fire('click');
+steps.push(snapshot('crt-diario'));
+elements['layer-crt'].fire('change', { target: { checked: false } });
+steps.push(snapshot('crt-apagado'));
+elements['layer-crt'].fire('change', { target: { checked: true } });
+tabs[1].fire('click');
+steps.push(snapshot('crt-en-h4'));
+tabs[0].fire('click');
 
 console.log(JSON.stringify({
   unknownElements: missing,

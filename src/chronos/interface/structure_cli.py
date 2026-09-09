@@ -45,6 +45,7 @@ from chronos.application.structure.config import (
     ZonesConfig,
     with_hourly_structure,
 )
+from chronos.application.structure.crt import CrtRun, read_daily_crt
 from chronos.application.structure.detect_impulses import DetectDominantImpulses, ImpulseRun
 from chronos.application.structure.evidence import BASELINE_HASH, PHASE1_BASELINE, collect
 from chronos.application.structure.lateralization import measure
@@ -881,25 +882,33 @@ def setup2_command(
     output: Annotated[Path, typer.Option("--salida", "-o")] = Path("now/setup2"),
     skip_tz_audit: Annotated[bool, typer.Option("--skip-tz-audit")] = False,
 ) -> None:
-    """SETUP 2 — el punto de partida: la ESTRUCTURA y nada más.
+    """SETUP 2 — el DIARIO se lee con CRT y la estructura se queda en H4.
 
-    ID en el **Diario** y en **H4** con sus tres zonas —el UL a favor y el PUL o
-    el APUL en contra—, con la regla del propietario: el UL manda el lado a
-    favor y el ancla el lado en contra.
+    En el **Diario** ya no se lee el ID: ni su línea, ni su marco, ni sus zonas
+    UL, PUL y APUL. En su lugar va la lectura CRT, vela contra vela anterior: si
+    una vela barrió un extremo y cerró dentro hay **RANGO** —la vela manipulada,
+    partida en mitad alta y mitad baja—, y si cerró más allá se marca su propio
+    extremo como **OBJETIVO**, a la espera de que lo manipulen y lo rechacen.
+
+    En **H4** sigue el ID con sus tres zonas —el UL a favor y el PUL o el APUL en
+    contra—, con la regla del propietario: el UL manda el lado a favor y el ancla
+    el lado en contra.
 
     **Ni cascada, ni entradas, ni ID en H1, ni nada en M15**: H1 y M15 se dibujan
     con el ID de H4 encima como contexto y ninguna marca propia. Eso es lo que
-    hay que auditar antes de escribir la primera regla del setup 2, y por eso
-    este comando no depende del interruptor del setup 1: dibuja la estructura
-    esté aquél encendido o apagado.
+    hay que auditar antes de escribir la regla siguiente del setup 2, y por eso
+    este comando no depende del interruptor del setup 1: dibuja lo suyo esté
+    aquél encendido o apagado.
     """
     with _handled():
         corrida = _structure_pipeline(config, skip_tz_audit)
         if corrida is None:
             return
         run_config, run, zones = corrida
+        crt = read_daily_crt(run)
         _print_summary(run)
         _print_zones(zones)
+        _print_crt(crt)
 
         output.mkdir(parents=True, exist_ok=True)
         explorer = output / "explorador_setup2.html"
@@ -910,14 +919,48 @@ def setup2_command(
                 lateralization=measure(run),
                 zones=zones,
                 setup1=run_config.setup1.enabled,
+                crt=crt,
             ),
             encoding="utf-8",
         )
         console.print(f"\nExplorador: [bold]{explorer}[/bold]")
         console.print(
-            "[dim]Sólo estructura: ID de Diario y H4 con UL, PUL y APUL. No hay "
-            "cascada, ni entradas, ni ID de H1, ni nada de M15.[/dim]"
+            "[dim]El DIARIO se lee con CRT: rango u objetivo, sin ID ni UL, PUL "
+            "o APUL. La estructura se queda en H4, y H1 y M15 la llevan de "
+            "contexto. No hay cascada, ni entradas, ni ID de H1.[/dim]"
         )
+
+
+def _print_crt(crt: CrtRun) -> None:
+    """Cuántas lecturas de cada tipo trajo el Diario. Ni porcentajes ni veredictos.
+
+    Lo que se audita se mira en el gráfico; esto sólo dice que la corrida ha
+    producido algo y de qué tipo.
+    """
+    if not crt.enabled:
+        console.print(
+            "[yellow]No hay lectura CRT del Diario: hacen falta al menos dos "
+            "velas diarias.[/yellow]"
+        )
+        return
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Lectura")
+    table.add_column("Cuántas", justify="right")
+    for concept, count in crt.counts().items():
+        table.add_row(concept, f"{count:,}")
+    console.print("\n[bold]Diario · lectura CRT:[/bold]")
+    console.print(table)
+    console.print(
+        "[dim]RANGO: una vela barrió un extremo de la anterior y cerró dentro; "
+        "el rango es la vela MANIPULADA y se mira hacia su extremo contrario. "
+        "OBJETIVO: una vela cerró más allá del extremo de la anterior; el nivel "
+        "es SU propio extremo, a la espera de que lo manipulen y lo rechacen."
+        "[/dim]"
+    )
+    console.print(
+        "[dim]ES DIBUJO: no hay entradas, ni stops, ni objetivos de precio "
+        "detrás. Se audita en el explorador, capa «Rango del Diario».[/dim]"
+    )
 
 
 @structure_app.command("entradas-estadisticas")

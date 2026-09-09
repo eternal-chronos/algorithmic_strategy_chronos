@@ -39,6 +39,7 @@ import plotly.offline as pyo
 from chronos.application.entries.cascade import CascadeMark, CascadeRun
 from chronos.application.entries.trades import EntriesRun, Entry
 from chronos.application.structure.config import DAILY, H1, H4
+from chronos.application.structure.crt import CrtRun, DatedReading
 from chronos.application.structure.detect_impulses import ImpulseRun, TimeframeAnalysis
 from chronos.application.structure.lateralization import (
     LateralizationStudy,
@@ -84,6 +85,28 @@ HAND_RECTS: dict[str, str] = {
     "UL": theme.CYAN,
     "APUL": theme.OLIVE,
 }
+
+#: Las líneas que traza el propietario a mano (I.4) y el color de cada una. Cada
+#: una lleva el nombre de la TEMPORALIDAD que se está marcando con ella —el
+#: nivel que se ve en el Diario, en H4 o en H1—, que es lo que se quiere decir
+#: al señalarla; el color sólo sirve para distinguirlas en el gráfico.
+#:
+#: Los tonos son los mismos tres de la mano que los recuadros —y NO los de
+#: `TIMEFRAME_COLORS`, que son los del motor— justamente para que una línea de
+#: H4 no se pueda confundir con el marco de H4 que dibuja el motor. Lo que
+#: separa una línea de un recuadro es el TRAZO: continuo aquí y punteado allí.
+HAND_LINES: dict[str, str] = {
+    DAILY: theme.MAGENTA,
+    H4: theme.CYAN,
+    H1: theme.OLIVE,
+}
+
+#: SETUP 2 — el nivel que queda marcado cuando el Diario rompe: el extremo de la
+#: vela que rompió, a la espera de que lo manipulen y lo rechacen. Lleva el
+#: violeta que era el del ID del Diario, que en ese gráfico ya no se dibuja: es
+#: el color con el que el propietario lee el Diario y ahora lo lleva su lectura.
+#: Las dos mitades del rango van en verde y rojo, los mismos de las velas.
+CRT_TARGET = theme.VIOLET
 
 DECIMALS = 4
 
@@ -131,11 +154,12 @@ def render_explorer(
     cascade: CascadeRun | None = None,
     entries: EntriesRun | None = None,
     setup1: bool | None = None,
+    crt: CrtRun | None = None,
 ) -> str:
     """Devuelve el HTML completo del explorador."""
     generated_at = generated_at or SystemClock().now()
     payload = build_payload(
-        run, max_bars, lateralization, variants, zones, cascade, entries, setup1
+        run, max_bars, lateralization, variants, zones, cascade, entries, setup1, crt
     )
     # El JSON viaja dentro de un <script>: escapar `</` evita que un texto
     # cualquiera pueda cerrar la etiqueta antes de tiempo.
@@ -166,6 +190,7 @@ def build_payload(
     cascade: CascadeRun | None = None,
     entries: EntriesRun | None = None,
     setup1: bool | None = None,
+    crt: CrtRun | None = None,
 ) -> dict[str, Any]:
     """Serializa la corrida a la estructura que consume el explorador.
 
@@ -235,6 +260,14 @@ def build_payload(
             #: PUL, un UL o un APUL. Ninguna capa del motor usa estos tonos: con
             #: ellos sólo se dibuja lo que ha puesto una mano.
             "rects": dict(HAND_RECTS),
+            #: Las líneas que el propietario traza a mano para señalar lo que
+            #: quiere explicar, una por temporalidad. Mismos tonos de la mano
+            #: que los recuadros —no los del motor—: lo que separa una línea de
+            #: un recuadro es el trazo, continuo aquí y punteado allí.
+            "lines": dict(HAND_LINES),
+            #: SETUP 2: el nivel que deja marcado una rotura del Diario. Las dos
+            #: mitades del rango van con el verde y el rojo de las velas.
+            "crtTarget": CRT_TARGET,
         },
         "charts": list(available),
         "layout": {chart: list(charts.overlays(chart)) for chart in available},
@@ -293,6 +326,11 @@ def build_payload(
         #: Y con qué cuenta se miran. Va aquí y no incrustado en el JavaScript
         #: porque es una decisión de esta fase, no del explorador.
         **({} if entries is None else {"account": dict(ENTRIES_ACCOUNT)}),
+        #: SETUP 2 — la lectura CRT del Diario: o hay RANGO, o hay OBJETIVO, o
+        #: no hay nada. Va aparte de `impulses` porque no es una lectura del ID:
+        #: es la que lo SUSTITUYE en ese gráfico. Con ella en el payload, el
+        #: Diario deja de dibujar el ID y sus zonas UL, PUL y APUL.
+        "crt": _crt(crt, run),
         #: La franja de operativa con la que se calculó la cascada. Sin ella un
         #: gráfico sin marcas de madrugada se leería como que la regla no
         #: encontró nada, cuando lo que pasa es que ahí no se mira.
@@ -558,6 +596,60 @@ def _zone_signals(signals: TimeframeSignals | None) -> list[dict[str, Any]]:
         }
         for item in signals.items
     ]
+
+
+# --- La lectura CRT del Diario (setup 2) -------------------------------------
+
+
+def _crt(crt: CrtRun | None, run: ImpulseRun) -> dict[str, Any] | None:
+    """Capa "Rango del Diario". Puramente visual: no interviene en nada.
+
+    Las dos lecturas viajan en una sola lista y el explorador las separa por `k`:
+    son la respuesta a la misma pregunta hecha vela a vela —¿estamos en rango?,
+    y si no, ¿rompió?— y partirlas en dos arrays sólo repetiría las fechas.
+
+    Cada una lleva TRES marcas de tiempo, como las zonas: `xs` es la vela de la
+    que salen los precios —la manipulada en el rango, la que rompió en el
+    objetivo—, `x0` la vela que produce la lectura, que es cuando empieza a
+    existir, y `x1` la vela en la que dejó de estar vigente. Un rango vigente
+    llega hasta la última vela del gráfico y `v` lo dice: sin eso, un rango que
+    llega al borde derecho se leería como uno que acabó ahí.
+
+    Los cuatro precios van calculados: el 50 % que parte el rango en mitad alta y
+    mitad baja, el extremo manipulado y el contrario. El explorador dibuja, no
+    calcula.
+    """
+    if crt is None or not crt.enabled or crt.empty:
+        return None
+    index = pd.DatetimeIndex(run.chart_bars[crt.timeframe].index)
+    last = pd.Timestamp(index[-1])
+    return {
+        "tf": crt.timeframe,
+        "items": [_crt_record(item, last) for item in crt.items],
+    }
+
+
+def _crt_record(item: DatedReading, last: pd.Timestamp) -> dict[str, Any]:
+    reading = item.reading
+    return {
+        "k": reading.kind.value,
+        "d": reading.direction.value,
+        "x0": _minute(pd.Timestamp(item.timestamp)),
+        "xs": _minute(pd.Timestamp(item.ts_source)),
+        "x1": _minute(pd.Timestamp(item.ts_end) if item.ts_end is not None else last),
+        "v": item.ts_end is None,
+        "lo": round(reading.low, DECIMALS),
+        "hi": round(reading.high, DECIMALS),
+        "mid": round(reading.mid, DECIMALS),
+        #: El extremo BARRIDO —o roto— y el contrario. En el objetivo los dos son
+        #: el mismo precio: es una línea, no un rango.
+        "man": round(reading.manipulated, DECIMALS),
+        "tgt": round(reading.target, DECIMALS),
+        #: Cómo acabó el rango: `COMPLETADO` si el precio llegó al extremo
+        #: contrario, `ROTO` si cerró fuera por el lado manipulado. `None`
+        #: mientras siga vigente y en los objetivos, que no se completan.
+        "end": reading.end.value if reading.end is not None else None,
+    }
 
 
 def _cascade(cascade: CascadeRun | None) -> dict[str, list[dict[str, Any]]]:
