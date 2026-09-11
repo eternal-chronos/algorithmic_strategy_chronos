@@ -60,14 +60,11 @@ function declare(id) {
  'prev', 'next',
  'from', 'to', 'layer-limbo', 'layer-marks', 'layer-contacts', 'layer-mid', 'layer-wrong',
  'layer-frame',
- 'zone-layers', 'layer-zones',
- 'signal-layers', 'layer-signals',
- 'cascade-layers', 'layer-cascade',
- 'entry-layers', 'layer-entries', 'layer-regime',
- 'break-layers', 'avoided-layer', 'layer-avoided', 'steps-layer', 'layer-steps',
  'blind-seed', 'blind-start', 'blind-reveal', 'blind-exit',
- 'sim-group', 'sim-buttons', 'sim-ratio', 'sim-clear',
+ 'sim-group', 'sim-buttons', 'sim-rr', 'sim-clear',
  'rect-group', 'rect-buttons', 'rect-undo', 'rect-clear',
+ 'line-group', 'line-buttons', 'line-undo', 'line-clear',
+ 'fib-group', 'fib-buttons', 'fib-undo', 'fib-clear',
  'account-group', 'account-initial', 'account-mode', 'account-risk',
  'account-buttons', 'account-undo', 'account-reset', 'account-copy', 'account-summary',
  'replay-group', 'replay-date', 'replay-start', 'replay-back', 'replay-step',
@@ -116,8 +113,9 @@ global.document = {
     if (selector === '#mode-buttons button') { return elements['mode-buttons'].children; }
     if (selector === '#noise-buttons button') { return elements['noise-buttons'].children; }
     if (selector === '#sim-buttons button') { return elements['sim-buttons'].children; }
-    if (selector === '#sim-ratio button') { return elements['sim-ratio'].children; }
     if (selector === '#rect-buttons button') { return elements['rect-buttons'].children; }
+    if (selector === '#line-buttons button') { return elements['line-buttons'].children; }
+    if (selector === '#fib-buttons button') { return elements['fib-buttons'].children; }
   if (selector === '#account-buttons button') { return elements['account-buttons'].children; }
     if (selector === '#view-buttons button') { return viewButtons; }
     missing.push(selector);
@@ -147,14 +145,26 @@ function simShape(shape) {
   return String(shape.name || '').indexOf('sim-') === 0;
 }
 
-// I.3 — los recuadros de PUL, UL y APUL los planta el propietario a mano, igual
-// que la caja simulada: tampoco son capa del motor.
+// I.3 — los recuadros los planta el propietario a mano, igual que la caja
+// simulada: tampoco son capa del motor.
 function rectShape(shape) {
   return String(shape.name || '').indexOf('rect-') === 0;
 }
 
+// I.4 — las líneas de magenta, cian y oliva las traza el propietario a mano:
+// tampoco son capa del motor.
+function lineShape(shape) {
+  return String(shape.name || '').indexOf('line-') === 0;
+}
+
+// I.5 — el Fibonacci gris lo mide el propietario a mano: tampoco es capa del
+// motor, ni siquiera el 0 que espera su segundo clic.
+function fibShape(shape) {
+  return String(shape.name || '').indexOf('fib-') === 0;
+}
+
 function handDrawn(shape) {
-  return simShape(shape) || rectShape(shape);
+  return simShape(shape) || rectShape(shape) || lineShape(shape) || fibShape(shape);
 }
 
 function furthest(traces, layout) {
@@ -194,17 +204,14 @@ global.Plotly = {
           // El color del trazo: el marco del ID lo toma de su TEMPORALIDAD y es
           // lo único que dice de quién es cada recuadro cuando hay dos.
           color: (trace.line && trace.line.color) || null,
-          // Fase 2.0: el tramo en que la zona es del ID va relleno y el que va
-          // desde su vela definitoria, sólo con el contorno. Se comprueba aquí.
           fill: trace.fill || null,
           fillcolor: trace.fillcolor || null,
           captions: trace.text && trace.text.length <= 200 ? trace.text.slice() : null,
           xs: trace.mode === 'markers' && (trace.x || []).length <= 200
             ? trace.x.slice()
             : null,
-          // Fase 2.1 (§3.2): la línea del extremo va en ESCALERA, así que «cuántos
-          // puntos tiene» no dice nada. Para comprobar QUÉ nivel se dibuja en CADA
-          // tramo hace falta el trazo entero: cada segmento es (x0, x1, precio).
+          // El trazo entero, para comprobar QUÉ nivel se dibuja en CADA tramo:
+          // cada segmento es (x0, x1, precio).
           segments: trace.mode === 'lines' && (trace.x || []).length <= 3000
             ? (trace.x || []).map(function (x, index) { return [x, trace.y[index]]; })
             : null,
@@ -237,6 +244,41 @@ global.Plotly = {
           label: (shape.label && shape.label.text) || null,
         };
       }),
+      // I.4 — las líneas trazadas a mano, con el color y el trazo que las
+      // separan de los recuadros y de todo lo que dibuja el motor.
+      line: (layout.shapes || []).filter(lineShape).map(function (shape) {
+        return {
+          name: shape.name, type: shape.type,
+          x0: shape.x0, x1: shape.x1, y0: shape.y0, y1: shape.y1,
+          color: (shape.line && shape.line.color) || null,
+          dash: (shape.line && shape.line.dash) || null,
+          width: (shape.line && shape.line.width) || null,
+          label: (shape.label && shape.label.text) || null,
+        };
+      }),
+      // I.5 — el Fibonacci trazado a mano: un trazo por nivel, con el
+      // porcentaje escrito al lado.
+      fib: (layout.shapes || []).filter(fibShape).map(function (shape) {
+        return {
+          name: shape.name, type: shape.type,
+          x0: shape.x0, x1: shape.x1, y0: shape.y0, y1: shape.y1,
+          color: (shape.line && shape.line.color) || null,
+          dash: (shape.line && shape.line.dash) || null,
+          width: (shape.line && shape.line.width) || null,
+          label: (shape.label && shape.label.text) || null,
+        };
+      }),
+      // El RSI vive en su propio panel: el reparto de alto entre precio e índice
+      // es lo que mantiene los tiradores donde se ve la línea.
+      priceDomain: (layout.yaxis && layout.yaxis.domain) || null,
+      rsiAxis: layout.yaxis2
+        ? {
+          domain: layout.yaxis2.domain,
+          ticks: layout.yaxis2.tickvals,
+          title: layout.yaxis2.title && layout.yaxis2.title.text,
+        }
+        : null,
+      xAnchor: (layout.xaxis && layout.xaxis.anchor) || null,
       yTickFormat: layout.yaxis && layout.yaxis.tickformat,
       xRange: (layout.xaxis && layout.xaxis.range) || null,
       yRange: (layout.yaxis && layout.yaxis.range) || null,
@@ -266,9 +308,10 @@ function snapshot(label) {
       return button.getAttribute('aria-pressed') === 'true';
     })[0] || {}).dataset?.side || null,
     simClearDisabled: elements['sim-clear'].disabled === true,
-    simRatio: (elements['sim-ratio'].children.filter(function (button) {
-      return button.getAttribute('aria-pressed') === 'true';
-    })[0] || {}).dataset?.ratio || null,
+    // El R:R que el panel dice que hay dibujado: siempre medido de la caja.
+    simReadout: elements['sim-rr'].textContent,
+    simReadoutSource: elements['sim-rr'].dataset.source || '',
+    simReadoutTitle: elements['sim-rr'].title,
     simCursor: elements['chart'].style.cursor || '',
     // I.3 — los recuadros a mano: qué botón espera el clic y si hay algo que quitar.
     rectArmed: (elements['rect-buttons'].children.filter(function (button) {
@@ -276,6 +319,18 @@ function snapshot(label) {
     })[0] || {}).dataset?.kind || null,
     rectUndoDisabled: elements['rect-undo'].disabled === true,
     rectClearDisabled: elements['rect-clear'].disabled === true,
+    // I.4 — las líneas a mano: qué botón espera el clic y si hay algo que quitar.
+    lineArmed: (elements['line-buttons'].children.filter(function (button) {
+      return button.getAttribute('aria-pressed') === 'true';
+    })[0] || {}).dataset?.kind || null,
+    lineUndoDisabled: elements['line-undo'].disabled === true,
+    lineClearDisabled: elements['line-clear'].disabled === true,
+    // I.5 — el Fibonacci a mano: si el botón espera un clic y si hay algo que quitar.
+    fibArmed: elements['fib-buttons'].children.some(function (button) {
+      return button.getAttribute('aria-pressed') === 'true';
+    }),
+    fibUndoDisabled: elements['fib-undo'].disabled === true,
+    fibClearDisabled: elements['fib-clear'].disabled === true,
     // I.2 — la cuenta simulada: lo que dice la barra y lo que deja hacer.
     account: {
       summary: elements['account-summary'].textContent,
@@ -304,9 +359,7 @@ function snapshot(label) {
     // Las casillas que el preset mueve sin que nadie las toque: si el estado y
     // el control se separan, el explorador miente sobre lo que se está viendo.
     boxes: ['layer-limbo', 'layer-marks', 'layer-contacts', 'layer-mid', 'layer-wrong',
-      'layer-frame', 'layer-zones', 'layer-signals',
-      'layer-cascade', 'layer-entries', 'layer-regime',
-      'layer-avoided', 'layer-steps']
+      'layer-frame']
       .reduce(function (state, id) {
         state[id] = elements[id].checked === true;
         return state;
@@ -448,13 +501,8 @@ visiblesMarco.forEach(function (button) {
 visiblesMarco.filter(function (button) { return button.dataset.visible === 'pair'; })
   .forEach(function (button) { button.fire('click'); });
 
-// Cada gráfico lleva su marco y el de la temporalidad que le toca: el del Diario
-// sobre H4, el de H4 sobre H1 y el de H1 sobre M15. Se retrata cada gráfico con
-// el periodo completo para poder comprobarlo.
-// El paso del DIARIO es además el que audita el APUL: la zona en contra de un ID
-// nacido tras una constitución abortada. Las cajas son sólo las del ID que se
-// mira, así que ese caso se prueba con un histórico cortado mientras ese ID
-// sigue vivo (ver `test_impulse_explorer.py`).
+// Cada gráfico lleva su marco y el de la temporalidad que le toca. Se retrata
+// cada gráfico con el periodo completo para poder comprobarlo.
 tabs.forEach(function (tab) {
   tab.fire('click');
   steps.push(snapshot('marco-de-' + tab.dataset.tf));
@@ -462,55 +510,22 @@ tabs.forEach(function (tab) {
 // El gráfico vuelve a ser el que los pasos siguientes dan por supuesto.
 conMarco.fire('click');
 
-// Fase 2.1: la capa de roturas evitadas, encendida y apagada sobre las mismas
-// velas. Con `break_by_zone: false` no hay ninguna y los dos pasos salen iguales.
-// Se dibujan todos los ID: con el filtro «actual + anterior» las evitadas de los
-// impulsos antiguos quedan fuera y el paso no comprobaría la capa sino el filtro.
-// Y se vuelve a encender el impulso principal, que el paso `sin-principal` dejó
-// apagado: la capa de evitadas es sólo del principal, igual que los marcadores.
+// Todos los ID a la vista y el impulso principal encendido —el paso
+// `sin-principal` lo dejó apagado—: los marcadores son suyos.
 visiblesMarco.filter(function (button) { return button.dataset.visible === 'all'; })
   .forEach(function (button) { button.fire('click'); });
 const capaPrincipal = elements['impulse-layers'].children[0].children[0];
 capaPrincipal.fire('change', { target: { checked: true } });
 
-// Constituciones, roturas y el reloj de arena de las constituciones abortadas
-// comparten capa: se apaga y se enciende para que el paso recorra las tres. Va
-// aquí porque necesita las tres cosas que este bloque acaba de dejar puestas: el
-// impulso principal encendido (los marcadores son suyos), todos los ID y el
-// histórico entero a la vista. Las constituciones abortadas son raras y con una
-// ventana corta no cae ninguna.
+// Constituciones y roturas comparten capa: se apaga y se enciende para que el
+// paso recorra las dos. Va aquí porque necesita lo que este bloque acaba de
+// dejar puesto: el impulso principal encendido, todos los ID y el histórico
+// entero a la vista.
 steps.push(snapshot('marcas-por-defecto'));
 elements['layer-marks'].fire('change', { target: { checked: false } });
 steps.push(snapshot('sin-marcas'));
 elements['layer-marks'].fire('change', { target: { checked: true } });
-steps.push(snapshot('evitadas-por-defecto'));
-elements['layer-avoided'].fire('change', { target: { checked: false } });
-steps.push(snapshot('evitadas-apagadas'));
-elements['layer-avoided'].fire('change', { target: { checked: true } });
 
-// Las ZONAS del ID: el UL y el PUL. Se encienden y se apagan sobre las mismas
-// velas; sin zonas en el payload los dos pasos salen iguales, que es lo que
-// comprueba el test de la corrida sin zonas.
-steps.push(snapshot('zonas-por-defecto'));
-elements['layer-zones'].fire('change', { target: { checked: false } });
-steps.push(snapshot('zonas-apagadas'));
-elements['layer-zones'].fire('change', { target: { checked: true } });
-
-// Señales de zona: el toque del PUL y el rechazo/rotura del UL. Se encienden y se
-// apagan sobre las mismas velas; sin zonas en el payload los dos pasos salen
-// iguales, que es lo que comprueba el test de la corrida sin zonas.
-steps.push(snapshot('senales-por-defecto'));
-elements['layer-signals'].fire('change', { target: { checked: false } });
-steps.push(snapshot('senales-apagadas'));
-elements['layer-signals'].fire('change', { target: { checked: true } });
-
-// Fase 2.1 (§3.2): la escalera del extremo. Los saltos son una capa propia que se
-// apaga; los ESCALONES no, porque no son una capa sino la línea del ID dibujada
-// como fue. Los dos pasos siguientes lo separan.
-steps.push(snapshot('escalera-por-defecto'));
-elements['layer-steps'].fire('change', { target: { checked: false } });
-steps.push(snapshot('escalera-sin-saltos'));
-elements['layer-steps'].fire('change', { target: { checked: true } });
 capaPrincipal.fire('change', { target: { checked: false } });
 visiblesMarco.filter(function (button) { return button.dataset.visible === 'pair'; })
   .forEach(function (button) { button.fire('click'); });
@@ -544,104 +559,13 @@ visibles.forEach(function (button) {
   steps.push(snapshot('ids-' + button.dataset.visible));
 });
 
-// La cascada H4 -> H1, con el Diario de veto. Se recorren los cuatro gráficos
-// porque cada paso se dibuja en el suyo: el tramo diario en el Diario, el toque
-// de H4 en H4 y la confirmación en H1, con su caja si es el PUL de H1. Encendida
-// y apagada sobre las mismas velas; sin cascada en
-// el payload los dos pasos salen iguales, que es lo que comprueba el test de la
-// corrida sin ella. Va con el periodo completo y todos los ID a la vista, que es
-// como lo deja el bloque de arriba.
-tabs.forEach(function (tab) {
-  tab.fire('click');
-  // La capa cuelga del impulso principal del gráfico, y algún paso de más arriba
-  // pudo apagarlo: se encienden todas antes de mirar, que es lo que se quiere
-  // probar aquí.
-  elements['impulse-layers'].children.forEach(function (wrapper) {
-    wrapper.children[0].fire('change', { target: { checked: true } });
-  });
-  steps.push(snapshot('cascada-' + tab.dataset.tf));
-  elements['layer-cascade'].fire('change', { target: { checked: false } });
-  steps.push(snapshot('cascada-apagada-' + tab.dataset.tf));
-  elements['layer-cascade'].fire('change', { target: { checked: true } });
-});
-tabs[0].fire('click');
-
-// Fase 3.1 — las ENTRADAS y el régimen de H4. Se recorren los cuatro gráficos:
-// una operación es un tramo de precio y de tiempo y se dibuja igual en todos, así
-// que apagarla tiene que quitar sus trazas en cualquiera de ellos. Sin entradas en
-// el payload los dos pasos salen iguales, que es lo que comprueba el test de la
-// corrida sin ellas.
-tabs.forEach(function (tab) {
-  tab.fire('click');
-  steps.push(snapshot('entradas-' + tab.dataset.tf));
-  elements['layer-entries'].fire('change', { target: { checked: false } });
-  steps.push(snapshot('entradas-apagadas-' + tab.dataset.tf));
-  elements['layer-entries'].fire('change', { target: { checked: true } });
-});
-
-// La ETIQUETA escrita de cada operación: sólo se escribe con pocas a la vista, así
-// que se encoge la ventana a un día en M15. Se elige el día de una que entró y
-// salió en la MISMA vela —el caso que sin ancho no se veía—, y si no hubiera
-// ninguna, el de la primera que se llenó.
-const operaciones = payloadData.entries || [];
-const relampago = operaciones.filter(function (item) {
-  return item.xf !== undefined && item.xe === item.xf;
-})[0] || operaciones.filter(function (item) { return item.xf !== undefined; })[0];
-function unDia(item, minuto, etiqueta) {
-  if (!item) { return; }
-  const dia = new Date(minuto * 60000).toISOString().slice(0, 10);
-  tabs.filter(function (tab) { return tab.dataset.tf === 'M15'; })
-    .forEach(function (tab) { tab.fire('click'); });
-  elements['from'].fire('change', { target: { value: dia } });
-  elements['to'].fire('change', { target: { value: dia } });
-  steps.push(snapshot(etiqueta));
-  presets[0].fire('click');
-}
-
-unDia(relampago, relampago && relampago.xf, 'entradas-un-dia');
-
-// El RECHAZO_UL afinado con un OB: su límite cae fuera del recuadro del patrón, y
-// el globo tiene que decir de dónde sale. Se retrata el día en que se armó.
-const rechazo = operaciones.filter(function (item) {
-  return item.f === 'RECHAZO_UL' && item.pat === 'OB';
-})[0];
-unDia(rechazo, rechazo && rechazo.x, 'entradas-rechazo-ob');
-
-// El patrón de DETRÁS de la zona: el recuadro cae fuera de la zona de H1 y el
-// stop no va a la zona sino al borde lejano del patrón. Se retrata el día en que
-// se armó, que es donde se ve el hueco entre la zona y el sitio.
-const detras = operaciones.filter(function (item) {
-  return item.f === 'ZONA_ATRAS';
-})[0];
-unDia(detras, detras && detras.x, 'entradas-detras-zona');
-
-// El CIERRE DEL VIERNES: la posición que no llegó ni al stop ni al objetivo
-// porque cerró el mercado, y el límite que se quitó por lo mismo. Son lo único
-// que sale del gráfico sin que el precio haya llegado a ningún sitio.
-const cierreViernes = operaciones.filter(function (item) {
-  return item.o === 'CIERRE_SEMANAL';
-})[0];
-unDia(cierreViernes, cierreViernes && cierreViernes.xe, 'entradas-cierre-viernes');
-
-const quitadoViernes = operaciones.filter(function (item) {
-  return item.why === 'CIERRE_SEMANAL';
-})[0];
-unDia(quitadoViernes, quitadoViernes && quitadoViernes.xc, 'entradas-limite-viernes');
-
-tabs[0].fire('click');
-elements['layer-regime'].fire('change', { target: { checked: false } });
-steps.push(snapshot('regimen-apagado'));
-elements['layer-regime'].fire('change', { target: { checked: true } });
-steps.push(snapshot('regimen-encendido'));
-
 // R-36 — alternar los tres LEG_START_MODE sobre las mismas velas, y apagar la
 // capa que marca los extremos de color contrario.
 elements['mode-buttons'].children.forEach(function (button) {
   button.fire('click');
   steps.push(snapshot('modo-' + button.dataset.mode));
 });
-// De vuelta al modo de la corrida: es el único que lleva zonas, y los pasos del
-// replay tienen que poder comprobar que tampoco se adelantan.
+// De vuelta al modo de la corrida, que es el que audita el replay.
 elements['mode-buttons'].children
   .filter(function (button) { return button.dataset.mode === payloadMeta.legStartMode; })
   .forEach(function (button) { button.fire('click'); });
@@ -854,13 +778,19 @@ const simX = [
 const simY = precios;
 zoomTo(simX, simY);
 
-// El mismo cálculo que hace el explorador: MARGIN sobre el div de 1200 x 720.
+// El mismo cálculo que hace el explorador: MARGIN sobre el div de 1200 x 720, y
+// de ese alto, la franja que le queda al PRECIO. El RSI se lleva la de abajo
+// (`PRICE_DOMAIN` = [0.28, 1] en el explorador), así que sin descontarla precio
+// y píxel se separarían y ningún tirador caería donde se ve.
+const PRICE_DOMAIN = [0.28, 1];
+
 function pixelOf(minute, price) {
   const width = 1200 - 66 - 18;
-  const height = 720 - 16 - 44;
+  const height = (720 - 16 - 44) * (PRICE_DOMAIN[1] - PRICE_DOMAIN[0]);
+  const top = 16 + (720 - 16 - 44) * (1 - PRICE_DOMAIN[1]);
   return {
     x: 66 + (minute - simX[0]) / (simX[1] - simX[0]) * width,
-    y: 16 + (simY[1] - price) / (simY[1] - simY[0]) * height,
+    y: top + (simY[1] - price) / (simY[1] - simY[0]) * height,
   };
 }
 
@@ -923,7 +853,8 @@ armar('long');
 clicGrafico(pixelOf(minutoSimulado, entradaSimulada));
 steps.push(snapshot('sim-largo'));
 
-// El borde de fuera de la caja roja mueve el stop y nada más.
+// El borde de fuera de la caja roja mueve el stop y nada más: el objetivo se
+// queda donde estaba y el R:R se vuelve a medir solo.
 const asaStop = asaDeLaCaja('stop');
 arrastrarCaja(asaStop, { x: asaStop.x, y: asaStop.y + 40 });
 steps.push(snapshot('sim-stop-arrastrado'));
@@ -933,29 +864,26 @@ const asaEntrada = asaDeLaCaja('entry');
 arrastrarCaja(asaEntrada, { x: asaEntrada.x, y: asaEntrada.y - 25 });
 steps.push(snapshot('sim-entrada-arrastrada'));
 
-// El R:R fijo: 1:3 recoloca el objetivo sin tocar el stop, y con el candado
-// puesto mover el stop arrastra el objetivo con él.
-const ratios = elements['sim-ratio'].children;
-
-function fijarRatio(value) {
-  ratios.filter(function (button) { return button.dataset.ratio === value; })
-    .forEach(function (button) { button.fire('click'); });
-}
-
-fijarRatio('3');
-steps.push(snapshot('sim-ratio-1-3'));
-
-const asaStopConCandado = asaDeLaCaja('stop');
-arrastrarCaja(asaStopConCandado, { x: asaStopConCandado.x, y: asaStopConCandado.y - 20 });
-steps.push(snapshot('sim-stop-con-candado'));
-
-// Arrastrar el objetivo suelta el candado: manda lo que se ve.
+// Arrastrar el objetivo cambia el R:R: manda la distancia que se ve.
 const asaObjetivo = asaDeLaCaja('target');
 arrastrarCaja(asaObjetivo, { x: asaObjetivo.x, y: asaObjetivo.y + 30 });
 steps.push(snapshot('sim-objetivo-a-mano'));
 
+// El R:R del panel se mide MIENTRAS se coloca el objetivo, no al soltarlo: se
+// suelta el botón del ratón cuando el número ya dice lo que se buscaba.
+const asaEnVuelo = asaDeLaCaja('target');
+elements['chart'].fire('mousedown', {
+  clientX: asaEnVuelo.x, clientY: asaEnVuelo.y,
+  preventDefault() {}, stopPropagation() {},
+});
+fireDocument('mousemove', {
+  clientX: asaEnVuelo.x, clientY: asaEnVuelo.y - 18, preventDefault() {},
+});
+const rrEnVuelo = elements['sim-rr'].textContent;
+fireDocument('mouseup', {});
+steps.push(Object.assign(snapshot('sim-objetivo-en-vuelo'), { simReadoutEnVuelo: rrEnVuelo }));
+
 // En corto el objetivo va por debajo de la entrada y el riesgo por encima.
-fijarRatio('4');
 armar('short');
 clicGrafico(pixelOf(minutoSimulado, entradaSimulada));
 steps.push(snapshot('sim-corto'));
@@ -965,9 +893,10 @@ steps.push(snapshot('sim-quitado'));
 
 
 // I.2 — la cuenta simulada: el capital, el riesgo y los tres botones que apuntan
-// la caja dibujada. El encuadre y el ratio son los mismos que usa el bloque de
-// arriba, así que el R:R de cada caja es 1:2 exacto y las cifras se pueden
-// comprobar a mano: 50 $ al 2 % son 1,00 $ de riesgo y 2,00 $ de objetivo.
+// la caja dibujada. El encuadre es el mismo que usa el bloque de arriba y las
+// cajas se plantan y se cobran sin arrastrar nada, así que su R:R es el 1:2 con
+// el que nacen y las cifras se pueden comprobar a mano: 50 $ al 2 % son 1,00 $
+// de riesgo y 2,00 $ de objetivo.
 const resultados = elements['account-buttons'].children;
 
 function apuntar(result) {
@@ -980,10 +909,6 @@ function plantarCaja(side) {
   clicGrafico(pixelOf(minutoSimulado, entradaSimulada));
 }
 
-// Fijar un R:R sin caja plantada deja el ratio puesto para la siguiente y no
-// puede romper nada: es el gesto natural antes de dibujar.
-fijarRatio('2');
-steps.push(snapshot('ratio-sin-caja'));
 steps.push(snapshot('cuenta-sin-nada'));
 plantarCaja('long');
 steps.push(snapshot('cuenta-con-caja'));
@@ -1087,6 +1012,162 @@ elements['rect-undo'].fire('click');
 steps.push(snapshot('rect-deshecho'));
 elements['rect-clear'].fire('click');
 steps.push(snapshot('rect-limpio'));
+
+// I.4 — las líneas a mano: tres botones —Diario, H4 y H1— que arman, un clic que
+// planta la suya HORIZONTAL al precio pulsado y arrastres que la mueven y la
+// inclinan. Es dibujo del propietario: no la ha calculado el motor y no cuenta
+// como capa.
+function botonLinea(kind) {
+  return elements['line-buttons'].children.filter(function (button) {
+    return button.dataset.kind === kind;
+  })[0];
+}
+
+function armarLinea(kind) {
+  botonLinea(kind).fire('click');
+}
+
+function lineas() {
+  return (plotCalls[plotCalls.length - 1].line || []).map(function (shape) {
+    return {
+      name: shape.name,
+      left: shape.y0,
+      right: shape.y1,
+      from: minuteOf(shape.x0),
+      to: minuteOf(shape.x1),
+    };
+  });
+}
+
+function asaDeLinea(index, extremo) {
+  const line = lineas()[index];
+  if (extremo === 'left') { return pixelOf(line.from, line.left); }
+  if (extremo === 'right') { return pixelOf(line.to, line.right); }
+  return pixelOf(
+    Math.round((line.from + line.to) / 2),
+    (line.left + line.right) / 2
+  );
+}
+
+steps.push(snapshot('linea-sin-nada'));
+armarLinea('D');
+steps.push(snapshot('linea-armada'));
+// Escape suelta el botón sin plantar nada, igual que en los recuadros.
+pressKey('Escape');
+steps.push(snapshot('linea-desarmada'));
+
+armarLinea('D');
+clicGrafico(pixelOf(minutoSimulado, entradaSimulada));
+steps.push(snapshot('linea-plantada'));
+
+// El extremo derecho la INCLINA: sube ese lado y el izquierdo se queda.
+const asaDerecha = asaDeLinea(0, 'right');
+arrastrarCaja(asaDerecha, { x: asaDerecha.x, y: asaDerecha.y - 30 });
+steps.push(snapshot('linea-inclinada'));
+
+// Por dentro se mueve entera: la inclinación no cambia.
+const asaTrazo = asaDeLinea(0, 'body');
+arrastrarCaja(asaTrazo, { x: asaTrazo.x + 40, y: asaTrazo.y + 30 });
+steps.push(snapshot('linea-movida'));
+
+// Se trazan varias, una por temporalidad: cada una con su nombre y su color.
+const precioAlto = (simY[1] + entradaSimulada) / 2;
+armarLinea('H4');
+clicGrafico(pixelOf(minutoSimulado, precioAlto));
+steps.push(snapshot('linea-segunda'));
+
+// Y se numeran POR TEMPORALIDAD: la segunda del Diario es «Diario 2» aunque
+// entre medias haya una de H4.
+armarLinea('D');
+clicGrafico(pixelOf(minutoSimulado, (simY[1] + precioAlto) / 2));
+steps.push(snapshot('linea-tercera'));
+
+elements['line-undo'].fire('click');
+steps.push(snapshot('linea-deshecha'));
+elements['line-clear'].fire('click');
+steps.push(snapshot('linea-limpia'));
+
+// I.5 — el Fibonacci a mano: un botón que arma, DOS clics —el 0 y el 100— y los
+// cinco niveles dibujados entre ellos. Es la regla del propietario: no la ha
+// calculado el motor y no cuenta como capa.
+function botonFib() {
+  return elements['fib-buttons'].children[0];
+}
+
+function fibs() {
+  return (plotCalls[plotCalls.length - 1].fib || []).map(function (shape) {
+    return {
+      name: shape.name,
+      price: shape.y0,
+      from: minuteOf(shape.x0),
+      to: minuteOf(shape.x1),
+      dash: shape.dash,
+      label: shape.label,
+    };
+  });
+}
+
+function nivelFib(index, level) {
+  return fibs().filter(function (shape) {
+    return shape.name === 'fib-' + index + '-' + level;
+  })[0];
+}
+
+steps.push(snapshot('fib-sin-nada'));
+botonFib().fire('click');
+steps.push(snapshot('fib-armado'));
+// Escape suelta el botón sin clavar nada.
+pressKey('Escape');
+steps.push(snapshot('fib-desarmado'));
+
+// El primer clic clava el 0 y el botón SIGUE armado: hasta el segundo no hay
+// retroceso que medir.
+const fibCero = simY[0] + (simY[1] - simY[0]) * 0.2;
+const fibCien = simY[0] + (simY[1] - simY[0]) * 0.8;
+botonFib().fire('click');
+clicGrafico(pixelOf(minutoSimulado, fibCero));
+steps.push(snapshot('fib-cero-clavado'));
+
+// Escape con el 0 a medias lo suelta sin plantar el 100 en cualquier sitio.
+pressKey('Escape');
+steps.push(snapshot('fib-cero-soltado'));
+
+botonFib().fire('click');
+clicGrafico(pixelOf(minutoSimulado, fibCero));
+const minutoFibCien = minutoSimulado + Math.round((simX[1] - simX[0]) * 0.2);
+clicGrafico(pixelOf(minutoFibCien, fibCien));
+steps.push(snapshot('fib-trazado'));
+
+// El ancla del 100 se mueve sola: los tres retrocesos la siguen.
+const asaCien = pixelOf(minutoFibCien, fibCien);
+arrastrarCaja(asaCien, { x: asaCien.x, y: asaCien.y - 30 });
+steps.push(snapshot('fib-cien-movido'));
+
+// Por dentro se desplaza el conjunto entero y el retroceso medido no cambia.
+const fibTrazado = nivelFib(0, 80);
+const asaFib = pixelOf(
+  Math.round((fibTrazado.from + fibTrazado.to) / 2), fibTrazado.price
+);
+arrastrarCaja(asaFib, { x: asaFib.x, y: asaFib.y + 25 });
+steps.push(snapshot('fib-movido'));
+
+// Se trazan varios y se numeran en el orden en que se plantan.
+botonFib().fire('click');
+clicGrafico(pixelOf(minutoSimulado, fibCien));
+clicGrafico(pixelOf(minutoFibCien, fibCero));
+steps.push(snapshot('fib-segundo'));
+
+elements['fib-undo'].fire('click');
+steps.push(snapshot('fib-deshecho'));
+elements['fib-clear'].fire('click');
+steps.push(snapshot('fib-limpio'));
+
+// El RSI no se enciende ni se apaga: está puesto en los cuatro gráficos y sólo
+// desaparece con la venda de la auditoría ciega, porque lo calcula el motor.
+tabs[1].fire('click');
+steps.push(snapshot('rsi-en-h4'));
+tabs[0].fire('click');
+steps.push(snapshot('rsi-en-diario'));
 
 console.log(JSON.stringify({
   unknownElements: missing,
