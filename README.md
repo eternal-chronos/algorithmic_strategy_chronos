@@ -46,44 +46,23 @@ chronos data dukascopy -g m1 --from 2018-01-01 --to 2025-12-31
 # Verificar la zona horaria del histórico. Obligatorio antes de calcular nada.
 chronos structure verify-tz --config config/impulse.yaml
 
-# Detectar los impulsos dominantes (Diario, H4, H1; M15 se dibuja con el de H1)
+# Detectar los impulsos dominantes (Diario y H4; H1 y M15 se dibujan con el de H4)
 # El explorador embebe los tres LEG_START_MODE de R-36 para poder alternarlos
 # sobre las mismas velas; `--sin-modos-r36` se ahorra las dos corridas extra.
 chronos structure detect --config config/impulse.yaml
 
 # Evidencia de las comprobaciones: esperado y obtenido, lado a lado.
 chronos structure evidencia --config config/impulse.yaml
-
-# Zonas UL y OB de cada impulso (fase 2.0). Sólo detección y dibujo.
-chronos structure zonas --config config/impulse.yaml
-
-# Fase 2.1: la zona decide la rotura del ID en vez de la línea. Ejecuta el módulo
-# entero con las dos reglas sobre las mismas velas y las compara. Antes de nada
-# verifica que con `break_by_zone: false` sale la línea base exacta; si no sale,
-# para y avisa.
-chronos structure rotura-por-zona --config config/impulse.yaml
-
-# SETUP 1: la cascada H4 -> H1 (el Diario sólo veta) y las operaciones. Se
-# enciende y se apaga entero con `setup1.enabled` en el YAML; APAGADO los dos
-# comandos avisan y no calculan nada.
-chronos structure entradas --config config/impulse.yaml
-chronos structure operaciones --config config/impulse.yaml
-
-# SETUP 2: el punto de partida. La ESTRUCTURA y nada más: ID del Diario y de H4
-# con sus zonas UL, PUL y APUL. Ni cascada, ni entradas, ni ID de H1, ni nada de
-# M15. No depende del interruptor del setup 1.
-chronos structure setup2 --config config/impulse.yaml
 ```
 
 El módulo de estructura detecta **el impulso dominante del Diario y de H4** y
-**no emite señales**: sin entradas, sin stops, sin targets y sin medición de
-rentabilidad. H1 y M15 no llevan detector —no se les marca ID— y sobre ellas se
-dibuja el de H4 como contexto; la única excepción es el **setup 1**, que enciende
-el ID de H1 porque su cascada lo necesita para confirmar —y ahora mismo está
-**apagado** (`setup1.enabled: false`), así que el proyecto está en la estructura
-sola, preparando el setup 2. Ver
-[`docs/MODULO_1_IMPULSO_DOMINANTE.md`](docs/MODULO_1_IMPULSO_DOMINANTE.md) y
-[`docs/MODULO_2_ZONAS.md`](docs/MODULO_2_ZONAS.md).
+**no emite señales**: sin zonas, sin entradas, sin stops, sin targets y sin
+medición de rentabilidad. H1 y M15 no llevan detector —no se les marca ID— y
+sobre ellas se dibuja el de H4 como contexto. Ver
+[`docs/MODULO_1_IMPULSO_DOMINANTE.md`](docs/MODULO_1_IMPULSO_DOMINANTE.md). Las
+zonas UL/PUL/APUL, la rotura por zona y los setups 1 y 2 que hubo encima se
+retiraron enteros; su historia queda en [`docs/FASES.md`](docs/FASES.md) y las
+entradas se rehacen desde cero.
 
 Cada corrida de estructura deja una carpeta en `reports/` con `reporte.txt`,
 `explorador.html`, los CSV de impulsos, roturas, contactos y estado, y

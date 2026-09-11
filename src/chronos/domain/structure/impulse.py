@@ -6,32 +6,12 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from chronos.domain.structure.enums import (
-    AntePenultimateOrigin,
     BodyDirection,
     BreakKind,
-    BreakLevelSource,
     ImpulseDirection,
     MachineState,
 )
 from chronos.domain.structure.errors import StructureError
-
-
-@dataclass(frozen=True, slots=True)
-class ExtremeExtension:
-    """Una vez que el extremo de un ID vigente se estiró (fase 2.1, §3.2).
-
-    Sólo se **registra**: ninguna regla del módulo 1 ni de la 2.1 lee esta lista,
-    y el detector se comporta exactamente igual con ella dentro que sin ella. Lo
-    que habilita es el dibujo: la línea del extremo va en escalera, un tramo por
-    nivel, y pintarla recta con el valor final enseñaría desde la constitución un
-    precio al que el mercado todavía no había llegado. El UL **no** viaja con
-    ella: se marca una vez, al constituirse el ID, y no se remarca.
-    """
-
-    index: int
-    timestamp: datetime
-    price: float
-    bar_direction: BodyDirection
 
 
 @dataclass(slots=True)
@@ -77,61 +57,6 @@ class DominantImpulse:
     #: un impulso alcista es verde y en uno bajista, rojo.
     extreme_bar_direction: BodyDirection
 
-    #: Vela del extremo del ID **anterior**: la que llevaba su UL. Cuando aquel
-    #: ID iba en el mismo sentido que éste, su extremo queda por detrás y esa
-    #: vela es la del **PUL** de éste. `None` sólo en el primer impulso del
-    #: histórico, que no tiene ID anterior. Se guarda por lo mismo que las otras
-    #: dos velas: quien dibuje o audite no tiene que reconstruirla, y la fase 2.1
-    #: la lee barra a barra sin volver a la lista de impulsos.
-    index_penultimate: int | None
-    ts_penultimate: datetime | None
-    #: Hacia dónde iba aquel ID. Es lo que decide si hay PUL: sólo lo hay si iba
-    #: en el MISMO sentido que éste. Si iba al revés, su extremo es casi siempre
-    #: el ancla de éste y no un nivel detrás, así que el lado en contra pasa a
-    #: ser el APUL heredado; y cuando aquel extremo sí quedó por detrás del
-    #: ancla, el APUL es su propio UL. Se guarda porque después no se puede
-    #: reconstruir sin recorrer la lista de impulsos hacia atrás, y quien dibuja
-    #: no tiene esa lista.
-    penultimate_direction: ImpulseDirection | None
-
-    #: Vela del **APUL**: la del nivel en contra que le prestó el ID anterior
-    #: —porque aquél iba al revés y su extremo es el ancla de éste—, la del
-    #: extremo de aquel ID cuando quedó por detrás del ancla, o la del extremo
-    #: del último ID **interior** contrario del retroceso cuando en medio se
-    #: abortó una constitución. `None`
-    #: en los que llevan PUL o nada. Se guarda porque no se puede re-derivar sin
-    #: recorrer la cadena de impulsos hacia atrás —o sin volver a correr la
-    #: máquina dentro de aquel retroceso—, y quien dibuja no hace ni lo uno ni lo
-    #: otro.
-    index_ante_penultimate: int | None
-    ts_ante_penultimate: datetime | None
-    #: Hacia dónde iba el ID que fijó la mecha del APUL. En el heredado es el del
-    #: ID que la fijó, que puede ir en cualquiera de los dos sentidos porque la
-    #: zona viene de más atrás; en el del retroceso, el del ID interior. Decide
-    #: qué borde de la zona es el exterior.
-    ante_penultimate_direction: ImpulseDirection | None
-
-    #: Velas entre las que se busca la **punta** de la zona en contra: la vida
-    #: entera del ID que la fijó, del arranque de su pierna a la vela anterior a
-    #: la que lo rompió. Se apunta al constituir —sale de índices que el módulo
-    #: ya tiene— y quien lee la mecha es la capa de zonas. `None` cuando el lado
-    #: en contra se rompe por línea.
-    against_tip_window: tuple[int, int] | None
-
-    #: Qué zona lleva el lado en contra de este ID: su PUL, su APUL, o nada
-    #: mientras no hay ningún ID detrás del que sacarla. Se clasifica siempre,
-    #: también con `BREAK_BY_ZONE = false`: ahí la zona no gobierna la rotura,
-    #: pero es la misma que se mide y se dibuja. Con `against_by_zone` apagado la
-    #: zona existe igual y quien manda la rotura de ese lado es el ancla.
-    against_source: BreakLevelSource
-    #: `True` sólo en el APUL **heredado**: la zona no sale de ningún extremo del
-    #: ID anterior sino del nivel que aquél llevaba, y puede venir de varios ID
-    #: atrás. Los otros dos APUL —el UL del ID anterior contrario que dejó su
-    #: extremo por detrás del ancla, y el del ID interior de un retroceso— salen
-    #: de un extremo. Quien dibuja no puede distinguirlos por los bordes y son
-    #: tres historias distintas, así que el dato viaja con el impulso.
-    against_inherited: bool
-
     #: Barras cerradas en LIMBO entre la rotura anterior y esta constitución.
     limbo_bars: int
     #: Tamaño del cuerpo de la vela contraria que lo constituyó. Alimenta el
@@ -143,50 +68,8 @@ class DominantImpulse:
     ts_end: datetime | None = field(default=None, init=False)
     index_end: int | None = field(default=None, init=False)
     exit_break_kind: BreakKind | None = field(default=None, init=False)
-    #: Fase 2.1. De dónde salió el nivel que lo mató: la línea, el UL o el PUL.
-    #: Con `BREAK_BY_ZONE = false` es siempre la línea.
-    exit_level_source: BreakLevelSource | None = field(default=None, init=False)
 
-    #: Fase 2.1. Veces que el extremo se estiró estando el ID ya vigente, porque
-    #: una vela cerró más allá de la línea sin atravesar el UL entero. En la fase
-    #: 1 esto no podía ocurrir: esa vela mataba el ID.
-    extreme_extensions: int = field(default=0, init=False)
-    #: El extremo con el que nació, antes de cualquier extensión. Se guarda para
-    #: poder medir cuánto se movió sin reconstruirlo desde los eventos.
-    extreme_at_constitution: float = field(default=float("nan"), init=False)
-    #: La vela que fijaba el extremo al nacer el ID, y por tanto **la vela del
-    #: UL**: la zona se marca con ella y no se remarca aunque el extremo se
-    #: estire después, así que este índice hace falta durante toda la vida del
-    #: ID. Se guarda en vez de re-derivarlo porque buscar qué cuerpo coincide con
-    #: `extreme_at_constitution` no tiene respuesta única con empates. Mismo
-    #: criterio que `index_extreme` en la fase 1.
-    index_extreme_at_constitution: int = field(default=-1, init=False)
-    #: La marca de tiempo y el color de esa misma vela. Se guardan por lo mismo
-    #: que el índice: quien dibuje la escalera del extremo necesita el primer
-    #: escalón entero, no sólo su precio.
-    ts_extreme_at_constitution: datetime | None = field(default=None, init=False)
-    extreme_bar_direction_at_constitution: BodyDirection | None = field(
-        default=None, init=False
-    )
-    #: Traza de esas extensiones, en orden. Material de auditoría y de dibujo:
-    #: no la lee ninguna regla de detección y no cambia ni un impulso. Es lo que
-    #: permite pintar la línea del extremo en escalera sin adelantar niveles.
-    extension_trail: list[ExtremeExtension] = field(default_factory=list, init=False)
-
-    def __post_init__(self) -> None:
-        self.extreme_at_constitution = self.extreme
-        self.index_extreme_at_constitution = self.index_extreme
-        self.ts_extreme_at_constitution = self.ts_extreme
-        self.extreme_bar_direction_at_constitution = self.extreme_bar_direction
-
-    def close(
-        self,
-        *,
-        timestamp: datetime,
-        index: int,
-        kind: BreakKind,
-        level_source: BreakLevelSource = BreakLevelSource.LINE,
-    ) -> None:
+    def close(self, *, timestamp: datetime, index: int, kind: BreakKind) -> None:
         """Cierra el impulso en la barra que lo rompe."""
         if self.ts_end is not None:
             raise StructureError(f"El impulso {self.id_num} ya estaba cerrado")
@@ -197,128 +80,6 @@ class DominantImpulse:
         self.ts_end = timestamp
         self.index_end = index
         self.exit_break_kind = kind
-        self.exit_level_source = level_source
-
-    def extend_extreme(
-        self,
-        *,
-        price: float,
-        index: int,
-        timestamp: datetime,
-        bar_direction: BodyDirection,
-    ) -> None:
-        """Estira el extremo del ID vigente (fase 2.1, §3.2).
-
-        Sólo lo llama el detector cuando una vela cierra más allá de la línea del
-        extremo sin atravesar el UL entero: el ID sobrevive a lo que antes era
-        una rotura y su extremo pasa a ser lo que ha alcanzado esta vela.
-
-        Lo que **no** se mueve es ninguna de las dos zonas. El UL lo fija la vela
-        del extremo de la constitución —`index_extreme_at_constitution`— y ahí se
-        queda: no se remarca en cada rechazo. El ancla ni siquiera se estira: la
-        fija la vela del arranque de la pierna, que no cambia.
-        """
-        if self.ts_end is not None:
-            raise StructureError(
-                f"El impulso {self.id_num} ya estaba cerrado: su extremo no se mueve"
-            )
-        if index < self.index_constitution:
-            raise StructureError(
-                f"El impulso {self.id_num} no puede extender su extremo antes de constituirse"
-            )
-        improves = (
-            price > self.extreme
-            if self.direction is ImpulseDirection.ALCISTA
-            else price < self.extreme
-        )
-        if not improves:
-            raise StructureError(
-                f"El extremo del impulso {self.id_num} no retrocede: "
-                f"{price} no mejora {self.extreme}"
-            )
-        self.extreme = price
-        self.index_extreme = index
-        self.ts_extreme = timestamp
-        self.extreme_bar_direction = bar_direction
-        self.extreme_extensions += 1
-        self.extension_trail.append(
-            ExtremeExtension(
-                index=index,
-                timestamp=timestamp,
-                price=price,
-                bar_direction=bar_direction,
-            )
-        )
-
-    @property
-    def extreme_steps(self) -> tuple[ExtremeExtension, ...]:
-        """El extremo vigente en cada tramo, en orden cronológico.
-
-        El primero es el de la constitución y los demás, cada extensión. Es lo
-        que hace falta para dibujar —o auditar— la línea del extremo **como la
-        vio el mercado**: un ID que estiró su extremo dos veces tuvo tres
-        niveles, y pintar sólo el último dice que el sistema conocía desde el
-        primer minuto un precio al que el precio aún no había llegado.
-
-        Sin extensiones devuelve un único escalón, que es exactamente la fase 1.
-        """
-        assert self.ts_extreme_at_constitution is not None  # lo fija __post_init__
-        assert self.extreme_bar_direction_at_constitution is not None
-        first = ExtremeExtension(
-            index=self.index_extreme_at_constitution,
-            timestamp=self.ts_extreme_at_constitution,
-            price=self.extreme_at_constitution,
-            bar_direction=self.extreme_bar_direction_at_constitution,
-        )
-        return (first, *self.extension_trail)
-
-    @property
-    def has_penultimate(self) -> bool:
-        """`True` si el lado en contra de este ID lo gobierna su PUL."""
-        return self.against_source is BreakLevelSource.PENULTIMATE
-
-    @property
-    def has_ante_penultimate(self) -> bool:
-        """`True` si lo gobierna su APUL, por cualquiera de sus tres motivos."""
-        return self.against_source is BreakLevelSource.ANTE_PENULTIMATE
-
-    @property
-    def ante_penultimate_origin(self) -> AntePenultimateOrigin | None:
-        """Cuál de los tres APUL lleva este ID, o `None` si no lleva APUL."""
-        if not self.has_ante_penultimate:
-            return None
-        if self.against_inherited:
-            return AntePenultimateOrigin.INHERITED
-        if (
-            self.penultimate_direction is not None
-            and self.penultimate_direction is not self.direction
-        ):
-            return AntePenultimateOrigin.COUNTER_EXTREME
-        return AntePenultimateOrigin.PULLBACK
-
-    @property
-    def index_against(self) -> int | None:
-        """Vela de la que sale el nivel en contra, o `None` si manda la línea."""
-        if self.has_penultimate:
-            return self.index_penultimate
-        if self.has_ante_penultimate:
-            return self.index_ante_penultimate
-        return None
-
-    @property
-    def against_direction(self) -> ImpulseDirection | None:
-        """Hacia dónde iba el ID que fijó la mecha del nivel en contra.
-
-        Es lo que dice qué borde de la zona es el exterior. Los dos sentidos
-        viajan con el impulso porque ninguno se puede reconstruir después: el del
-        PUL exigiría la lista de impulsos y el del APUL, seguir la cadena de
-        zonas heredadas hasta el ID que la marcó.
-        """
-        if self.has_penultimate:
-            return self.penultimate_direction
-        if self.has_ante_penultimate:
-            return self.ante_penultimate_direction
-        return None
 
     @property
     def is_open(self) -> bool:
@@ -387,18 +148,8 @@ class BreakEvent:
     #: del ID que acabará constituyéndose.
     new_leg_direction: ImpulseDirection
     close: float
-    #: Nivel que el cierre superó. En la fase 1 es siempre una de las dos líneas
-    #: del ID; con `BREAK_BY_ZONE` es el borde **exterior** de la zona que la
-    #: sustituye, salvo cuando no hay zona en ese lado.
+    #: Nivel superado: el `extremo` en una rotura a favor, el `ancla` en contra.
     level: float
-    #: La línea del ID (`extremo` a favor, `ancla` en contra), mande o no. Con la
-    #: regla nueva es lo que permite ver cuánto más lejos hubo que ir para romper.
-    line: float | None = None
-    level_source: BreakLevelSource = BreakLevelSource.LINE
-
-    @property
-    def by_zone(self) -> bool:
-        return self.level_source is not BreakLevelSource.LINE
 
 
 @dataclass(frozen=True, slots=True)
@@ -420,34 +171,3 @@ class BarState:
     @property
     def in_limbo(self) -> bool:
         return self.state is MachineState.LIMBO
-
-
-@dataclass(frozen=True, slots=True)
-class AbortedConstitution:
-    """Vela contraria que no llega a constituir: el ID nacería ya roto.
-
-    La regla «primero la rotura» sólo protege al ID **anterior**. Sin esto, una
-    vela contraria que cierra al otro lado del nivel de rotura en contra del ID
-    que iba a crear lo constituye igualmente, y el ID nace muerto: la rotura no
-    se juzga hasta la barra siguiente, así que el impulso sobrevive apuntando al
-    revés que el precio y bloquea al que debería nacer.
-
-    Aquí esa vela no constituye nada: se comporta como una vela de rotura y gira
-    la pierna. Se registra entera —el nivel que cruzó y de dónde salía— porque es
-    una constitución que el propietario habría visto y no está.
-    """
-
-    timestamp: datetime
-    index: int
-    timeframe: str
-    #: Dirección del ID que se habría constituido, y de la pierna que muere aquí.
-    aborted_direction: ImpulseDirection
-    #: Dirección de la pierna que esta misma vela abre.
-    new_leg_direction: ImpulseDirection
-    close: float
-    #: Nivel de rotura en contra que el cierre ya había dejado atrás: el ancla, o
-    #: el borde exterior del PUL cuando la fase 2.1 lo pone a mandar.
-    level: float
-    #: La línea del ancla, mande o no, por la misma razón que en `BreakEvent`.
-    line: float
-    level_source: BreakLevelSource = BreakLevelSource.LINE

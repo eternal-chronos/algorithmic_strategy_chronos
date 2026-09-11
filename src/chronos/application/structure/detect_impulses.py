@@ -22,14 +22,7 @@ from chronos.application.structure.timezone_audit import TimezoneAudit
 from chronos.domain.errors import DomainError
 from chronos.domain.structure.body import BodyBar
 from chronos.domain.structure.detector import DominantImpulseDetector
-from chronos.domain.structure.impulse import (
-    AbortedConstitution,
-    BarState,
-    BreakEvent,
-    DominantImpulse,
-)
-from chronos.domain.structure.zone_break import AvoidedBreak, ZoneBreakLevels
-from chronos.domain.structure.zones import CandleSeries
+from chronos.domain.structure.impulse import BarState, BreakEvent, DominantImpulse
 
 #: Columnas exigidas por §5.1, en su orden. Las que van detrás son material de
 #: auditoría (comparativa de anclas, arranque de la pierna) y no sustituyen a
@@ -73,13 +66,6 @@ AUDIT_COLUMNS = (
     #: reloj y cero velas.
     "indice_constitucion",
     "indice_fin",
-    #: Fase 2.1. De dónde salió el nivel que mató al ID —`linea`, `UL` o `PUL`— y
-    #: cuántas veces su extremo se estiró estando ya vigente, que en la fase 1
-    #: era imposible. Con `break_by_zone: false` la primera es siempre `linea` y
-    #: la segunda siempre cero.
-    "origen_nivel_rotura",
-    "extensiones_extremo",
-    "precio_extremo_al_constituirse",
 )
 
 
@@ -94,12 +80,6 @@ class TimeframeAnalysis:
     states: tuple[BarState, ...]
     table: pd.DataFrame
     diagnostics: dict[str, int]
-    #: Fase 2.1: velas que la regla antigua habría llamado rotura y la nueva ha
-    #: salvado. Vacío con `break_by_zone: false`.
-    avoided: tuple[AvoidedBreak, ...] = ()
-    #: Velas contrarias que no llegaron a constituir porque el ID habría nacido
-    #: ya roto. Ahí no hay rombo de constitución y sí un giro de pierna.
-    aborted: tuple[AbortedConstitution, ...] = ()
 
     @property
     def published(self) -> tuple[DominantImpulse, ...]:
@@ -189,13 +169,6 @@ class DetectDominantImpulses:
             raise DomainError(f"No hay barras agregadas en {timeframe}")
 
         rules = self._config.rules
-        # Fase 2.1: las mechas sólo se construyen si van a mandar. Con
-        # `break_by_zone: false` el detector ni siquiera las recibe.
-        zone_levels = (
-            ZoneBreakLevels(CandleSeries.of(frame), timeframe=timeframe)
-            if rules.break_by_zone
-            else None
-        )
         detector = DominantImpulseDetector(
             timeframe=timeframe,
             anchor_mode=rules.anchor_mode,
@@ -203,10 +176,6 @@ class DetectDominantImpulses:
             doji_break_mode=rules.doji_break_mode,
             leg_start_mode=rules.leg_start_mode,
             warmup_bars=rules.warmup_bars,
-            break_by_zone=rules.break_by_zone,
-            break_against_by_zone=rules.break_against_by_zone,
-            overlap_priority=rules.overlap_priority,
-            zone_levels=zone_levels,
         )
         atr = PriorBarAtr(
             frame["high"].to_numpy(dtype=float),
@@ -251,8 +220,6 @@ class DetectDominantImpulses:
             states=detector.states,
             table=table,
             diagnostics=detector.diagnostics,
-            avoided=detector.avoided_breaks,
-            aborted=detector.aborted_constitutions,
         )
 
 
@@ -302,13 +269,6 @@ def _build_table(
                 "atr_previo": atr_value,
                 "indice_constitucion": impulse.index_constitution,
                 "indice_fin": impulse.index_end,
-                "origen_nivel_rotura": (
-                    impulse.exit_level_source.value
-                    if impulse.exit_level_source is not None
-                    else None
-                ),
-                "extensiones_extremo": impulse.extreme_extensions,
-                "precio_extremo_al_constituirse": impulse.extreme_at_constitution,
             }
         )
 
