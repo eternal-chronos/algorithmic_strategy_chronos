@@ -53,6 +53,20 @@ DEFAULT_CHARTS: dict[str, tuple[str, ...]] = {
     M5: (H4,),
 }
 
+#: Dónde se buscan el OB y el FVG (K.1) y qué ID los acota: el gráfico es la
+#: temporalidad de las velas en las que está el patrón y el valor, la del ID
+#: dentro del cual tiene que caer. **En el Diario y en H4, dentro de su propio
+#: ID; en H1, que no tiene ID, dentro del de H4.** M15 y M5 no marcan nada
+#: todavía: la confirmación de M15 la dictará el propietario más adelante.
+#:
+#: Es lectura del propietario, no parámetro del motor, y no entra en el hash:
+#: no cambia ni una vela ni un impulso.
+PATTERN_CHARTS: dict[str, str] = {
+    DAILY: DAILY,
+    H4: H4,
+    H1: H4,
+}
+
 
 def by_size(timeframes: Iterable[str], *, descending: bool = True) -> tuple[str, ...]:
     """Ordena temporalidades por duración, de mayor a menor por defecto."""

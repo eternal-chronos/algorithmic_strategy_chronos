@@ -46,6 +46,15 @@ OLIVE = "#7c8b12"
 BROWN = "#8a5a2b"
 PURPLE = "#9440c8"
 
+# Dos del MOTOR para el OB y el FVG que marca dentro del ID (K.1). Rellenos con
+# transparencia, así que van saturados y oscuros: el ámbar (40°) queda lejos
+# del naranja vivo del marco de H4 y del marrón de Asia, y el índigo (234°) es
+# más oscuro y más azul que el azul de la serie. Ninguno lo usa la mano —sus
+# recuadros son magenta y cian— para que un OB del motor no se confunda nunca
+# con uno que ha marcado el propietario.
+AMBER = "#cf8a00"
+INDIGO = "#3d47b5"
+
 # Polaridad (ganancia / pérdida): pareja divergente azul ↔ rojo con gris neutro.
 POSITIVE = "#2a78d6"
 NEGATIVE = "#d03b3b"

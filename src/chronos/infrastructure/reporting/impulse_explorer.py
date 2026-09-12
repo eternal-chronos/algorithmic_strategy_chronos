@@ -35,7 +35,7 @@ import numpy as np
 import pandas as pd
 import plotly.offline as pyo
 
-from chronos.application.structure.config import DAILY, H1, H4
+from chronos.application.structure.config import DAILY, H1, H4, PATTERN_CHARTS
 from chronos.application.structure.detect_impulses import ImpulseRun, TimeframeAnalysis
 from chronos.application.structure.lateralization import (
     LateralizationStudy,
@@ -97,6 +97,15 @@ HAND_LINES: dict[str, str] = {
 SESSION_COLORS: dict[str, str] = {
     "asia": theme.BROWN,
     "london": theme.PURPLE,
+}
+
+#: El OB y el FVG que marca el MOTOR dentro del ID (K.1). Un tono por patrón,
+#: ninguno de la mano ni de otra capa: lo que se vea en ámbar o en índigo lo ha
+#: calculado el dominio, y lo que se vea en magenta o en cian lo ha puesto el
+#: propietario.
+PATTERN_COLORS: dict[str, str] = {
+    "OB": theme.AMBER,
+    "FVG": theme.INDIGO,
 }
 
 #: El Fibonacci que traza el propietario a mano (I.5). Va en el gris de la tinta
@@ -226,6 +235,9 @@ def build_payload(
             #: escribir un 21 y un 55 que no ha decidido él.
             "rsiPeriod": RSI_PERIOD,
             "rsiBands": list(RSI_BANDS),
+            #: Con qué regla se han marcado el OB y el FVG, escrita para el
+            #: estado del explorador: el dibujo dice qué está enseñando.
+            "patternRule": run.pattern_rule.describe(),
         },
         "colors": {
             "bullish": BULLISH,
@@ -250,6 +262,8 @@ def build_payload(
             #: Un tono por sesión para el alto y el bajo de Asia y de Londres,
             #: que sí son del motor.
             "sessions": dict(SESSION_COLORS),
+            #: Y un tono por patrón para el OB y el FVG del motor.
+            "patterns": dict(PATTERN_COLORS),
             #: El Fibonacci a mano: gris de medir, no color de marcar.
             "fib": HAND_FIB,
             #: Y el RSI, que sí es del motor pero vive en su propio panel: no
@@ -262,6 +276,7 @@ def build_payload(
         "spans": _spans(run),
         "bars": bars,
         "sessions": _sessions_payload(run),
+        "patterns": _patterns_payload(run),
         "impulses": {
             timeframe: _impulse_payload(analysis, contacts.get(timeframe))
             for timeframe, analysis in run.analyses.items()
@@ -432,6 +447,43 @@ def _level(value: Any) -> float | None:
 
 def _optional_minute(stamp: Any) -> int | None:
     return None if pd.isna(stamp) else _minute(pd.Timestamp(stamp))
+
+
+# --- OB y FVG ---------------------------------------------------------------
+
+
+def _patterns_payload(run: ImpulseRun) -> dict[str, Any]:
+    """Capa "OB y FVG" (K.1): por gráfico, los patrones que el motor marcó
+    dentro del ID que le toca.
+
+    Cada uno lleva su ID (`id`, de la temporalidad `idTimeframe`), su clase
+    (`k`), la vela que lo define (`x0`), la vela en cuyo CIERRE se supo (`xk`),
+    hasta dónde llega (`x1`: la vela que lo usó, o la que mató al ID; `None`
+    si sigue vivo, y entonces llega al presente), sus dos bordes y si se usó
+    (`u`). El explorador dibuja el recuadro de `x0` a `x1` y, en replay, no lo
+    enseña hasta que cierran la vela `xk` y la que constituye su ID. Un gráfico
+    que no marca patrones no aparece: el explorador lo dice en el estado.
+    """
+    return {
+        chart: {
+            "idTimeframe": PATTERN_CHARTS[chart],
+            "list": [
+                {
+                    "id": int(row["id_num"]),
+                    "k": str(row["tipo"]),
+                    "d": str(row["direccion"]),
+                    "x0": _minute(pd.Timestamp(row["ts_origen"])),
+                    "xk": _minute(pd.Timestamp(row["ts_conocido"])),
+                    "x1": _optional_minute(row["ts_fin"]),
+                    "lo": round(float(row["precio_bajo"]), DECIMALS),
+                    "hi": round(float(row["precio_alto"]), DECIMALS),
+                    "u": bool(row["usado"]),
+                }
+                for row in frame.to_dict("records")
+            ],
+        }
+        for chart, frame in run.patterns.items()
+    }
 
 
 # --- Impulsos ---------------------------------------------------------------

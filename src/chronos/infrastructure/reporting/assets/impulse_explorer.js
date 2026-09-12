@@ -52,10 +52,10 @@
    * pasan cosas, no CUÁLES. Estos tres niveles son un preset de las casillas que
    * ya existen —ni una capa nueva, ni un cálculo nuevo— y se aplican de golpe:
    *
-   *   · Limpio  — el ID actual y su marco en la temporalidad que se está
-   *               mirando, y nada más. Fuera se quedan las capas que no deciden
-   *               nada sobre el ID vigente: limbo, contactos, 50 %, extremo
-   *               contrario y las sesiones de Asia y Londres.
+   *   · Limpio  — el ID actual, su marco y sus OB y FVG en la temporalidad que
+   *               se está mirando, y nada más. Fuera se quedan las capas que no
+   *               deciden nada sobre el ID vigente: limbo, contactos, 50 %,
+   *               extremo contrario y las sesiones de Asia y Londres.
    *   · Normal  — lo que el explorador enseñaba hasta ahora, más las sesiones.
    *   · Todo    — todo, incluidos los contactos.
    *
@@ -72,17 +72,17 @@
     clean: {
       visible: "current",
       limbo: false, marks: true, contacts: false, mid: false, wrong: false,
-      frame: true, sessions: false
+      frame: true, sessions: false, patterns: true
     },
     normal: {
       visible: "pair",
       limbo: true, marks: true, contacts: false, mid: false, wrong: true,
-      frame: true, sessions: true
+      frame: true, sessions: true, patterns: true
     },
     all: {
       visible: "all",
       limbo: true, marks: true, contacts: true, mid: true, wrong: true,
-      frame: true, sessions: true
+      frame: true, sessions: true, patterns: true
     }
   };
 
@@ -125,6 +125,10 @@
      * «Normal» y en «Todo»; «Limpio» los apaga como a todo lo que no decide
      * sobre el ID. */
     sessions: true,
+    /* El OB y el FVG que marca el motor dentro del ID (K.1). Encendidos en los
+     * tres niveles de ruido: son lo que se está auditando ahora y cuelgan del
+     * ID, así que obedecen el mismo filtro de ID visibles que su marco. */
+    patterns: true,
     blind: false,      // auditoría ciega en curso (F.1)
     revealed: false,
     seed: null,
@@ -794,6 +798,149 @@
         : "") +
       " · punteado desde la vela que fijó el nivel, continuo desde la marca" +
       " · las marcas anteriores no se dibujan: siguen en sesiones.csv";
+  }
+
+  // --- OB y FVG del motor (K.1) ------------------------------------------------
+  //
+  // Los patrones que el dominio marcó DENTRO del ID que le toca a cada gráfico:
+  // en el Diario y en H4 los de sus velas dentro de su ID, en H1 los de sus
+  // velas dentro del ID de H4. Vienen calculados —origen, cuándo se supo, hasta
+  // dónde llegan, si se usaron— y aquí sólo se elige cuáles se pintan: los de
+  // los ID que el filtro de ID visibles deja, dentro de la ventana y, en
+  // replay, sólo cuando ya se sabían. Cada patrón es un recuadro relleno con
+  // el tono de su clase y el nombre escrito dentro.
+
+  var PATTERN_KINDS = [
+    { id: "OB", label: "OB" },
+    { id: "FVG", label: "FVG" }
+  ];
+
+  function patternColor(kind) { return COLORS.patterns[kind]; }
+
+  /* Los patrones de este gráfico, o null si el gráfico no marca ninguno. */
+  function patternsOf() { return (DATA.patterns || {})[state.chart] || null; }
+
+  /* Sólo se dibujan sobre la corrida base: las variantes de R-36 no traen
+   * patrones y sus ID no son los mismos. */
+  function patternsOn() {
+    return state.patterns && !blindfolded() && state.mode === DATA.meta.legStartMode;
+  }
+
+  /* El ID del que cuelga cada patrón, por número: hace falta para no enseñar
+   * el patrón antes de que su ID se constituya. */
+  function impulseIndex(timeframe) {
+    var byId = {};
+    impulsesOf(timeframe).list.forEach(function (impulse) { byId[impulse.id] = impulse; });
+    return byId;
+  }
+
+  /* Los patrones que se pintan con esta ventana, ya filtrados. Es lo que
+   * comparten la traza y el estado, para que cuenten lo mismo. */
+  function drawnPatterns(edges) {
+    var source = patternsOf();
+    if (!patternsOn() || !source || !isVisible(source.idTimeframe)) { return []; }
+    var allowed = visibleIds(source.idTimeframe, edges);
+    var owners = impulseIndex(source.idTimeframe);
+    return source.list.filter(function (pattern) {
+      var owner = owners[pattern.id];
+      if (!owner) { return false; }
+      if (pattern.x0 > edges.hi || (pattern.x1 !== null && pattern.x1 < edges.lo)) { return false; }
+      // No existe hasta que cierra la vela que lo hace saber, ni antes de que
+      // exista el ID dentro del que se marca.
+      if (pending(pattern.xk, state.chart, edges)) { return false; }
+      if (pending(owner.x0, source.idTimeframe, edges)) { return false; }
+      return keeps(allowed, pattern.id);
+    });
+  }
+
+  function patternEnd(pattern, edges) {
+    return pattern.x1 === null ? edges.hi : clip(pattern.x1, edges);
+  }
+
+  function patternCaption(pattern, source, end, edges) {
+    var open = pattern.x1 === null || pending(pattern.x1, state.chart, edges);
+    return pattern.k + " DEL MOTOR · " + label(state.chart) +
+      " · dentro del ID " + label(source.idTimeframe) + " nº " + pattern.id +
+      " · " + pattern.d +
+      "<br>vela de " + stamp(pattern.x0) + " · se supo al cerrar la de " + stamp(pattern.xk) +
+      "<br>de " + price(pattern.lo) + " a " + price(pattern.hi) +
+      "<br>" + (open
+        ? "SIN USAR: sigue esperando, llega hasta " + stamp(end)
+        : pattern.u
+          ? "USADO: el precio volvió a entrar en la vela de " + stamp(pattern.x1)
+          : "sin usar: murió con su ID en la vela de " + stamp(pattern.x1));
+  }
+
+  function patternTraces(range) {
+    var source = patternsOf();
+    var edges = window_(range);
+    var drawn = drawnPatterns(edges);
+    if (!drawn.length) { return []; }
+    var buckets = {};
+    PATTERN_KINDS.forEach(function (kind) { buckets[kind.id] = { x: [], y: [], text: [], labels: [] }; });
+    drawn.forEach(function (pattern) {
+      var bucket = buckets[pattern.k];
+      if (!bucket) { return; }
+      var end = patternEnd(pattern, edges);
+      var a = iso(pattern.x0), b = iso(end);
+      var caption = patternCaption(pattern, source, end, edges);
+      // "usado" sólo cuando la vela que lo usó ya ha cerrado: en replay, un
+      // patrón que se usará más adelante todavía está esperando.
+      var used = pattern.u && !pending(pattern.x1, state.chart, edges);
+      // El primer punto es la esquina superior izquierda: ahí va el nombre.
+      bucket.x.push(a, b, b, a, a, null);
+      bucket.y.push(pattern.hi, pattern.hi, pattern.lo, pattern.lo, pattern.hi, null);
+      bucket.text.push(caption, caption, caption, caption, caption, "");
+      bucket.labels.push(
+        pattern.k + " " + label(state.chart) + " · ID " + label(source.idTimeframe) +
+          " nº " + pattern.id + (used ? " · usado" : ""),
+        "", "", "", "", ""
+      );
+    });
+    return PATTERN_KINDS.filter(function (kind) { return buckets[kind.id].x.length; })
+      .map(function (kind) {
+        var bucket = buckets[kind.id];
+        var colour = patternColor(kind.id);
+        return {
+          type: "scatter", mode: "lines+text", name: kind.label + " del motor",
+          x: bucket.x, y: bucket.y, text: bucket.labels, hovertext: bucket.text,
+          hoverinfo: "text", hoverlabel: { align: "left" }, connectgaps: false,
+          textposition: "bottom right", textfont: { size: 10, color: colour },
+          fill: "toself", fillcolor: rgba(colour, 0.16),
+          line: { color: colour, width: 1.2 }
+        };
+      });
+  }
+
+  /* Qué se está viendo de los OB y FVG, y qué no. */
+  function patternNote(edges) {
+    if (!state.patterns || blindfolded()) { return null; }
+    if (state.mode !== DATA.meta.legStartMode) {
+      return "OB y FVG del motor: sólo están calculados para el modo base (" +
+        DATA.meta.legStartMode + "), en este modo no se dibujan";
+    }
+    var source = patternsOf();
+    if (!source) {
+      return "OB y FVG del motor: en " + label(state.chart) +
+        " no se marcan (por ahora sólo en Diario, H4 y H1)";
+    }
+    if (!isVisible(source.idTimeframe)) {
+      return "OB y FVG del motor: apagados con el ID de " + label(source.idTimeframe) +
+        ", que es el que los acota";
+    }
+    var drawn = drawnPatterns(edges);
+    var counts = PATTERN_KINDS.map(function (kind) {
+      var n = drawn.filter(function (pattern) { return pattern.k === kind.id; }).length;
+      return n.toLocaleString("es-ES") + " " + kind.label;
+    });
+    var used = drawn.filter(function (pattern) {
+      return pattern.u && !pending(pattern.x1, state.chart, edges);
+    }).length;
+    return "OB y FVG del motor: " + counts.join(" y ") + " a la vista en " +
+      label(state.chart) + ", dentro del ID de " + label(source.idTimeframe) +
+      " (" + DATA.meta.patternRule + ")" +
+      (used ? " · " + used.toLocaleString("es-ES") + " usados, dibujados hasta la vela que los usó" : "") +
+      " · obedecen el filtro de ID visibles · ámbar el OB, índigo el FVG";
   }
 
   /* Capa R-36: dónde cae el extremo cuando lo fija una vela del color contrario
@@ -3346,6 +3493,7 @@
       .concat(contactTraces(range))
       .concat(wrongExtremeTraces(range))
       .concat(sessionTraces(range))
+      .concat(patternTraces(range))
       // Y en su propio panel, abajo del todo: el RSI no comparte eje con nada
       // de lo de arriba, así que da igual dónde se apile.
       .concat(rsiTraces(cut));
@@ -3373,7 +3521,8 @@
     ["mid", "nivel 50 %"],
     ["wrong", "extremo de color contrario"],
     ["frame", "marco del ID"],
-    ["sessions", "sesiones de Asia y Londres"]
+    ["sessions", "sesiones de Asia y Londres"],
+    ["patterns", "OB y FVG del motor"]
   ];
 
   /* Qué nivel de ruido está puesto y qué se está dejando fuera por él. Un
@@ -3417,6 +3566,9 @@
     // Y las sesiones, que sí son del motor: cuántas marcas hay a la vista y con
     // qué regla se calcularon.
     var sesiones = sessionCaption(edges);
+    // Y los OB y FVG del motor: cuántos hay a la vista, con qué regla, y en qué
+    // gráficos no se marcan todavía.
+    var patrones = patternNote(edges);
     if (blindfolded()) {
       return "AUDITORÍA CIEGA · semilla " + state.seed + " · " + label(state.chart) + " · " +
         range.from + " → " + range.to + " · " + visible.toLocaleString("es-ES") +
@@ -3511,6 +3663,7 @@
     }
     if (indice) { text += " · " + indice; }
     if (sesiones) { text += " · " + sesiones; }
+    if (patrones) { text += " · " + patrones; }
     if (simulada) { text += " · " + simulada; }
     if (recuadros) { text += " · " + recuadros; }
     if (lineas) { text += " · " + lineas; }
@@ -3890,7 +4043,8 @@
       ["layer-contacts", "contacts"],
       ["layer-mid", "mid"],
       ["layer-wrong", "wrong"],
-      ["layer-sessions", "sessions"]
+      ["layer-sessions", "sessions"],
+      ["layer-patterns", "patterns"]
     ].forEach(function (pair) {
       document.getElementById(pair[0]).checked = state[pair[1]];
     });
@@ -4015,7 +4169,8 @@
       ["layer-mid", "mid"],
       ["layer-wrong", "wrong"],
       ["layer-frame", "frame"],
-      ["layer-sessions", "sessions"]
+      ["layer-sessions", "sessions"],
+      ["layer-patterns", "patterns"]
     ].forEach(function (pair) {
       document.getElementById(pair[0]).addEventListener("change", function (event) {
         state[pair[1]] = event.target.checked;

@@ -17,12 +17,18 @@ import numpy as np
 import pandas as pd
 
 from chronos.application.structure.causal import PriorBarAtr
-from chronos.application.structure.config import ImpulseConfig
+from chronos.application.structure.config import PATTERN_CHARTS, ImpulseConfig
 from chronos.application.structure.timezone_audit import TimezoneAudit
 from chronos.domain.errors import DomainError
 from chronos.domain.structure.body import BodyBar
 from chronos.domain.structure.detector import DominantImpulseDetector
 from chronos.domain.structure.impulse import BarState, BreakEvent, DominantImpulse
+from chronos.domain.structure.patterns import (
+    DEFAULT_RULE,
+    PATTERN_COLUMNS,
+    PatternRule,
+    patterns_inside,
+)
 from chronos.domain.structure.sessions import OWNER_RULE, SessionLevelsRule, session_levels
 
 #: Columnas exigidas por §5.1, en su orden. Las que van detrás son material de
@@ -107,6 +113,12 @@ class ImpulseRun:
     #: recibió ese histórico: entonces no hay marcas, no marcas vacías.
     sessions: pd.DataFrame | None = None
     session_rule: SessionLevelsRule = OWNER_RULE
+    #: El OB y el FVG dentro del ID (K.1), una tabla por gráfico que los marca
+    #: según `PATTERN_CHARTS`: en el Diario y en H4 los de sus propias velas
+    #: dentro de su propio ID, en H1 los de sus velas dentro del ID de H4. Un
+    #: gráfico que no está aquí no marca ninguno.
+    patterns: dict[str, pd.DataFrame] = field(default_factory=dict)
+    pattern_rule: PatternRule = DEFAULT_RULE
 
     @property
     def emits_nothing(self) -> bool:
@@ -120,6 +132,16 @@ class ImpulseRun:
             return pd.DataFrame(columns=[*TABLE_COLUMNS, *AUDIT_COLUMNS])
         combined = pd.concat(frames, ignore_index=True)
         return combined.sort_values(["timeframe", "ts_constitucion"]).reset_index(drop=True)
+
+    def patterns_table(self) -> pd.DataFrame:
+        """Los OB y FVG de todos los gráficos en una tabla, ya ordenada."""
+        frames = [frame for frame in self.patterns.values() if not frame.empty]
+        if not frames:
+            return pd.DataFrame(columns=list(PATTERN_COLUMNS))
+        combined = pd.concat(frames, ignore_index=True)
+        return combined.sort_values(["timeframe", "ts_conocido", "ts_origen"]).reset_index(
+            drop=True
+        )
 
 
 class DetectDominantImpulses:
@@ -137,6 +159,7 @@ class DetectDominantImpulses:
         aggregation_notes: Sequence[str] = (),
         base_bars: pd.DataFrame | None = None,
         session_rule: SessionLevelsRule = OWNER_RULE,
+        pattern_rule: PatternRule = DEFAULT_RULE,
     ) -> ImpulseRun:
         """`series` trae las velas de cada gráfico; el detector sólo corre en las
         temporalidades que el reparto declara como impulso.
@@ -161,6 +184,19 @@ class DetectDominantImpulses:
             timeframe: self._analyse(timeframe, series[timeframe], config_hash)
             for timeframe in detected
         }
+        # K.1: el OB y el FVG de cada gráfico, dentro del ID que le toca. Sólo
+        # donde hay velas del gráfico y detector del ID que lo acota.
+        patterns = {
+            chart: patterns_inside(
+                series[chart],
+                timeframe=chart,
+                impulses=analyses[id_timeframe].published,
+                id_bars=analyses[id_timeframe].bars,
+                rule=pattern_rule,
+            )
+            for chart, id_timeframe in PATTERN_CHARTS.items()
+            if chart in series and id_timeframe in analyses
+        }
         return ImpulseRun(
             enabled=True,
             config=self._config,
@@ -176,6 +212,8 @@ class DetectDominantImpulses:
                 session_levels(base_bars, session_rule) if base_bars is not None else None
             ),
             session_rule=session_rule,
+            patterns=patterns,
+            pattern_rule=pattern_rule,
         )
 
     # --- Interno ------------------------------------------------------------

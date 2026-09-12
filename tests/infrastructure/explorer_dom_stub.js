@@ -59,7 +59,7 @@ function declare(id) {
  'mode-group', 'impulse-layers', 'chart', 'zoom-reset', 'noise-buttons',
  'prev', 'next',
  'from', 'to', 'layer-limbo', 'layer-marks', 'layer-contacts', 'layer-mid', 'layer-wrong',
- 'layer-frame', 'layer-sessions',
+ 'layer-frame', 'layer-sessions', 'layer-patterns',
  'blind-seed', 'blind-start', 'blind-reveal', 'blind-exit',
  'sim-group', 'sim-buttons', 'sim-rr', 'sim-clear',
  'rect-group', 'rect-buttons', 'rect-undo', 'rect-clear',
@@ -375,7 +375,7 @@ function snapshot(label) {
     // Las casillas que el preset mueve sin que nadie las toque: si el estado y
     // el control se separan, el explorador miente sobre lo que se está viendo.
     boxes: ['layer-limbo', 'layer-marks', 'layer-contacts', 'layer-mid', 'layer-wrong',
-      'layer-frame', 'layer-sessions']
+      'layer-frame', 'layer-sessions', 'layer-patterns']
       .reduce(function (state, id) {
         state[id] = elements[id].checked === true;
         return state;
@@ -500,6 +500,37 @@ steps.push(snapshot('con-sesiones'));
 elements['layer-sessions'].fire('change', { target: { checked: false } });
 steps.push(snapshot('sin-sesiones'));
 elements['layer-sessions'].fire('change', { target: { checked: true } });
+tabs[0].fire('click');
+
+// K.1 — el OB y el FVG que marca el motor dentro del ID. Se retratan en H1 con
+// el periodo entero y todos los ID a la vista —es donde se marcan dentro del ID
+// de H4, el caso con dos temporalidades—, apagados sobre las mismas velas para
+// comprobar que la casilla los quita, en el Diario y en H4 con su propio ID, y
+// en M15, donde no se marcan y el estado tiene que decirlo.
+const h1Patterns = tabs.filter(function (tab) { return tab.dataset.tf === 'H1'; })[0] || tabs[0];
+h1Patterns.fire('click');
+presets[0].fire('click');
+setNoise('all');
+steps.push(snapshot('con-patrones'));
+elements['layer-patterns'].fire('change', { target: { checked: false } });
+steps.push(snapshot('sin-patrones'));
+elements['layer-patterns'].fire('change', { target: { checked: true } });
+setNoise('clean');
+steps.push(snapshot('patrones-id-actual'));
+setNoise('all');
+tabs.filter(function (tab) { return tab.dataset.tf === 'D'; }).forEach(function (tab) {
+  tab.fire('click');
+  steps.push(snapshot('patrones-diario'));
+});
+tabs.filter(function (tab) { return tab.dataset.tf === 'H4'; }).forEach(function (tab) {
+  tab.fire('click');
+  steps.push(snapshot('patrones-h4'));
+});
+tabs.filter(function (tab) { return tab.dataset.tf === 'M15'; }).forEach(function (tab) {
+  tab.fire('click');
+  steps.push(snapshot('patrones-m15'));
+});
+setNoise('normal');
 tabs[0].fire('click');
 
 // El MARCO del ID: el recuadro de la constitución a la muerte y del ancla al

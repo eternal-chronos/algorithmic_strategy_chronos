@@ -72,6 +72,7 @@ class ImpulseReportWriter:
         _contacts_frame(lateralization).to_csv(folder / "contactos.csv", index=False)
         if run.sessions is not None:
             run.sessions.to_csv(folder / "sesiones.csv", index=False)
+        run.patterns_table().to_csv(folder / "patrones.csv", index=False)
 
         if run.config.reporting.text_report:
             (folder / "reporte.txt").write_text(

@@ -123,8 +123,8 @@ encuadre automático. También con doble clic sobre el gráfico.">Ajustar</butto
       </div>
     </div>
     <div class="group">
-      <span title="Preset de capas. Limpio deja el ID actual y su marco en esta
-temporalidad, y nada más: fuera quedan limbo, contactos, 50 %, extremo contrario y las
+      <span title="Preset de capas. Limpio deja el ID actual, su marco y sus OB y FVG en
+esta temporalidad, y nada más: fuera quedan limbo, contactos, 50 %, extremo contrario y las
 sesiones de Asia y Londres. Normal es lo que el explorador enseñaba hasta ahora, más las
 sesiones. Todo lo enciende entero.
 No cambia la detección ni los informes: sólo cuántas cosas se dibujan a la vez.">
@@ -165,6 +165,21 @@ cuya sesión no tuvo barras no se dibuja y el estado lo dice.
 SÓLO SE DIBUJA LA MARCA ACTUAL: la última puesta a la hora del borde derecho de la ventana
 (o del reloj del replay). Las anteriores no se pintan; siguen en sesiones.csv.">
           <input type="checkbox" id="layer-sessions"> Asia y Londres</label>
+        <label class="toggle" title="El OB y el FVG que marca el MOTOR DENTRO DEL ID: en el
+Diario dentro del ID del Diario, en H4 dentro del ID de H4 y en H1 —que no tiene ID— dentro
+del ID de H4. M15 y M5 no marcan nada todavía.
+DENTRO DEL ID quiere decir: en su dirección (alcistas en un ID alcista), solapando su rango
+de ancla a extremo, y formados desde la VELA PREVIA al arranque de la pierna —de ahí sale el
+OB «donde arranca el ID», que asoma por debajo del ancla y es el que más importa— hasta la
+vela que mata al ID. Un patrón que cae en la ventana de dos ID es del último.
+OB: vela contraria y, en tres velas, un cierre más allá de su extremo; la zona es la vela
+entera. FVG: hueco de tres velas entre mechas. USADO: el precio volvió a entrar en la zona
+mientras el ID vivía; se dibuja hasta la vela que lo usó y lo dice en el nombre.
+Recuadro relleno con el nombre dentro: ÁMBAR el OB, ÍNDIGO el FVG. Ninguno es de la mano
+(magenta y cian). En replay no aparece hasta que cierra la vela que lo hace saber y hasta
+que existe su ID. Obedece el filtro de ID visibles: con «ID actual» sólo los del ID actual.
+Todo viene calculado del motor: el explorador no busca ningún patrón.">
+          <input type="checkbox" id="layer-patterns" checked> OB y FVG</label>
       </div>
     </div>
     <div class="group" id="replay-group">
@@ -449,10 +464,23 @@ configuración, el historial y las estadísticas, en texto">Copiar</button>
       marcados A MANO («Rectángulo»): cada nombre con su color, punteados y numerados por
       nombre en el orden en que se plantan. El botón arma, el clic lo planta y después se
       arrastra: bordes de arriba y abajo = techo y suelo, bordes de los lados = el tramo,
-      por dentro = moverlo entero. Escape desarma. NO SON ZONAS DEL MOTOR: no las ha
-      detectado nada, no hay regla de OB ni FVG en el proyecto y no salen de la
-      pantalla. Son, con la caja simulada, lo único del gráfico que dibuja el
-      propietario</span>
+      por dentro = moverlo entero. Escape desarma. NO SON ZONAS DEL MOTOR: los del
+      motor van en ámbar y en índigo (capa «OB y FVG»); éstos no los ha detectado nada y
+      no salen de la pantalla. Son, con la caja simulada, lo único del gráfico que dibuja
+      el propietario</span>
+    <span><i class="box" style="background:#cf8a00; opacity:.5"></i><b>OB del motor</b>
+      <i class="box" style="background:#3d47b5; opacity:.5"></i><b>FVG del motor</b>: los
+      patrones que el MOTOR marca <b>DENTRO DEL ID</b> (capa «OB y FVG»): en el Diario
+      dentro del ID del Diario, en H4 dentro del ID de H4 y en H1 —que no tiene ID—
+      dentro del ID de H4; M15 y M5 no marcan nada todavía. Dentro del ID quiere decir en
+      su dirección, solapando su rango de ancla a extremo y formados desde la VELA PREVIA
+      al arranque de la pierna —el OB «donde arranca el ID», que asoma por debajo del
+      ancla— hasta la vela que lo mata. OB = vela contraria y, en tres velas, un cierre
+      más allá de su extremo, zona la vela entera; FVG = hueco de tres velas entre mechas.
+      Recuadro RELLENO con el nombre y el ID dentro; USADO cuando el precio volvió a
+      entrar mientras el ID vivía: se dibuja hasta esa vela y lo dice. Obedecen el filtro
+      de ID visibles y en replay no aparecen hasta que cierra la vela que los hace saber
+      y existe su ID. Vienen calculados: el explorador no busca ningún patrón</span>
     <span><i style="background:#c0359a"></i><b>Diario</b>
       <i style="background:#0b8fa8"></i><b>H4</b>
       <i style="background:#7c8b12"></i><b>H1</b>: LÍNEAS marcadas A MANO («Línea»): un
