@@ -443,12 +443,14 @@ steps.push(snapshot('teclado-derecha'));
 pressKey('ArrowLeft', 'INPUT');
 steps.push(snapshot('teclado-en-un-campo'));
 
-// Atajos de temporalidad: d/4/1/m saltan de gráfico, salvo con el foco en un
+// Atajos de temporalidad: d/4/1/m/5 saltan de gráfico, salvo con el foco en un
 // campo de texto o con una tecla modificadora (Ctrl+D es del navegador).
 pressKey('4');
 steps.push(snapshot('teclado-tf-h4'));
 pressKey('m');
 steps.push(snapshot('teclado-tf-m15'));
+pressKey('5');
+steps.push(snapshot('teclado-tf-m5'));
 pressKey('1');
 steps.push(snapshot('teclado-tf-h1'));
 pressKey('d', 'INPUT');

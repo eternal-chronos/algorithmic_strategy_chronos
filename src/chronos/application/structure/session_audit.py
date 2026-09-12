@@ -20,14 +20,14 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from chronos.application.structure.config import DAILY, H1, H4, M15
+from chronos.application.structure.config import DAILY, H1, H4, M5, M15
 from chronos.application.structure.detect_impulses import TimeframeAnalysis
 from chronos.application.structure.lateralization import DEGENERATE_RANGE_ATR
 from chronos.application.structure.statistics import whipsaw_episodes
 from chronos.domain.structure.enums import MachineState
 
 #: Minutos de mercado que promete cada temporalidad cuando la vela está completa.
-EXPECTED_MINUTES: dict[str, int] = {M15: 15, H1: 60, H4: 240, DAILY: 1440}
+EXPECTED_MINUTES: dict[str, int] = {M5: 5, M15: 15, H1: 60, H4: 240, DAILY: 1440}
 
 #: Por debajo de esta fracción de sus minutos, la vela se cuenta como corta. Sale
 #: del enunciado del propietario, no de una búsqueda de umbrales.

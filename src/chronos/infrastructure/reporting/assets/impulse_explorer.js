@@ -3692,8 +3692,8 @@
   // --- Controles ------------------------------------------------------------
 
   /* Atajos de temporalidad: una tecla por gráfico. Si la corrida no trae ese
-   * gráfico —un histórico H1 no da para M15— la tecla no hace nada. */
-  var CHART_KEYS = { "d": "D", "4": "H4", "1": "H1", "m": "M15" };
+   * gráfico —un histórico H1 no da para M15 ni para M5— la tecla no hace nada. */
+  var CHART_KEYS = { "d": "D", "4": "H4", "1": "H1", "m": "M15", "5": "M5" };
   var CHART_SHORTCUTS = {};
   Object.keys(CHART_KEYS).forEach(function (key) { CHART_SHORTCUTS[CHART_KEYS[key]] = key; });
 

@@ -17,6 +17,7 @@ from chronos.application.structure.config import (
     DAILY,
     H1,
     H4,
+    M5,
     M15,
     AggregationConfig,
     ChartsConfig,
@@ -115,10 +116,10 @@ def test_cada_fila_es_trazable_a_su_configuracion(run: ImpulseRun) -> None:
 
 def test_solo_se_detecta_en_las_temporalidades_que_llevan_impulso(run: ImpulseRun) -> None:
     tabla = run.table()
-    # H1 y M15 se dibujan pero no llevan detector: no se les marca ID, y sobre
-    # las dos se ve el impulso de H4.
+    # H1, M15 y M5 se dibujan pero no llevan detector: no se les marca ID, y
+    # sobre las tres se ve el impulso de H4.
     assert set(tabla["timeframe"]) == {H4, DAILY}
-    assert set(run.chart_bars) == {M15, H1, H4, DAILY}
+    assert set(run.chart_bars) == {M5, M15, H1, H4, DAILY}
     # Un ID diario se rompe con cierres diarios: hay muchos menos que en H4.
     assert (tabla["timeframe"] == H4).sum() > (tabla["timeframe"] == DAILY).sum()
 
@@ -273,7 +274,7 @@ def test_el_explorador_dibuja_impulsos_limbo_y_marcadores(run: ImpulseRun) -> No
     assert any(
         item["d"] == ImpulseDirection.ALCISTA.value for item in h4["list"]
     ), "sin ningún impulso alcista que dibujar"
-    assert payload["charts"] == [DAILY, H4, H1, M15]
+    assert payload["charts"] == [DAILY, H4, H1, M15, M5]
 
 
 def test_el_explorador_es_autocontenido_y_con_cuatro_decimales(run: ImpulseRun) -> None:

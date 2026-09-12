@@ -84,9 +84,9 @@ data:
 # En el diario los cortes 22:00, NY_17:00 y NY_18:00 producen velas idénticas —el
 # M1 ya trae la parada diaria del oro—, así que el cambio sólo mueve H4.
 #
-# Sólo H4 y el diario llevan desplazamiento: la rejilla de M15 y H1 —cuartos de
-# hora y horas en punto— es la misma en todas las plataformas. Y son justo las
-# dos temporalidades que llevan detector.
+# Sólo H4 y el diario llevan desplazamiento: la rejilla de M5, M15 y H1 —cinco
+# minutos, cuartos de hora y horas en punto— es la misma en todas las
+# plataformas. Y son justo las dos temporalidades que llevan detector.
 aggregation:
   # Desplazamiento del inicio de las velas H4 respecto a 00:00 UTC. Se IGNORA
   # con el ancla de sesión de abajo: H4 arranca con la sesión y avanza de cuatro
@@ -111,9 +111,10 @@ aggregation:
 # Una temporalidad que no aparece como PRIMERA de ninguna lista no lleva
 # detector: no se le marca ID.
 #
-# EL ID VIVE SÓLO EN EL DIARIO Y EN H4. H1 y M15 no tienen impulso propio: son
-# las temporalidades en las que se mira cómo llega el precio a la zona, y sobre
-# ellas se dibuja el ID de H4 como contexto y nada más.
+# EL ID VIVE SÓLO EN EL DIARIO Y EN H4. H1, M15 y M5 no tienen impulso propio:
+# son las temporalidades en las que se mira cómo llega el precio a la zona, y
+# sobre ellas se dibuja el ID de H4 como contexto y nada más. M5 es la más fina
+# y es donde se afinan la entrada y el stop.
 #
 # EL DIARIO SE DIBUJA SÓLO EN SU GRÁFICO. En H4 no se ve nada del Diario —ni su
 # ID ni su marco—: lo que manda ahí es el ID de H4, y la caja diaria encima
@@ -123,6 +124,7 @@ charts:
   H4: [H4]
   H1: [H4]
   M15: [H4]
+  M5: [H4]
 
 rules:
   # DECIDIDO (§2.5, R-02). Dónde se ancla el nuevo impulso:
@@ -222,7 +224,7 @@ reporting:
   # TODAS. Con el recorte a 60.000, M15 sólo llegaba a mediados de 2023: abrir
   # M15 sobre cualquier operación anterior enseñaba un gráfico vacío, que es
   # justo la temporalidad en la que se audita la afinación de la entrada. Ocho
-  # años de M15 son ~190.000 velas y engordan el fichero unos 7 MB; el
-  # explorador sólo dibuja el tramo de la ventana, así que el coste es de
-  # descarga, no de dibujo.
+  # años de M15 son ~190.000 velas y engordan el fichero unos 7 MB, y los de M5
+  # —~570.000 velas— unos 20 MB más; el explorador sólo dibuja el tramo de la
+  # ventana, así que el coste es de descarga, no de dibujo.
   max_explorer_bars: 0

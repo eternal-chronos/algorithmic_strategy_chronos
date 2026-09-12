@@ -47,19 +47,20 @@ def test_el_yaml_del_proyecto_carga_y_declara_los_parametros_abiertos() -> None:
 
 
 def test_el_reparto_de_graficos_del_yaml_es_el_del_propietario() -> None:
-    """Cada uno con el suyo, y H1 y M15 con el de H4.
+    """Cada uno con el suyo, y H1, M15 y M5 con el de H4.
 
-    El ID vive sólo en el Diario y en H4: a H1 y a M15 no se les marca ID. Y el
-    Diario se dibuja SÓLO en su gráfico: en H4 no se ve nada suyo.
+    El ID vive sólo en el Diario y en H4: a H1, M15 y M5 no se les marca ID. Y
+    el Diario se dibuja SÓLO en su gráfico: en H4 no se ve nada suyo.
     """
     charts = load_impulse_config(Path("config/impulse.yaml")).charts
 
-    assert charts.charts == ("D", "H4", "H1", "M15")
+    assert charts.charts == ("D", "H4", "H1", "M15", "M5")
     assert charts.overlays("D") == ("D",)
     assert charts.overlays("H4") == ("H4",)
     assert charts.overlays("H1") == ("H4",)
     assert charts.overlays("M15") == ("H4",)
-    # H1 y M15 se dibujan pero no llevan detector propio.
+    assert charts.overlays("M5") == ("H4",)
+    # H1, M15 y M5 se dibujan pero no llevan detector propio.
     assert charts.detected == ("D", "H4")
 
 
@@ -211,11 +212,11 @@ def test_detect_con_el_modulo_apagado_no_escribe_nada(tmp_path: Path) -> None:
 def test_detect_omite_el_grafico_que_el_historico_no_da_para_construir(
     tmp_path: Path,
 ) -> None:
-    """Con un histórico H1 hay diario, H4 y H1, pero no M15.
+    """Con un histórico H1 hay diario, H4 y H1, pero no M15 ni M5.
 
-    Fabricar velas M15 a partir de velas de una hora sería inventarse datos; y
-    abortar la fase entera por un gráfico que no lleva impulso propio sería peor
-    que trabajar con lo que hay. Se omite y se dice.
+    Fabricar velas M15 o M5 a partir de velas de una hora sería inventarse datos;
+    y abortar la fase entera por un gráfico que no lleva impulso propio sería
+    peor que trabajar con lo que hay. Se omite y se dice.
     """
     hourly = (
         make_m1_history(weeks=10)
@@ -228,11 +229,14 @@ def test_detect_omite_el_grafico_que_el_historico_no_da_para_construir(
 
     assert result.exit_code == 0
     assert "se omite el gráfico M15" in result.stdout
+    assert "se omite el gráfico M5" in result.stdout
     carpeta = next(iter((tmp_path / "out").iterdir()))
     tabla = pd.read_csv(carpeta / "impulsos.csv")
     # H1 se dibuja, pero el ID sólo se marca en el diario y en H4.
     assert set(tabla["timeframe"]) == {"D", "H4"}
-    assert "M15" in (carpeta / "reporte.txt").read_text(encoding="utf-8")
+    reporte = (carpeta / "reporte.txt").read_text(encoding="utf-8")
+    assert "M15" in reporte
+    assert "M5" in reporte
 
 
 def test_detect_no_omite_una_temporalidad_que_lleva_impulso(tmp_path: Path) -> None:

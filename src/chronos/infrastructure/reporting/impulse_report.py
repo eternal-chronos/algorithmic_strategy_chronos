@@ -401,6 +401,7 @@ def _effective_parameters(run: ImpulseRun) -> str:
         ],
         ["Offset de H1", "0 h (rejilla de horas en punto, sin parámetro)"],
         ["Offset de M15", "0 min (cuartos de hora, sin parámetro)"],
+        ["Offset de M5", "0 min (cinco minutos en punto, sin parámetro)"],
         ["STRUCTURE_SIDE", config.structure_side],
         ["ANCHOR_MODE", config.rules.anchor_mode.value],
         ["LEG_START_MODE", config.rules.leg_start_mode.value],

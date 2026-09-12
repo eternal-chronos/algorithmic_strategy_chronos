@@ -27,6 +27,7 @@ from chronos.application.structure.config import (
     DAILY,
     H1,
     H4,
+    M5,
     M15,
     AggregationConfig,
     ChartsConfig,
@@ -85,7 +86,9 @@ def run() -> ImpulseRun:
 #: propietario —el Diario se dibuja sólo en su gráfico— pero es el único modo de
 #: retratar el trazo punteado y la casilla por temporalidad con los dos únicos
 #: detectores que hay, el Diario y H4.
-CONTEXT_CHARTS = ChartsConfig({DAILY: (DAILY,), H4: (H4, DAILY), H1: (H4,), M15: (H4,)})
+CONTEXT_CHARTS = ChartsConfig(
+    {DAILY: (DAILY,), H4: (H4, DAILY), H1: (H4,), M15: (H4,), M5: (H4,)}
+)
 
 
 @pytest.fixture
@@ -102,44 +105,48 @@ def context_run(run: ImpulseRun) -> ImpulseRun:
 
 def test_el_reparto_por_defecto_es_el_del_propietario(run: ImpulseRun) -> None:
     payload = build_payload(run)
-    assert payload["charts"] == [DAILY, H4, H1, M15]
+    assert payload["charts"] == [DAILY, H4, H1, M15, M5]
     assert payload["layout"] == {
         DAILY: [DAILY],
         # El Diario se dibuja sólo en su gráfico: en H4 no se ve nada suyo.
         H4: [H4],
         H1: [H4],
         M15: [H4],
+        # M5 es donde se afinan la entrada y el stop: lleva el ID de H4 detrás.
+        M5: [H4],
     }
 
 
-def test_h1_y_m15_llevan_velas_pero_no_impulso_propio(run: ImpulseRun) -> None:
-    """El ID vive sólo en el Diario y en H4: sobre las otras dos se dibuja el de H4."""
+def test_h1_m15_y_m5_llevan_velas_pero_no_impulso_propio(run: ImpulseRun) -> None:
+    """El ID vive sólo en el Diario y en H4: sobre las otras tres se dibuja el de H4."""
     payload = build_payload(run)
-    assert {H1, M15} <= set(payload["bars"])
-    assert not {H1, M15} & set(payload["impulses"])
+    assert {H1, M15, M5} <= set(payload["bars"])
+    assert not {H1, M15, M5} & set(payload["impulses"])
     assert set(payload["impulses"]) == {DAILY, H4}
 
 
 def test_cada_grafico_tiene_sus_velas(run: ImpulseRun) -> None:
     counts = bar_counts(build_payload(run))
-    assert set(counts) == {DAILY, H4, H1, M15}
-    assert counts[M15] > counts[H1] > counts[H4] > counts[DAILY]
+    assert set(counts) == {DAILY, H4, H1, M15, M5}
+    assert counts[M5] > counts[M15] > counts[H1] > counts[H4] > counts[DAILY]
 
 
 def test_un_grafico_sin_velas_no_llega_a_ofrecerse(run: ImpulseRun) -> None:
-    """Con un histórico H1 no hay M15: su pestaña no puede quedarse esperando."""
-    sin_m15 = ImpulseRun(
+    """Con un histórico H1 no hay M15 ni M5: su pestaña no puede quedarse esperando."""
+    sin_finas = ImpulseRun(
         enabled=True,
         config=run.config,
         config_hash=run.config_hash,
         analyses=run.analyses,
-        chart_bars={chart: frame for chart, frame in run.chart_bars.items() if chart != M15},
+        chart_bars={
+            chart: frame for chart, frame in run.chart_bars.items() if chart not in (M15, M5)
+        },
     )
-    payload = build_payload(sin_m15)
+    payload = build_payload(sin_finas)
 
     assert payload["charts"] == [DAILY, H4, H1]
-    assert M15 not in payload["layout"]
-    assert M15 not in payload["bars"]
+    assert not {M15, M5} & set(payload["layout"])
+    assert not {M15, M5} & set(payload["bars"])
 
 
 def test_no_se_puede_superponer_una_temporalidad_inferior() -> None:
@@ -149,7 +156,7 @@ def test_no_se_puede_superponer_una_temporalidad_inferior() -> None:
 
 def test_una_temporalidad_no_soportada_se_rechaza() -> None:
     with pytest.raises(Exception, match="no soportada"):
-        ChartsConfig({"M5": ("M5",)})
+        ChartsConfig({"M3": ("M3",)})
 
 
 def test_las_detectadas_salen_de_lo_que_se_dibuja() -> None:
@@ -265,6 +272,7 @@ def test_la_cabecera_declara_el_reparto_y_el_hash(run: ImpulseRun) -> None:
     assert "H4: H4" in html
     assert "H4: H4 + Diario" not in html
     assert "M15: H4" in html
+    assert "M5: H4" in html
     assert run.config_hash in html
 
 
@@ -337,7 +345,7 @@ def test_el_explorador_se_dibuja_sin_errores(run: ImpulseRun, tmp_path: Path) ->
     assert not resultado["unknownElements"], (
         f"el explorador busca elementos que la plantilla no define: {resultado['unknownElements']}"
     )
-    assert resultado["chartTabs"] == ["Diario", "H4", "H1", "M15"]
+    assert resultado["chartTabs"] == ["Diario", "H4", "H1", "M15", "M5"]
     assert resultado["presetLabels"][0] == "Todo"
 
     todo = _step(resultado, "todo")["plot"]
@@ -354,6 +362,7 @@ def test_los_botones_dicen_que_impulso_dibuja_cada_grafico(
     titulos = dict(zip(resultado["chartTabs"], resultado["chartTitles"], strict=True))
     assert titulos["H4"] == "Dibuja el impulso de H4. Atajo de teclado: 4"
     assert titulos["M15"] == "Dibuja el impulso de H4. Atajo de teclado: m"
+    assert titulos["M5"] == "Dibuja el impulso de H4. Atajo de teclado: 5"
 
 
 def _ids_dibujados(step: dict) -> set[str]:
@@ -368,8 +377,8 @@ def test_cada_grafico_dibuja_el_impulso_que_le_toca(
 ) -> None:
     """En el reparto por defecto NINGÚN gráfico lleva contexto.
 
-    El Diario se dibuja sólo en su gráfico: en H4 no se ve nada suyo. H1 y M15 no
-    tienen ID propio, así que lo que llevan es el de H4 y es su principal.
+    El Diario se dibuja sólo en su gráfico: en H4 no se ve nada suyo. H1, M15 y
+    M5 no tienen ID propio, así que lo que llevan es el de H4 y es su principal.
     """
     resultado = _draw(run, tmp_path)
     esperado = {
@@ -377,6 +386,7 @@ def test_cada_grafico_dibuja_el_impulso_que_le_toca(
         "grafico-H4": {"ID H4"},
         "grafico-H1": {"ID H4"},
         "grafico-M15": {"ID H4"},
+        "grafico-M5": {"ID H4"},
     }
     for label, temporalidades in esperado.items():
         paso = _step(resultado, label)
@@ -409,10 +419,12 @@ def test_en_h4_no_se_dibuja_nada_del_diario(run: ImpulseRun, tmp_path: Path) -> 
 def test_los_marcadores_son_solo_del_impulso_principal(
     run: ImpulseRun, tmp_path: Path
 ) -> None:
-    """En M15 los marcadores son los de H4, que es el único impulso que se ve."""
-    nombres = [t["name"] for t in _step(_draw(run, tmp_path), "grafico-M15")["plot"]["traces"]]
-    assert "Constitución H4" in nombres
-    assert not any(nombre.startswith("Constitución M15") for nombre in nombres)
+    """En M15 y en M5 los marcadores son los de H4, que es el único impulso que se ve."""
+    resultado = _draw(run, tmp_path)
+    for grafico in (M15, M5):
+        nombres = [t["name"] for t in _step(resultado, f"grafico-{grafico}")["plot"]["traces"]]
+        assert "Constitución H4" in nombres, grafico
+        assert not any(nombre.startswith(f"Constitución {grafico}") for nombre in nombres)
 
 
 def test_las_capas_se_rehacen_al_cambiar_de_grafico(
@@ -421,6 +433,7 @@ def test_las_capas_se_rehacen_al_cambiar_de_grafico(
     resultado = _draw(run, tmp_path)
     assert _step(resultado, "grafico-H4")["layerLabels"] == ["ID H4 (principal)"]
     assert _step(resultado, "grafico-M15")["layerLabels"] == ["ID H4 (principal)"]
+    assert _step(resultado, "grafico-M5")["layerLabels"] == ["ID H4 (principal)"]
 
 
 def test_el_grafico_con_contexto_lleva_una_casilla_por_temporalidad(
@@ -707,13 +720,14 @@ def test_las_flechas_no_roban_el_teclado_a_los_campos(
     assert (en_campo["from"], en_campo["to"]) == (derecha["from"], derecha["to"])
 
 
-def test_las_teclas_d_4_1_m_cambian_la_temporalidad(
+def test_las_teclas_d_4_1_m_5_cambian_la_temporalidad(
     run: ImpulseRun, tmp_path: Path
 ) -> None:
-    """Una tecla por gráfico: d = Diario, 4 = H4, 1 = H1, m = M15."""
+    """Una tecla por gráfico: d = Diario, 4 = H4, 1 = H1, m = M15, 5 = M5."""
     resultado = _draw(run, tmp_path)
     assert _step(resultado, "teclado-tf-h4")["chart"] == H4
     assert _step(resultado, "teclado-tf-m15")["chart"] == M15
+    assert _step(resultado, "teclado-tf-m5")["chart"] == M5
     assert _step(resultado, "teclado-tf-h1")["chart"] == H1
     assert _step(resultado, "teclado-tf-diario")["chart"] == DAILY
 
@@ -922,7 +936,7 @@ def test_cada_temporalidad_declara_cuanto_dura_su_vela(run: ImpulseRun) -> None:
     """Sin la duración no se puede saber cuándo cerró una vela, y sin eso el
     replay no sabe qué puede dibujar."""
     spans = build_payload(run)["spans"]
-    assert spans == {DAILY: 1440, H4: 240, H1: 60, M15: 15}
+    assert spans == {DAILY: 1440, H4: 240, H1: 60, M15: 15, M5: 5}
 
 
 def test_el_replay_arranca_en_la_fecha_elegida(run: ImpulseRun, tmp_path: Path) -> None:

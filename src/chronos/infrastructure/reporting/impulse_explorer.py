@@ -7,7 +7,7 @@ comparar impulso a impulso.
 
 Cada gráfico dibuja **su** impulso y el de la temporalidad superior que le
 corresponda, según el reparto de `ChartsConfig`: el Diario sólo en su gráfico,
-sobre H4 el de H4, y sobre H1 y M15 el de H4 como contexto. El impulso
+sobre H4 el de H4, y sobre H1, M15 y M5 el de H4 como contexto. El impulso
 principal de cada gráfico lleva línea continua, sombreado de limbo y marcadores;
 el de contexto va en trazo discontinuo y sin marcadores, para que no compitan.
 
@@ -201,7 +201,7 @@ def build_payload(
         chart: _bars_payload(frame, max_bars) for chart, frame in run.chart_bars.items()
     }
     # Sólo se ofrecen los gráficos que tienen velas: si el histórico no daba
-    # para construir M15, su pestaña no puede quedarse ahí esperando a que
+    # para construir M15 o M5, su pestaña no puede quedarse ahí esperando a que
     # alguien la pulse.
     available = tuple(chart for chart in charts.charts if chart in bars)
     return {

@@ -669,9 +669,9 @@ def _aggregate_available(
 ) -> tuple[dict[str, AggregatedSeries], list[str]]:
     """Agrega cada gráfico; los que el histórico no da para construir, se saltan.
 
-    Un histórico H1 sirve para el diario, H4 y H1 pero no para M15. Abortar la
-    fase entera por eso sería peor que trabajar con lo que hay: lo que no puede
-    pasar es fabricar velas M15 a partir de velas de una hora, y de eso ya se
+    Un histórico H1 sirve para el diario, H4 y H1 pero no para M15 ni M5. Abortar
+    la fase entera por eso sería peor que trabajar con lo que hay: lo que no puede
+    pasar es fabricar velas M15 o M5 a partir de velas de una hora, y de eso ya se
     encarga `aggregate`. Si la temporalidad que falta lleva impulso, sí es fatal:
     su rotura la dibujan otros gráficos.
     """

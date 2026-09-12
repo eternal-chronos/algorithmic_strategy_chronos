@@ -77,7 +77,7 @@ footer code { background: var(--surface); border: 1px solid var(--grid); border-
 
   <div class="controls">
     <div class="group">
-      <span title="Atajos de teclado: d = Diario, 4 = H4, 1 = H1, m = M15.
+      <span title="Atajos de teclado: d = Diario, 4 = H4, 1 = H1, m = M15, 5 = M5.
 Se ignoran mientras el foco está en un campo de texto.">Temporalidad</span>
       <div class="buttons" id="tf-buttons"></div>
     </div>
@@ -145,7 +145,7 @@ No cambia la detección ni los informes: sólo cuántas cosas se dibujan a la ve
 CONSTITUYE y la que lo MATA en las dos verticales, y su ANCLA y su EXTREMO en las dos
 horizontales. Lo lleva CADA ID dibujado.
 El COLOR lo pone la TEMPORALIDAD —violeta el Diario, naranja H4—, no la dirección: en el
-mismo gráfico puede haber marcos de dos (el de H4 sobre H1 y M15) y lo primero es saber
+mismo gráfico puede haber marcos de dos (el de H4 sobre H1, M15 y M5) y lo primero es saber
 de quién es cada uno. La dirección sigue en la línea del ID.
 SE REMARCA mientras el ID vive: el lado derecho llega al presente.
 Obedece el selector de ID visibles.">
@@ -404,8 +404,12 @@ configuración, el historial y las estadísticas, en texto">Copiar</button>
       dirección se lee en la línea del ID y en el globo. Continuo el del gráfico,
       punteado el de la temporalidad de encima</span>
     <span>cada gráfico lleva su marco y el de la temporalidad que le toca: el de
-      <b>H4</b> sobre H1 y sobre M15, que no llevan ID propio. El <b>Diario</b> se dibuja
-      SÓLO en su gráfico: en H4 no se ve nada suyo</span>
+      <b>H4</b> sobre H1, sobre M15 y sobre M5, que no llevan ID propio. El <b>Diario</b> se
+      dibuja SÓLO en su gráfico: en H4 no se ve nada suyo</span>
+    <span><b>M5</b> es la temporalidad más fina del explorador y no lleva nada suyo: ni ID,
+      ni marco, ni marcadores. Está para afinar la ENTRADA y el STOP a mano —la caja
+      simulada, los recuadros y las líneas— con el ID de H4 detrás como contexto; el
+      motor no calcula nada sobre M5</span>
     <span>el marco SE REMARCA mientras el ID vive: el lado derecho llega al presente</span>
     <span>✕ grueso = extremo fijado por una vela del color contrario al impulso (R-36),
       sobre la vela que lo fijó</span>
@@ -421,8 +425,8 @@ configuración, el historial y las estadísticas, en texto">Copiar</button>
     <span>el zoom hecho a mano (rueda o arrastre) se conserva paso a paso durante el
       replay: la ventana sólo se desplaza para seguir a la última vela. «Ajustar»
       o doble clic devuelven el encuadre automático</span>
-    <span>teclas <b>d</b> (Diario), <b>4</b> (H4), <b>1</b> (H1) y <b>m</b> (M15) cambian
-      la temporalidad; se ignoran con el foco en un campo de texto</span>
+    <span>teclas <b>d</b> (Diario), <b>4</b> (H4), <b>1</b> (H1), <b>m</b> (M15) y <b>5</b>
+      (M5) cambian la temporalidad; se ignoran con el foco en un campo de texto</span>
     <span><i class="box" style="background:#1baf7a; opacity:.22"></i>
       <i class="box" style="background:#d03b3b; opacity:.22"></i>Entrada SIMULADA a mano
       («Simular entrada»): la caja verde es el objetivo y la roja el riesgo, colgando de la
