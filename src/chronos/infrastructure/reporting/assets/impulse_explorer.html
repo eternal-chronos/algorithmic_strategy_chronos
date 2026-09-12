@@ -124,8 +124,9 @@ encuadre automático. También con doble clic sobre el gráfico.">Ajustar</butto
     </div>
     <div class="group">
       <span title="Preset de capas. Limpio deja el ID actual y su marco en esta
-temporalidad, y nada más: fuera quedan limbo, contactos, 50 % y extremo contrario.
-Normal es lo que el explorador enseñaba hasta ahora. Todo lo enciende entero.
+temporalidad, y nada más: fuera quedan limbo, contactos, 50 %, extremo contrario y las
+sesiones de Asia y Londres. Normal es lo que el explorador enseñaba hasta ahora, más las
+sesiones. Todo lo enciende entero.
 No cambia la detección ni los informes: sólo cuántas cosas se dibujan a la vez.">
         Ruido
       </span>
@@ -151,6 +152,19 @@ Obedece el selector de ID visibles.">
           <input type="checkbox" id="layer-frame" checked> Marco del ID</label>
         <label class="toggle"><input type="checkbox" id="layer-wrong">
           Extremo de color contrario (R-36)</label>
+        <label class="toggle" title="El ALTO y el BAJO de ASIA y de LONDRES, marcados por el
+MOTOR cada día a las 7:58: Asia va de 20:00 a 01:00 y Londres de 03:00 a 08:00, pero a las
+7:58 sólo se conoce lo cerrado a las 7:58, así que Londres se mide de 03:00 a 07:58. Los
+cuatro se dejan puestos hasta las 17:00. Las horas son las del RELOJ DE LA PANTALLA —el que
+se imprime al lado de la UTC, UTC-4 fijo—, no las de Nueva York con horario de verano: así
+la marca cae a las 7:58 de lo que ves, en verano y en invierno.
+Un tono por sesión —marrón Asia, púrpura Londres— y el nombre y el precio escritos en la
+marca. Punteado desde la vela que fijó el nivel hasta la marca; continuo desde la marca.
+Se calculan sobre el M1 y vienen hechos: el explorador no mide ningún máximo. Un nivel
+cuya sesión no tuvo barras no se dibuja y el estado lo dice.
+SÓLO SE DIBUJA LA MARCA ACTUAL: la última puesta a la hora del borde derecho de la ventana
+(o del reloj del replay). Las anteriores no se pintan; siguen en sesiones.csv.">
+          <input type="checkbox" id="layer-sessions"> Asia y Londres</label>
       </div>
     </div>
     <div class="group" id="replay-group">
@@ -201,6 +215,9 @@ interior lo desplaza todo. La etiqueta dice los pips de cada lado y el R:R; un p
 El R:R NO SE PONE A MANO: sale de medir la caja —del stop al objetivo— y se vuelve a medir
 en cuanto arrastras cualquiera de los dos, así que dice 1:3, 1:4 o 1:2,44 según lo que haya
 dibujado. La caja nace con el objetivo a dos riesgos sólo para tener de dónde arrastrar.
+Caben DOS cajas a la vez —largas, cortas o una de cada—, numeradas por orden. La ACTIVA es la
+última plantada o agarrada: es la que cobra la cuenta simulada y la que se lleva «Quitar».
+Con las dos puestas, Largo y Corto se apagan hasta que una se cobre o se quite.
 ES DIBUJO A MANO Y NADA MÁS: no hay orden, ni ejecución, ni resultado. Nadie mira si el
 precio llegó al objetivo o al stop, no sale de la pantalla y el motor no la ve. El
 proyecto sigue sin entradas.">
@@ -210,20 +227,20 @@ proyecto sigue sin entradas.">
         <div class="buttons" id="sim-buttons"></div>
         <span id="sim-rr" title="Sin caja dibujada no hay distancias que medir.">R:R —</span>
         <div class="buttons">
-          <button type="button" id="sim-clear" title="Quita la caja simulada">Quitar</button>
+          <button type="button" id="sim-clear" title="Quita la caja simulada (con dos, la activa)">Quitar</button>
         </div>
       </div>
     </div>
     <div class="group" id="rect-group">
-      <span title="Tres RECUADROS que dibujas TÚ para marcar dónde ves un PUL, un UL o un
-APUL. Cada botón ARMA el suyo y el clic siguiente sobre el gráfico lo PLANTA ahí; después se
-arrastra: los bordes de arriba y abajo mueven el techo y el suelo, los de los lados alargan
-el tramo y por dentro se desplaza entero. Escape desarma sin plantar nada.
+      <span title="Dos RECUADROS que dibujas TÚ para marcar dónde ves un OB o un FVG. Cada
+botón ARMA el suyo y el clic siguiente sobre el gráfico lo PLANTA ahí; después se arrastra:
+los bordes de arriba y abajo mueven el techo y el suelo, los de los lados alargan el tramo y
+por dentro se desplaza entero. Escape desarma sin plantar nada.
 Se pueden marcar VARIOS de cada nombre —el de H4 y el de H1 en el mismo gráfico— y se
 numeran por nombre en el orden en que se plantan.
-Cada nombre lleva SU COLOR y todos van punteados a propósito: ninguna capa del motor usa
+Cada nombre lleva SU COLOR y los dos van punteados a propósito: ninguna capa del motor usa
 esos colores, así que lo que se vea así lo has puesto tú.
-NO SON ZONAS DEL MOTOR: no las ha detectado nadie, no hay regla de PUL, UL ni APUL en el
+NO SON ZONAS DEL MOTOR: no las ha detectado nadie, no hay regla de OB ni FVG en el
 proyecto, no salen de la pantalla y el motor no se entera de que existen. Sirven para mandar
 una captura señalando lo que aún no se detecta.">
         Rectángulo
@@ -250,6 +267,8 @@ plantan.
 Llevan los mismos tres tonos de la mano que los recuadros —y no los que el motor usa por
 temporalidad, para que una línea de H4 no se confunda con el marco de H4 que sí ha
 calculado alguien— y van CONTINUAS: punteado es recuadro, continuo es línea.
+El alto y el bajo de Asia y de Londres NO se trazan aquí: los marca el motor (capa «Asia y
+Londres»).
 NO SON CAPA DEL MOTOR: no las ha calculado nadie, no salen de la pantalla y el motor no se
 entera de que existen. Sirven para mandar una captura señalando lo que se quiere explicar.">
         Línea
@@ -275,7 +294,7 @@ por eso el 90 cae pegado al 100. Los dos extremos van con línea entera y los tr
 punteados. El tramo se estira un poco más allá del 100: un retroceso se mira hacia adelante.
 Después se arrastra: cada ancla se mueve sola y por dentro se desplaza el conjunto entero.
 Se trazan VARIOS y se numeran en el orden en que se plantan.
-Va en GRIS y no en un color porque no marca nada: no es un PUL ni un nivel, es una REGLA con
+Va en GRIS y no en un color porque no marca nada: no es un OB ni un nivel, es una REGLA con
 la que medir, y lo que la identifica son sus porcentajes escritos al lado.
 NO ES CAPA DEL MOTOR: nadie ha medido ese retroceso, no hay ninguna regla detrás, no sale de
 la pantalla y el motor no se entera de que existe.">
@@ -409,7 +428,10 @@ configuración, el historial y las estadísticas, en texto">Copiar</button>
       («Simular entrada»): la caja verde es el objetivo y la roja el riesgo, colgando de la
       línea de la entrada —al revés en corto—. El botón arma, el clic planta y después se
       arrastra: bordes de fuera = stop y objetivo, línea de la entrada = mover la caja
-      entera, bordes de los lados = alargar el tramo. Escape desarma</span>
+      entera, bordes de los lados = alargar el tramo. Escape desarma. Caben <b>dos cajas</b>
+      a la vez, numeradas; la <b>activa</b> —la última plantada o agarrada— lleva la línea de
+      entrada más gruesa y «(activa)» en su etiqueta, y es la que cobra la cuenta y la que
+      quita «Quitar»</span>
     <span>el <b>R:R es automático</b>: no se elige, se mide. El panel y la caja dicen la
       distancia que hay del stop al objetivo —1:3, 1:4 o 1:2,44— y la vuelven a medir en
       cuanto se arrastra el stop o el objetivo. La caja nace con el objetivo a dos riesgos
@@ -418,14 +440,13 @@ configuración, el historial y las estadísticas, en texto">Copiar</button>
       del precio. NO ES UNA OPERACIÓN: no hay orden, ni ejecución, ni resultado, y nadie
       comprueba si el precio llegó al objetivo o al stop. Es lo único del gráfico que
       dibuja el propietario y no el motor</span>
-    <span><i class="box" style="background:#c0359a; opacity:.5"></i><b>PUL</b>
-      <i class="box" style="background:#0b8fa8; opacity:.5"></i><b>UL</b>
-      <i class="box" style="background:#7c8b12; opacity:.5"></i><b>APUL</b>: RECUADROS
+    <span><i class="box" style="background:#c0359a; opacity:.5"></i><b>OB</b>
+      <i class="box" style="background:#0b8fa8; opacity:.5"></i><b>FVG</b>: RECUADROS
       marcados A MANO («Rectángulo»): cada nombre con su color, punteados y numerados por
       nombre en el orden en que se plantan. El botón arma, el clic lo planta y después se
       arrastra: bordes de arriba y abajo = techo y suelo, bordes de los lados = el tramo,
       por dentro = moverlo entero. Escape desarma. NO SON ZONAS DEL MOTOR: no las ha
-      detectado nada, no hay regla de PUL, UL ni APUL en el proyecto y no salen de la
+      detectado nada, no hay regla de OB ni FVG en el proyecto y no salen de la
       pantalla. Son, con la caja simulada, lo único del gráfico que dibuja el
       propietario</span>
     <span><i style="background:#c0359a"></i><b>Diario</b>
@@ -439,6 +460,21 @@ configuración, el historial y las estadísticas, en texto">Copiar</button>
       tonos de la mano y no los del motor: una línea de H4 no es el marco de H4. NO SON
       CAPA DEL MOTOR: no las ha calculado nada, no hay ninguna regla detrás y no salen de
       la pantalla</span>
+    <span><i style="background:#8a5a2b"></i><b>Alto Asia · Bajo Asia</b>
+      <i style="background:#9440c8"></i><b>Alto Londres · Bajo Londres</b>: los cuatro
+      niveles que el MOTOR marca cada día a las <b>7:58 del reloj de la pantalla</b>
+      (capa «Asia y Londres»): el alto y el bajo de Asia (20:00 → 01:00) y los de Londres
+      (03:00 → 08:00, medidos hasta las 7:58 porque a esa hora los dos últimos minutos no
+      han cerrado). Se dejan puestos hasta las 17:00. Las horas son las del reloj que se
+      imprime al lado de la UTC —UTC-4 fijo—, no las de Nueva York con horario de verano:
+      la marca cae a las 7:58 de lo que ves todo el año. Un tono por sesión y el nombre y
+      el precio escritos en la marca; PUNTEADO desde la vela que fijó el nivel hasta la
+      marca —el precio ya había estado ahí, nadie lo había marcado— y CONTINUO desde la
+      marca. Se calculan sobre el M1 y vienen hechos: el explorador no mide ningún
+      máximo. En replay no aparecen hasta que el reloj pasa
+      las 7:58. Un nivel cuya sesión no tuvo barras no se dibuja y el estado lo dice.
+      <b>Sólo se dibuja la marca actual</b> —la última puesta a la hora del borde derecho
+      de la ventana o del reloj—; las anteriores no se pintan y siguen en sesiones.csv</span>
     <span>con «Cuenta simulada» cada caja lleva además <b>el dinero que se juega</b>: la
       verde, lo que suma si llega el objetivo; la roja, lo que resta si toca el stop, con el
       capital y el riesgo puestos en la barra. Los botones <b>Ganada · Perdida · BE</b>

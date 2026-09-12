@@ -23,6 +23,7 @@ from chronos.domain.errors import DomainError
 from chronos.domain.structure.body import BodyBar
 from chronos.domain.structure.detector import DominantImpulseDetector
 from chronos.domain.structure.impulse import BarState, BreakEvent, DominantImpulse
+from chronos.domain.structure.sessions import OWNER_RULE, SessionLevelsRule, session_levels
 
 #: Columnas exigidas por §5.1, en su orden. Las que van detrás son material de
 #: auditoría (comparativa de anclas, arranque de la pierna) y no sustituyen a
@@ -101,6 +102,11 @@ class ImpulseRun:
     audit: TimezoneAudit | None = None
     provenance: str = ""
     aggregation_notes: tuple[str, ...] = ()
+    #: El alto y el bajo de Asia y de Londres, marcados cada día a las 7:58 de
+    #: Nueva York sobre el histórico base (M1). `None` cuando la corrida no
+    #: recibió ese histórico: entonces no hay marcas, no marcas vacías.
+    sessions: pd.DataFrame | None = None
+    session_rule: SessionLevelsRule = OWNER_RULE
 
     @property
     def emits_nothing(self) -> bool:
@@ -129,9 +135,15 @@ class DetectDominantImpulses:
         audit: TimezoneAudit | None = None,
         provenance: str = "",
         aggregation_notes: Sequence[str] = (),
+        base_bars: pd.DataFrame | None = None,
+        session_rule: SessionLevelsRule = OWNER_RULE,
     ) -> ImpulseRun:
         """`series` trae las velas de cada gráfico; el detector sólo corre en las
-        temporalidades que el reparto declara como impulso."""
+        temporalidades que el reparto declara como impulso.
+
+        `base_bars` es el histórico M1 del que salieron las velas: sobre él se
+        marcan el alto y el bajo de Asia y de Londres, que a las 7:58 necesitan
+        ver cerrar el minuto 7:57 y ninguna vela agregada lo ve."""
         config_hash = self._config.fingerprint()
         if not self._config.enabled:
             # Módulo apagado: no se procesa ni una barra y no se emite nada.
@@ -160,6 +172,10 @@ class DetectDominantImpulses:
             audit=audit,
             provenance=provenance,
             aggregation_notes=tuple(aggregation_notes),
+            sessions=(
+                session_levels(base_bars, session_rule) if base_bars is not None else None
+            ),
+            session_rule=session_rule,
         )
 
     # --- Interno ------------------------------------------------------------

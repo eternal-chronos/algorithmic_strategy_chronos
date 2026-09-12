@@ -68,13 +68,12 @@ TIMEFRAME_COLORS: dict[str, str] = {
 
 #: Los recuadros que dibuja el propietario a mano (I.3) y el color de cada uno.
 #: No son zonas del motor —el motor no calcula ninguna—: son marcas a mano con
-#: las que el propietario señala dónde ve un PUL, un UL o un APUL, y por eso
-#: llevan colores que no usa ninguna capa calculada. El nombre es lo que se
-#: dibuja al lado del rectángulo.
+#: las que el propietario señala dónde ve un OB o un FVG, y por eso llevan
+#: colores que no usa ninguna capa calculada. El nombre es lo que se dibuja al
+#: lado del rectángulo.
 HAND_RECTS: dict[str, str] = {
-    "PUL": theme.MAGENTA,
-    "UL": theme.CYAN,
-    "APUL": theme.OLIVE,
+    "OB": theme.MAGENTA,
+    "FVG": theme.CYAN,
 }
 
 #: Las líneas que traza el propietario a mano (I.4) y el color de cada una. Cada
@@ -89,6 +88,15 @@ HAND_LINES: dict[str, str] = {
     DAILY: theme.MAGENTA,
     H4: theme.CYAN,
     H1: theme.OLIVE,
+}
+
+#: Las SESIONES que marca el motor (J.1): el alto y el bajo de Asia y los de
+#: Londres, calculados cada día a las 7:58 del reloj de la pantalla. Un tono por sesión
+#: —el alto y el bajo de la misma se distinguen por el nombre escrito al
+#: lado— y ninguno de los dos lo usa la mano ni ninguna otra capa del motor.
+SESSION_COLORS: dict[str, str] = {
+    "asia": theme.BROWN,
+    "london": theme.PURPLE,
 }
 
 #: El Fibonacci que traza el propietario a mano (I.5). Va en el gris de la tinta
@@ -239,6 +247,9 @@ def build_payload(
             #: quiere explicar, una por temporalidad. Tonos de la mano, no los
             #: del motor.
             "lines": dict(HAND_LINES),
+            #: Un tono por sesión para el alto y el bajo de Asia y de Londres,
+            #: que sí son del motor.
+            "sessions": dict(SESSION_COLORS),
             #: El Fibonacci a mano: gris de medir, no color de marcar.
             "fib": HAND_FIB,
             #: Y el RSI, que sí es del motor pero vive en su propio panel: no
@@ -250,6 +261,7 @@ def build_payload(
         "labels": {chart: _label(chart) for chart in {*available, *charts.detected}},
         "spans": _spans(run),
         "bars": bars,
+        "sessions": _sessions_payload(run),
         "impulses": {
             timeframe: _impulse_payload(analysis, contacts.get(timeframe))
             for timeframe, analysis in run.analyses.items()
@@ -376,6 +388,50 @@ def _minute(stamp: pd.Timestamp) -> int:
 
 def _round(series: pd.Series) -> list[float]:
     return [round(float(value), DECIMALS) for value in series.to_numpy(dtype=float)]
+
+
+# --- Sesiones ---------------------------------------------------------------
+
+
+def _sessions_payload(run: ImpulseRun) -> dict[str, Any]:
+    """Capa "Asia y Londres" (J.1): una marca por día con sus cuatro niveles.
+
+    Cada marca lleva el minuto en que se pone (`m`, las 7:58 de NY en UTC), hasta
+    cuándo se deja (`u`, las 17:00), y por sesión el alto y el bajo con la vela
+    que fijó cada uno (`ahx`, `alx`, `lhx`, `llx`): el explorador dibuja
+    punteado de esa vela a la marca y continuo de la marca en adelante, igual
+    que hace con el ancla y el extremo del ID (B.1). Un nivel sin barras viaja
+    como `None` y no se dibuja. Todo viene ya calculado del dominio.
+    """
+    if run.sessions is None:
+        return {"rule": None, "days": []}
+    frame = run.sessions
+    return {
+        "rule": run.session_rule.describe(session_label(run.session_rule.timezone)),
+        "days": [
+            {
+                "m": _optional_minute(row.marked_at),
+                "u": _optional_minute(row.until),
+                "ah": _level(row.asia_high),
+                "al": _level(row.asia_low),
+                "ahx": _optional_minute(row.asia_high_at),
+                "alx": _optional_minute(row.asia_low_at),
+                "lh": _level(row.london_high),
+                "ll": _level(row.london_low),
+                "lhx": _optional_minute(row.london_high_at),
+                "llx": _optional_minute(row.london_low_at),
+            }
+            for row in frame.itertuples(index=False)
+        ],
+    }
+
+
+def _level(value: Any) -> float | None:
+    return None if pd.isna(value) else round(float(value), DECIMALS)
+
+
+def _optional_minute(stamp: Any) -> int | None:
+    return None if pd.isna(stamp) else _minute(pd.Timestamp(stamp))
 
 
 # --- Impulsos ---------------------------------------------------------------

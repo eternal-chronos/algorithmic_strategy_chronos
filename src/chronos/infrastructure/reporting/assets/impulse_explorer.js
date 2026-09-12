@@ -54,9 +54,9 @@
    *
    *   · Limpio  — el ID actual y su marco en la temporalidad que se está
    *               mirando, y nada más. Fuera se quedan las capas que no deciden
-   *               nada sobre el ID vigente: limbo, contactos, 50 % y extremo
-   *               contrario.
-   *   · Normal  — lo que el explorador enseñaba hasta ahora.
+   *               nada sobre el ID vigente: limbo, contactos, 50 %, extremo
+   *               contrario y las sesiones de Asia y Londres.
+   *   · Normal  — lo que el explorador enseñaba hasta ahora, más las sesiones.
    *   · Todo    — todo, incluidos los contactos.
    *
    * Tocar una casilla suelta deja el nivel «a mano» y ningún botón pulsado: el
@@ -72,17 +72,17 @@
     clean: {
       visible: "current",
       limbo: false, marks: true, contacts: false, mid: false, wrong: false,
-      frame: true
+      frame: true, sessions: false
     },
     normal: {
       visible: "pair",
       limbo: true, marks: true, contacts: false, mid: false, wrong: true,
-      frame: true
+      frame: true, sessions: true
     },
     all: {
       visible: "all",
       limbo: true, marks: true, contacts: true, mid: true, wrong: true,
-      frame: true
+      frame: true, sessions: true
     }
   };
 
@@ -120,6 +120,11 @@
      * Nace encendido en los tres niveles de ruido: es dónde empieza y dónde
      * acaba el ID, que es lo primero que hay que ver. */
     frame: true,
+    /* El alto y el bajo de Asia y de Londres (J.1): los marca el motor cada
+     * día a las 7:58 del reloj de la pantalla y los deja hasta las 17:00. Encendidos en
+     * «Normal» y en «Todo»; «Limpio» los apaga como a todo lo que no decide
+     * sobre el ID. */
+    sessions: true,
     blind: false,      // auditoría ciega en curso (F.1)
     revealed: false,
     seed: null,
@@ -151,25 +156,30 @@
      * desplazar la ventana para que el presente siga a la vista. Se suelta con
      * «Ajustar» o con doble clic sobre el gráfico. */
     zoom: { x: null, y: null },
-    /* Simulador de entradas (I.1). `sim` es la caja plantada a mano —lado,
-     * entrada, stop, objetivo y el tramo que ocupa— y `arming` el lado que
-     * espera el clic que la planta. Es DIBUJO: no sale del explorador, no lo lee
-     * nadie y el motor no se entera de que existe. */
-    sim: null,
+    /* Simulador de entradas (I.1). `sims` son las cajas plantadas a mano —cada
+     * una con lado, entrada, stop, objetivo y el tramo que ocupa—, hasta
+     * `SIM_MAX` a la vez, y `arming` el lado que espera el clic que planta la
+     * siguiente. `simActive` es la posición de la caja ACTIVA: la última que se
+     * plantó o se tocó, que es la que apuntan los botones de la cuenta (I.2) y
+     * la que quita «Quitar». Es DIBUJO: no sale del explorador, no lo lee nadie
+     * y el motor no se entera de que existe. */
+    sims: [],
+    simActive: null,
     arming: null,
     /* Recuadros marcados a mano (I.3). Cada uno es un rectángulo —`kind`,
      * `from`, `to`, `low`, `high`— que planta el PROPIETARIO para señalar dónde
-     * ve un PUL, un UL o un APUL. No salen del explorador y el motor no los ve:
-     * en el proyecto no hay ninguna regla de esas tres cosas.
-     * `arming === "rect:PUL"` es el botón de ese nombre esperando el clic que
+     * ve un OB o un FVG. No salen del explorador y el motor no los ve: en el
+     * proyecto no hay ninguna regla de esas dos cosas.
+     * `arming === "rect:OB"` es el botón de ese nombre esperando el clic que
      * planta el siguiente. */
     rects: [],
     /* Líneas trazadas a mano (I.4). Cada una es un segmento —`kind`, `from`,
      * `to` y el precio de cada extremo, `left` y `right`— que planta el
      * PROPIETARIO para señalar lo que quiere explicar: un nivel, un tramo, de
      * dónde a dónde mira. Cada una lleva el nombre de la TEMPORALIDAD que se
-     * está marcando con ella. Tampoco salen del explorador ni las ve el motor.
-     * `arming === "line:H4"` es el botón de esa temporalidad esperando el clic. */
+     * está marcando con ella, o el de la SESIÓN cuyo alto o bajo se marca.
+     * Tampoco salen del explorador ni las ve el motor.
+     * `arming === "line:H4"` es el botón de ese nombre esperando el clic. */
     lines: [],
     /* Fibonacci trazados a mano (I.5). Cada uno son las DOS anclas que puso el
      * propietario —`from`/`zero` la del 0 y `to`/`hundred` la del 100— y de
@@ -660,6 +670,130 @@
       x: x, y: y, text: text, hoverinfo: "text", connectgaps: false,
       line: { color: COLORS.muted, width: 1, dash: "dot" }
     }];
+  }
+
+  /* --- Asia y Londres (J.1) -------------------------------------------------
+   *
+   * Cada día, a las 7:58, el motor marca cuatro niveles: el alto y el bajo de
+   * Asia (20:00 → 01:00) y el alto y el bajo de Londres (03:00 → 07:58: a las
+   * 7:58 sólo se conoce lo cerrado a las 7:58), y los deja puestos hasta las
+   * 17:00. Las horas son las del RELOJ DE LA PANTALLA —el que el explorador
+   * imprime al lado de la UTC, UTC-4 fijo— y no las de Nueva York con horario
+   * de verano: en invierno la marca de NY saldría a las 8:58 de la pantalla,
+   * tarde para operar las 8:00. Vienen calculados del dominio sobre el M1; aquí
+   * no se mide ningún máximo.
+   *
+   * Cada nivel se dibuja como el ancla y el extremo del ID (B.1): PUNTEADO desde
+   * la vela que lo fijó hasta la marca —el precio ya había estado ahí, pero
+   * nadie lo había marcado— y CONTINUO desde las 7:58 hasta las 17:00, con su
+   * nombre y su precio escritos en la marca. Un tono por sesión: marrón Asia,
+   * púrpura Londres; el alto y el bajo se distinguen por el nombre. En replay
+   * no aparece nada hasta que el reloj pasa las 7:58, y lo dibujado se corta en
+   * el presente.
+   *
+   * SÓLO SE DIBUJA LA MARCA ACTUAL: la última que el borde derecho de la
+   * ventana —o el reloj del replay— ya ha visto poner. Las anteriores no se
+   * pintan: con una por día, dos meses de marcas tapan el precio y no dicen
+   * nada que decida algo hoy. Siguen en `sesiones.csv`.
+   */
+  var SESSIONS = [
+    { id: "asia", label: "Asia", high: ["ah", "ahx"], low: ["al", "alx"] },
+    { id: "london", label: "Londres", high: ["lh", "lhx"], low: ["ll", "llx"] }
+  ];
+
+  function sessionColor(id) { return COLORS.sessions[id]; }
+
+  function sessionDays() { return (DATA.sessions && DATA.sessions.days) || []; }
+
+  /* La marca ACTUAL: la última que el borde derecho —o el reloj— ya ha visto
+   * poner. Null si a esa hora no se había puesto ninguna. */
+  function currentSession(edges) {
+    var days = sessionDays();
+    var current = null;
+    for (var i = 0; i < days.length; i++) {
+      if (days[i].m > edges.hi) { break; }
+      current = days[i];
+    }
+    return current;
+  }
+
+  function sessionTraces(range) {
+    if (!state.sessions || blindfolded()) { return []; }
+    var edges = window_(range);
+    var current = currentSession(edges);
+    if (!current) { return []; }
+    var marked = [current];
+    var traces = [];
+    SESSIONS.forEach(function (session) {
+      var known = shape();
+      [["high", "Alto"], ["low", "Bajo"]].forEach(function (side) {
+        var keys = session[side[0]];
+        var bucket = shape();
+        var labels = [];
+        marked.forEach(function (day) {
+          var level = day[keys[0]];
+          if (level === null || level === undefined) { return; }
+          var fixed = day[keys[1]];
+          var end = clip(day.u, edges);
+          var caption = side[1].toUpperCase() + " DE " + session.label.toUpperCase() +
+            " " + price(level) +
+            "<br>marcado a las " + stamp(day.m) +
+            "<br>lo fijó la vela de " + stamp(fixed) +
+            "<br>se retira a las " + stamp(day.u);
+          bucket.x.push(iso(day.m), iso(end), null);
+          bucket.y.push(level, level, null);
+          bucket.text.push(caption, caption, "");
+          labels.push(side[1] + " " + session.label + " " + price(level), "", "");
+          // Punteado: de la vela que fijó el nivel a la marca.
+          known.x.push(iso(fixed), iso(day.m), null);
+          known.y.push(level, level, null);
+          known.text.push(caption, caption, "");
+        });
+        if (!bucket.x.length) { return; }
+        traces.push({
+          type: "scatter", mode: "lines+text",
+          name: side[1] + " " + session.label,
+          x: bucket.x, y: bucket.y, text: labels, hovertext: bucket.text,
+          hoverinfo: "text", hoverlabel: { align: "left" }, connectgaps: false,
+          textposition: side[0] === "high" ? "top right" : "bottom right",
+          textfont: { size: 10, color: sessionColor(session.id) },
+          line: { color: sessionColor(session.id), width: 1.6 }
+        });
+      });
+      if (known.x.length) {
+        traces.push({
+          type: "scatter", mode: "lines", name: session.label + " · de dónde sale",
+          x: known.x, y: known.y, text: known.text, hoverinfo: "text",
+          hoverlabel: { align: "left" }, connectgaps: false, showlegend: false,
+          line: { color: sessionColor(session.id), width: 1, dash: "dot" },
+          opacity: 0.6
+        });
+      }
+    });
+    return traces;
+  }
+
+  /* Qué se está viendo de las sesiones, y qué no. */
+  function sessionCaption(edges) {
+    if (!state.sessions || blindfolded()) { return null; }
+    if (!DATA.sessions || !DATA.sessions.rule) {
+      return "sesiones de Asia y Londres: sin datos (la corrida no recibió el M1)";
+    }
+    var current = currentSession(edges);
+    if (!current) {
+      return "sesiones de Asia y Londres: ninguna marca puesta todavía a esta hora";
+    }
+    var missing = ["ah", "al", "lh", "ll"].filter(function (key) {
+      return current[key] === null || current[key] === undefined;
+    }).length;
+    return "sesiones de Asia y Londres: sólo la marca ACTUAL, la de " + stamp(current.m) +
+      " (" + DATA.sessions.rule + ")" +
+      (missing
+        ? " · " + missing.toLocaleString("es-ES") +
+          " niveles sin barras en su sesión, que no se dibujan"
+        : "") +
+      " · punteado desde la vela que fijó el nivel, continuo desde la marca" +
+      " · las marcas anteriores no se dibujan: siguen en sesiones.csv";
   }
 
   /* Capa R-36: dónde cae el extremo cuando lo fija una vela del color contrario
@@ -1176,6 +1310,13 @@
    * entrada mueve el conjunto entero, los bordes de los lados alargan el tramo y
    * el interior lo desplaza todo.
    *
+   * Caben DOS cajas a la vez, que es como opera el propietario: dos entradas
+   * —largas, cortas o una de cada— con su stop y su objetivo cada una. Van
+   * numeradas por orden de plantado y una de ellas es la ACTIVA: la última que
+   * se plantó o se agarró. Es la que cobra la cuenta (I.2) y la que se lleva
+   * «Quitar»; con las dos puestas, los botones de armar se apagan hasta que
+   * una se cobre o se quite.
+   *
    * ES DIBUJO A MANO Y NADA MÁS. No hay orden, ni ejecución, ni resultado: la
    * caja no lee una sola vela, nadie comprueba si el precio llegó al objetivo o
    * al stop y el motor no se entera de que existe. Sirve para medir a ojo
@@ -1191,16 +1332,23 @@
     {
       id: "long", label: "Largo",
       title: "Arma la caja de un LARGO: objetivo por encima de la entrada, riesgo\n" +
-        "por debajo. El clic siguiente sobre el gráfico la planta ahí. Es dibujo:\n" +
-        "no abre nada."
+        "por debajo. El clic siguiente sobre el gráfico la planta ahí. Caben dos\n" +
+        "cajas a la vez. Es dibujo: no abre nada."
     },
     {
       id: "short", label: "Corto",
       title: "Arma la caja de un CORTO: objetivo por debajo de la entrada, riesgo\n" +
-        "por encima. El clic siguiente sobre el gráfico la planta ahí. Es dibujo:\n" +
-        "no abre nada."
+        "por encima. El clic siguiente sobre el gráfico la planta ahí. Caben dos\n" +
+        "cajas a la vez. Es dibujo: no abre nada."
     }
   ];
+
+  /* Cuántas cajas se PLANTAN a la vez. Es un tope del clic, no del dibujo:
+   * deshacer una operación (I.2) devuelve su caja aunque ya haya dos, porque
+   * perderla sería perder la medida; lo que se apaga entonces es el armar. */
+  var SIM_MAX = 2;
+
+  var SIM_FULL_TITLE = "Ya hay dos cajas: cobra o quita una para plantar otra.";
 
   /* Un pip es la última cifra que se enseña del precio: con cuatro decimales,
    * 0,0001. La distancia se mide con esa unidad y no en porcentaje porque es la
@@ -1216,8 +1364,9 @@
 
   var GRAB = 9;          // píxeles de tolerancia para agarrar un borde
 
-  /* Dónde empiezan las tres formas de la caja dentro de `layout.shapes`. Se fija
-   * al dibujar y es lo que permite mover sólo esas tres durante el arrastre. */
+  /* Dónde empiezan las formas de las cajas dentro de `layout.shapes` —tres por
+   * caja, seguidas—. Se fija al dibujar y es lo que permite mover sólo esas
+   * durante el arrastre. */
   var simIndex = null;
 
   var simDrag = null;
@@ -1248,13 +1397,32 @@
     return "1:" + text.replace(".", ",");
   }
 
-  function simRisk() { return Math.abs(state.sim.entry - state.sim.stop); }
+  function simRisk(sim) { return Math.abs(sim.entry - sim.stop); }
 
-  function simReward() { return Math.abs(state.sim.target - state.sim.entry); }
+  function simReward(sim) { return Math.abs(sim.target - sim.entry); }
 
-  function simRatio() {
-    var risk = simRisk();
-    return risk > 0 ? simReward() / risk : 0;
+  function simRatio(sim) {
+    var risk = simRisk(sim);
+    return risk > 0 ? simReward(sim) / risk : 0;
+  }
+
+  /* La caja activa: la última plantada o agarrada. Es la que cobra la cuenta y
+   * la que quita «Quitar», así que con dos puestas hay que poder decir cuál. */
+  function activeSim() {
+    var sim = state.sims[state.simActive];
+    return sim || null;
+  }
+
+  function activateSim(index) {
+    state.simActive = index >= 0 && index < state.sims.length ? index : null;
+  }
+
+  function simFull() { return state.sims.length >= SIM_MAX; }
+
+  /* «caja 2» sólo cuando hay con qué confundirla: con una sola no hay número
+   * que leer. */
+  function simTag(position) {
+    return state.sims.length > 1 ? " · caja " + (position + 1) : "";
   }
 
   function simBox(name, x0, x1, from, to, colour, text, position) {
@@ -1267,37 +1435,48 @@
     };
   }
 
-  /* Las tres formas, siempre en este orden: objetivo, riesgo y la línea de la
-   * entrada. El orden es el que usa el arrastre para saber qué está moviendo. */
+  /* Las tres formas de cada caja, siempre en este orden: objetivo, riesgo y la
+   * línea de la entrada; y las cajas por orden de plantado. El orden es el que
+   * usa el arrastre para saber qué está moviendo. Cada nombre lleva el número
+   * de su caja —`sim-1-objetivo`, `sim-2-entrada`— y la línea de la activa lo
+   * dice: con dos puestas hay que ver cuál va a cobrar la cuenta. */
   function simShapes() {
-    var sim = state.sim;
-    if (!sim) { return []; }
-    var long_ = sim.side === "long";
-    var x0 = iso(sim.from), x1 = iso(sim.to);
-    // Cada rectángulo dice también lo que se juega con el capital puesto (I.2):
-    // el dinero es la razón de dibujar la caja y tenerlo que buscar arriba, en
-    // la barra, mientras se arrastra abajo es no verlo.
-    var stake = simStake();
-    return [
-      simBox("sim-objetivo", x0, x1, sim.entry, sim.target, COLORS.bullish,
-        "objetivo " + pips(simReward()) + " pips · " + signedMoney(stake.reward),
-        long_ ? "top left" : "bottom left"),
-      simBox("sim-riesgo", x0, x1, sim.entry, sim.stop, COLORS.bearish,
-        "riesgo " + pips(simRisk()) + " pips · " + signedMoney(-stake.risk),
-        long_ ? "bottom left" : "top left"),
-      {
-        type: "line", name: "sim-entrada", xref: "x", yref: "y",
-        x0: x0, x1: x1, y0: sim.entry, y1: sim.entry,
-        line: { color: COLORS.ink, width: 1.2 }, layer: "above",
-        label: {
-          text: sideLabel(sim.side).toUpperCase() + " · R:R " + ratioLabel(simRatio()),
-          textposition: "end", font: { size: 11, color: COLORS.ink }
+    var shapes = [];
+    state.sims.forEach(function (sim, position) {
+      var long_ = sim.side === "long";
+      var x0 = iso(sim.from), x1 = iso(sim.to);
+      var prefix = "sim-" + (position + 1) + "-";
+      var active = position === state.simActive && state.sims.length > 1;
+      // Cada rectángulo dice también lo que se juega con el capital puesto (I.2):
+      // el dinero es la razón de dibujar la caja y tenerlo que buscar arriba, en
+      // la barra, mientras se arrastra abajo es no verlo.
+      var stake = simStake(sim);
+      shapes.push(
+        simBox(prefix + "objetivo", x0, x1, sim.entry, sim.target, COLORS.bullish,
+          "objetivo " + pips(simReward(sim)) + " pips · " + signedMoney(stake.reward),
+          long_ ? "top left" : "bottom left"),
+        simBox(prefix + "riesgo", x0, x1, sim.entry, sim.stop, COLORS.bearish,
+          "riesgo " + pips(simRisk(sim)) + " pips · " + signedMoney(-stake.risk),
+          long_ ? "bottom left" : "top left"),
+        {
+          type: "line", name: prefix + "entrada", xref: "x", yref: "y",
+          x0: x0, x1: x1, y0: sim.entry, y1: sim.entry,
+          line: { color: COLORS.ink, width: active ? 2 : 1.2 }, layer: "above",
+          label: {
+            text: sideLabel(sim.side).toUpperCase() + simTag(position) +
+              (active ? " (activa)" : "") + " · R:R " + ratioLabel(simRatio(sim)),
+            textposition: "end", font: { size: 11, color: COLORS.ink }
+          }
         }
-      }
-    ];
+      );
+    });
+    return shapes;
   }
 
   function armSim(side) {
+    // Con las dos cajas puestas no hay dónde plantar: el botón está apagado y
+    // esto es por si llega de otro sitio.
+    if (simFull()) { return; }
     state.arming = state.arming === side ? null : side;
     draw();
   }
@@ -1310,29 +1489,38 @@
     return armedRect() || armedLine() || armedFib() ? null : state.arming;
   }
 
+  /* Quita UNA caja: la activa. Con dos puestas, quitar las dos son dos clics,
+   * y la que queda pasa a ser la activa. */
   function clearSim() {
-    state.sim = null;
+    removeSim(state.simActive);
     if (simArming()) { state.arming = null; }
     draw();
+  }
+
+  function removeSim(index) {
+    if (index === null || index < 0 || index >= state.sims.length) { return; }
+    state.sims.splice(index, 1);
+    activateSim(state.sims.length - 1);
   }
 
   /* La caja de salida: el riesgo es un 5 % de lo que se ve de alto y el objetivo
    * el doble, sobre un cuarto de la ventana de ancho. Es un punto de partida
    * para arrastrar, no una propuesta: el motor no ha dicho nada de este precio
-   * ni de esta distancia. */
+   * ni de esta distancia. La recién plantada es la activa. */
   function plantSim(side, point) {
     var y = viewRange("y"), x = viewRange("x");
-    if (!y || !x) { return; }
+    if (!y || !x || simFull()) { return; }
     var risk = (y[1] - y[0]) * 0.05;
     var dir = side === "long" ? 1 : -1;
-    state.sim = {
+    state.sims.push({
       side: side,
       entry: round_(point.price),
       stop: round_(point.price - dir * risk),
       target: round_(point.price + SIM_START_REWARD * dir * risk),
       from: point.minute,
       to: point.minute + Math.max(1, Math.round((x[1] - x[0]) * 0.25))
-    };
+    });
+    activateSim(state.sims.length - 1);
     state.arming = null;
     draw();
   }
@@ -1341,8 +1529,7 @@
    * entrada y el objetivo por encima, y al revés en corto. Un arrastre que cruce
    * la entrada se queda a un pip, que es lo que impide un R:R negativo o
    * infinito. */
-  function normalizeSim() {
-    var sim = state.sim;
+  function normalizeSim(sim) {
     if (!sim) { return; }
     var dir = sim.side === "long" ? 1 : -1;
     if (dir * (sim.entry - sim.stop) < PIP) {
@@ -1461,12 +1648,21 @@
     plantSim(state.arming, point);
   }
 
-  /* Qué parte de la caja hay bajo el ratón. Las tres líneas ganan al interior:
+  /* Qué caja y qué parte de ella hay bajo el ratón. Se mira de la última a la
+   * primera, que es el orden en que se pintan: con dos solapadas se agarra la
+   * de encima. */
+  function simHandleAt(box, cx, cy) {
+    for (var index = state.sims.length - 1; index >= 0; index -= 1) {
+      var part = simPartAt(box, state.sims[index], cx, cy);
+      if (part) { return { index: index, part: part }; }
+    }
+    return null;
+  }
+
+  /* Qué parte de una caja hay bajo el ratón. Las tres líneas ganan al interior:
    * con la caja estrecha, todo el rectángulo cae dentro de la tolerancia y lo
    * que se quiere agarrar entonces es el nivel más cercano. */
-  function simHandleAt(box, cx, cy) {
-    var sim = state.sim;
-    if (!sim) { return null; }
+  function simPartAt(box, sim, cx, cy) {
     var left = pixelAt(box, sim.from, sim.entry);
     var right = pixelAt(box, sim.to, sim.entry);
     var stop = pixelAt(box, sim.from, sim.stop);
@@ -1487,20 +1683,24 @@
   function startSimDrag(event) {
     // El gesto de los ejes se registra antes y corta la propagación cuando es
     // suyo, pero eso no impide que este oyente del mismo div se ejecute.
-    if (axisDrag || state.arming || !state.sim) { return; }
+    if (axisDrag || state.arming || !state.sims.length) { return; }
     var box = chartBox();
     if (!box) { return; }
-    var part = simHandleAt(box, event.clientX, event.clientY);
-    if (!part) { return; }
+    var hit = simHandleAt(box, event.clientX, event.clientY);
+    if (!hit) { return; }
     var origin = dataAt(box, event.clientX, event.clientY, true);
     if (!origin) { return; }
+    var sim = state.sims[hit.index];
     simDrag = {
-      part: part, origin: origin,
+      index: hit.index, part: hit.part, origin: origin,
       base: {
-        entry: state.sim.entry, stop: state.sim.stop, target: state.sim.target,
-        from: state.sim.from, to: state.sim.to
+        entry: sim.entry, stop: sim.stop, target: sim.target,
+        from: sim.from, to: sim.to
       }
     };
+    // Agarrar una caja la vuelve la activa: la que se está tocando es la que
+    // se va a cobrar o quitar después.
+    activateSim(hit.index);
     if (event.preventDefault) { event.preventDefault(); }
     if (event.stopPropagation) { event.stopPropagation(); }
   }
@@ -1515,7 +1715,8 @@
   }
 
   function applySimDrag(point) {
-    var sim = state.sim, base = simDrag.base, part = simDrag.part;
+    var sim = state.sims[simDrag.index], base = simDrag.base, part = simDrag.part;
+    if (!sim) { return; }
     var dy = point.price - simDrag.origin.price;
     var dx = point.minute - simDrag.origin.minute;
     if (part === "stop") {
@@ -1538,13 +1739,14 @@
       sim.target = round_(base.target + dy);
       if (part === "body") { sim.from = base.from + dx; sim.to = base.to + dx; }
     }
-    normalizeSim();
+    normalizeSim(sim);
     redrawSim();
   }
 
-  /* Durante el arrastre se mueven sólo las tres formas, no la figura entera: con
-   * ocho años de velas embebidas, rehacerla en cada píxel del gesto se nota. Al
-   * soltar se redibuja de verdad, que es cuando se ponen al día las notas. */
+  /* Durante el arrastre se mueven sólo las formas de las cajas, no la figura
+   * entera: con ocho años de velas embebidas, rehacerla en cada píxel del gesto
+   * se nota. Al soltar se redibuja de verdad, que es cuando se ponen al día las
+   * notas. */
   function redrawSim() {
     var chart = document.getElementById("chart");
     if (simIndex === null || !chart || typeof Plotly === "undefined" || !Plotly.relayout) {
@@ -1575,12 +1777,15 @@
   function hoverSim(event) {
     var chart = document.getElementById("chart");
     if (!chart || !chart.style || state.arming) { return; }
-    if (!state.sim && !state.rects.length && !state.lines.length && !state.fibs.length) {
+    if (!state.sims.length && !state.rects.length && !state.lines.length &&
+        !state.fibs.length) {
       return;
     }
     var box = chartBox();
-    var part = box && state.sim ? simHandleAt(box, event.clientX, event.clientY) : null;
-    if (part) { chart.style.cursor = SIM_CURSORS[part] || ""; return; }
+    var grip = box && state.sims.length
+      ? simHandleAt(box, event.clientX, event.clientY)
+      : null;
+    if (grip) { chart.style.cursor = SIM_CURSORS[grip.part] || ""; return; }
     var hit = box && state.rects.length
       ? rectHandleAt(box, event.clientX, event.clientY)
       : null;
@@ -1602,14 +1807,23 @@
       return "SIMULADOR ARMADO (" + sideLabel(simArming()).toLowerCase() +
         "): pulsa sobre el gráfico para plantar la entrada, o Escape para dejarlo";
     }
-    if (!state.sim) { return null; }
-    var sim = state.sim;
-    return "simulación " + sideLabel(sim.side).toUpperCase() + " · entrada " +
-      price(sim.entry) + " · stop " + price(sim.stop) + " (" + pips(simRisk()) +
-      " pips) · objetivo " + price(sim.target) + " (" + pips(simReward()) +
-      " pips) · R:R " + ratioLabel(simRatio()) +
-      " (automático: es la distancia que hay dibujada del stop al objetivo, y" +
-      " se vuelve a medir en cuanto se arrastra cualquiera de los dos)" +
+    if (!state.sims.length) { return null; }
+    var several = state.sims.length > 1;
+    var cajas = state.sims.map(function (sim, position) {
+      var active = several && position === state.simActive;
+      return "simulación " + sideLabel(sim.side).toUpperCase() +
+        (several ? " (caja " + (position + 1) + (active ? ", activa" : "") + ")" : "") +
+        " · entrada " + price(sim.entry) + " · stop " + price(sim.stop) + " (" +
+        pips(simRisk(sim)) + " pips) · objetivo " + price(sim.target) + " (" +
+        pips(simReward(sim)) + " pips) · R:R " + ratioLabel(simRatio(sim));
+    });
+    return cajas.join(" · ") +
+      " · R:R automático: es la distancia que hay dibujada del stop al objetivo, y" +
+      " se vuelve a medir en cuanto se arrastra cualquiera de los dos" +
+      (several
+        ? " · caben dos cajas: la ACTIVA es la última plantada o agarrada, y es la" +
+          " que cobra la cuenta y la que se lleva «Quitar»"
+        : "") +
       " · un pip es la última cifra del precio · ES DIBUJO A MANO: no hay orden, " +
       "ni ejecución, ni resultado; nadie mira si el precio llegó y el motor no la ve";
   }
@@ -1628,6 +1842,23 @@
     });
   }
 
+  /* Los botones de armar se apagan con las dos cajas puestas, y el título dice
+   * por qué: un botón que no hace nada sin explicación se lee como roto. */
+  function syncSimButtons() {
+    var full = simFull();
+    document.querySelectorAll("#sim-buttons button").forEach(function (button) {
+      button.setAttribute("aria-pressed", String(button.dataset.side === state.arming));
+      button.disabled = full;
+      var side = SIM_SIDES.filter(function (item) { return item.id === button.dataset.side; })[0];
+      button.title = full ? SIM_FULL_TITLE : (side ? side.title : "");
+    });
+    var clear = document.getElementById("sim-clear");
+    clear.disabled = !state.sims.length && !simArming();
+    clear.title = state.sims.length > 1
+      ? "Quita la caja activa (la " + (state.simActive + 1) + "); la otra se queda"
+      : "Quita la caja simulada";
+  }
+
   /* El R:R que hay DIBUJADO, en el panel y no sólo dentro del gráfico.
    *
    * NO SE ELIGE: se mide. Entrada -> stop es el 1 y entrada -> objetivo lo que
@@ -1638,16 +1869,21 @@
   function syncRatioReadout() {
     var node = document.getElementById("sim-rr");
     if (!node) { return; }
-    if (!state.sim) {
+    var sim = activeSim();
+    if (!sim) {
       node.textContent = "R:R —";
       node.dataset.source = "";
       node.title = "Sin caja dibujada no hay distancias que medir.";
       return;
     }
-    node.textContent = "R:R " + ratioLabel(simRatio()) + " · automático";
+    // Con dos cajas el panel habla de la ACTIVA y lo dice: la otra tiene el
+    // suyo escrito en su línea de entrada.
+    node.textContent = "R:R " + ratioLabel(simRatio(sim)) + " · automático" +
+      simTag(state.simActive);
     node.dataset.source = "auto";
-    node.title = "Sale de medir la caja: " + pips(simRisk()) + " pips de riesgo contra " +
-      pips(simReward()) + " pips de objetivo.\nNo hay ratio que poner a mano: " +
+    node.title = "Sale de medir la caja" + simTag(state.simActive) + ": " +
+      pips(simRisk(sim)) + " pips de riesgo contra " +
+      pips(simReward(sim)) + " pips de objetivo.\nNo hay ratio que poner a mano: " +
       "arrastrar el stop o el objetivo lo vuelve a medir.";
   }
 
@@ -1662,14 +1898,14 @@
 
   /* --- Los recuadros a mano (I.3) -------------------------------------------
    *
-   * Tres rectángulos que planta el PROPIETARIO encima del gráfico para decir
-   * DÓNDE VE UN PUL, UN UL O UN APUL. No son zonas del motor —el motor no
+   * Dos rectángulos que planta el PROPIETARIO encima del gráfico para decir
+   * DÓNDE VE UN OB O UN FVG. No son zonas del motor —el motor no
    * calcula ninguna—: no las ve nadie más que quien las dibuja. Existen para
    * poder mandar una captura señalando lo que no hay regla que detecte.
    *
-   * Cada nombre lleva SU COLOR y todos van punteados: ninguna capa calculada
-   * usa esos tres tonos, así que lo que se vea con ellos lo ha puesto una mano,
-   * y cuál de los tres es se lee sin abrir la leyenda.
+   * Cada nombre lleva SU COLOR y los dos van punteados: ninguna capa calculada
+   * usa esos tonos, así que lo que se vea con ellos lo ha puesto una mano, y
+   * cuál de los dos es se lee sin abrir la leyenda.
    *
    * Se marcan VARIOS de cada nombre: en un mismo gráfico hay el de H4 y el de
    * H1, y enseñarlos de uno en uno no dice lo que hay que decir. El gesto es el
@@ -1679,23 +1915,18 @@
    */
   var RECT_KINDS = [
     {
-      id: "PUL", label: "PUL",
-      title: "Arma el recuadro del PUL: el clic siguiente sobre el gráfico lo\n" +
+      id: "OB", label: "OB",
+      title: "Arma el recuadro del OB: el clic siguiente sobre el gráfico lo\n" +
         "planta ahí. Escape desarma. Lo dibujas tú: el motor no lo ve."
     },
     {
-      id: "UL", label: "UL",
-      title: "Arma el recuadro del UL: el clic siguiente sobre el gráfico lo\n" +
-        "planta ahí. Escape desarma. Lo dibujas tú: el motor no lo ve."
-    },
-    {
-      id: "APUL", label: "APUL",
-      title: "Arma el recuadro del APUL: el clic siguiente sobre el gráfico lo\n" +
+      id: "FVG", label: "FVG",
+      title: "Arma el recuadro del FVG: el clic siguiente sobre el gráfico lo\n" +
         "planta ahí. Escape desarma. Lo dibujas tú: el motor no lo ve."
     }
   ];
 
-  /* `arming` es UNO y lo comparten los tres botones y la caja simulada, así que
+  /* `arming` es UNO y lo comparten los dos botones y la caja simulada, así que
    * el nombre del recuadro viaja dentro del propio valor. */
   var RECT_ARM = "rect:";
 
@@ -1719,8 +1950,8 @@
 
   var rectDrag = null;
 
-  /* Se numeran POR NOMBRE: el segundo PUL es «PUL 2» aunque entre los dos se
-   * haya plantado un UL, porque lo que se cuenta al mirarlos es cuántos hay de
+  /* Se numeran POR NOMBRE: el segundo OB es «OB 2» aunque entre los dos se
+   * haya plantado un FVG, porque lo que se cuenta al mirarlos es cuántos hay de
    * cada cosa. */
   function rectShapes() {
     var seen = {};
@@ -1921,9 +2152,9 @@
     if (!state.rects.length) { return null; }
     return "recuadros marcados a mano: " + state.rects.length +
       " (" + rectCounts() + ")" +
-      " · los dibuja el propietario para señalar dónde ve un PUL, un UL o un " +
-      "APUL: NO los ha detectado el motor, no hay regla de PUL, UL ni APUL en " +
-      "el proyecto y no salen de la pantalla";
+      " · los dibuja el propietario para señalar dónde ve un OB o un FVG: NO " +
+      "los ha detectado el motor, no hay regla de OB ni FVG en el proyecto y " +
+      "no salen de la pantalla";
   }
 
   function buildRectButtons() {
@@ -1952,20 +2183,21 @@
 
   /* --- Las líneas a mano (I.4) ----------------------------------------------
    *
-   * Tres LÍNEAS que traza el PROPIETARIO encima del gráfico para señalar lo que
+   * LÍNEAS que traza el PROPIETARIO encima del gráfico para señalar lo que
    * todavía no tiene regla: por dónde pasa un nivel, qué dos puntos une, de
    * dónde a dónde mira. No son capa del motor —como los recuadros de I.3—: no
    * las ha calculado nadie, el motor no se entera de que existen y no salen de
    * la pantalla. Existen para poder mandar una captura señalando lo que se
    * quiere explicar.
    *
-   * El NOMBRE de cada una es la TEMPORALIDAD que se está marcando con ella —el
-   * nivel que se ve en el Diario, el de H4, el de H1—, que es lo que se quiere
-   * decir al señalarla: el color es sólo para distinguirlas. Los tonos son los
-   * tres de la mano, los mismos que los recuadros y NO los que el motor usa por
+   * El NOMBRE de cada una es lo que se quiere decir al señalarla: la
+   * TEMPORALIDAD que se está marcando —el nivel que se ve en el Diario, el de
+   * H4, el de H1—. El color es sólo para distinguirlas: llevan los tres tonos
+   * de la mano, los mismos que los recuadros y NO los que el motor usa por
    * temporalidad, para que una línea de H4 no se confunda con el marco de H4
    * que sí ha calculado alguien. Lo que las separa de los recuadros es el
-   * TRAZO: continuo la línea, punteado el recuadro.
+   * TRAZO: continuo la línea, punteado el recuadro. El alto y el bajo de Asia
+   * y de Londres ya no se trazan a mano: los marca el motor (J.1).
    *
    * Se plantan HORIZONTALES —marcar un nivel es lo que más se hace— y se
    * inclinan arrastrando un extremo: los dos se mueven en precio y en tiempo, y
@@ -2001,8 +2233,8 @@
 
   var lineDrag = null;
 
-  /* Se numeran POR TEMPORALIDAD: la segunda de H4 es «H4 2» aunque entre las
-   * dos se haya trazado una del Diario. */
+  /* Se numeran POR NOMBRE: la segunda de H4 es «H4 2» aunque entre las dos se
+   * haya trazado una del Diario. */
   function lineShapes() {
     var seen = {};
     return state.lines.map(function (line, position) {
@@ -2183,8 +2415,8 @@
     draw();
   }
 
-  /* Cuántas hay de cada temporalidad, en el orden de los botones y sin nombrar
-   * las que no se han trazado. */
+  /* Cuántas hay de cada nombre, en el orden de los botones y sin nombrar las
+   * que no se han trazado. */
   function lineCounts() {
     var counts = {};
     state.lines.forEach(function (line) {
@@ -2223,8 +2455,7 @@
       button.dataset.kind = kind.id;
       button.title = "Arma la " + kind.name + ": el clic siguiente sobre el\n" +
         "gráfico la planta ahí, horizontal al precio pulsado. Escape desarma.\n" +
-        "El nombre dice la temporalidad que estás marcando; la dibujas tú y el\n" +
-        "motor no la ve.";
+        "El nombre dice qué estás marcando; la dibujas tú y el motor no la ve.";
       button.addEventListener("click", function () { armLine(kind.id); });
       container.appendChild(button);
     });
@@ -2254,7 +2485,7 @@
    *
    * NO ES CAPA DEL MOTOR. Nadie ha medido ese retroceso, no hay ninguna regla
    * detrás, no sale de la pantalla y el motor no se entera de que existe. Va en
-   * GRIS y no en un color porque no marca nada —no es un PUL, ni un nivel—: es
+   * GRIS y no en un color porque no marca nada —no es un OB, ni un nivel—: es
    * una regla, y lo que la identifica son sus porcentajes escritos al lado.
    *
    * Después se arrastra, como los recuadros y las líneas: cada ancla se mueve
@@ -2680,15 +2911,17 @@
   /* Lo que la caja dibujada se juega AHORA: lo que resta si toca el stop y lo
    * que suma si llega al objetivo. Es lo que va escrito dentro de cada
    * rectángulo, para no tener que mirar arriba mientras se dibuja abajo. */
-  function simStake() {
+  function simStake(sim) {
     var risk = riskFor();
-    return { risk: risk, reward: round2(risk * simRatio()) };
+    return { risk: risk, reward: round2(risk * simRatio(sim)) };
   }
 
+  /* Se cobra la caja ACTIVA: con dos puestas, la última plantada o agarrada.
+   * La otra se queda esperando su turno. */
   function recordTrade(result) {
-    var sim = state.sim;
+    var sim = activeSim();
     if (!sim) { return; }
-    var ratio = Number(simRatio().toFixed(2));
+    var ratio = Number(simRatio(sim).toFixed(2));
     state.account.copied = null;
     state.account.trades.push({
       result: result,
@@ -2703,23 +2936,26 @@
       }
     });
     // La caja se va: ya está cobrada, y dejarla puesta invita a apuntarla dos
-    // veces. La siguiente entrada se planta como la primera.
-    state.sim = null;
+    // veces. Si había otra, pasa a ser la activa; la siguiente entrada se
+    // planta como la primera.
+    removeSim(state.simActive);
     state.arming = null;
     draw();
   }
 
   /* Deshacer devuelve el saldo Y la caja: el error que se deshace casi siempre
    * es haber pulsado el botón que no era, y replantar el dibujo a mano para
-   * volver a cobrarlo bien sería perder la medida. */
+   * volver a cobrarlo bien sería perder la medida. Vuelve como la activa, y
+   * vuelve aunque ya haya dos: el tope es del clic que planta, no del deshacer. */
   function undoTrade() {
     var last = state.account.trades.pop();
     if (!last) { return; }
     state.account.copied = null;
-    state.sim = {
+    state.sims.push({
       side: last.box.side, entry: last.box.entry, stop: last.box.stop,
       target: last.box.target, from: last.box.from, to: last.box.to
-    };
+    });
+    activateSim(state.sims.length - 1);
     state.arming = null;
     draw();
   }
@@ -2868,7 +3104,7 @@
    * hay nada que declarar. */
   function accountCaption() {
     var stats = accountStats();
-    if (!stats.trades && !state.sim) { return null; }
+    if (!stats.trades && !state.sims.length) { return null; }
     var text = "CUENTA SIMULADA: capital " + money(stats.balance) +
       " (partía de " + money(stats.initial) + ") · " + signedMoney(stats.net) +
       " (" + signedPct(stats.netPct) + ") · riesgo " + riskLabel() + " = " +
@@ -2881,9 +3117,12 @@
         " (el break-even no cuenta) · " + signedR(stats.r) +
         " · caída máxima " + money(stats.drawdown) + " (" + pct(stats.drawdownPct) + ")";
     }
-    if (state.sim) {
-      var stake = simStake();
-      text += " · la caja dibujada se juega " + money(stake.risk) + " para ganar " +
+    var active = activeSim();
+    if (active) {
+      var stake = simStake(active);
+      text += " · la caja " + (state.sims.length > 1
+        ? "activa (la " + (state.simActive + 1) + ")"
+        : "dibujada") + " se juega " + money(stake.risk) + " para ganar " +
         money(stake.reward);
     }
     if (stats.balance <= 0) {
@@ -2950,7 +3189,7 @@
     // Sin caja dibujada no hay nada que cobrar: lo que se apunta es SIEMPRE una
     // caja concreta, con su R:R y su fecha, no un resultado suelto.
     document.querySelectorAll("#account-buttons button").forEach(function (button) {
-      button.disabled = !state.sim;
+      button.disabled = !activeSim();
     });
     document.getElementById("account-undo").disabled = !stats.trades;
     document.getElementById("account-reset").disabled = !stats.trades;
@@ -3011,8 +3250,8 @@
 
   // --- Figura ---------------------------------------------------------------
 
-  /* Las formas del limbo y, detrás, las tres de la caja simulada. Se apunta
-   * dónde empiezan: es lo que permite mover sólo esas tres mientras se arrastra
+  /* Las formas del limbo y, detrás, las de las cajas simuladas. Se apunta
+   * dónde empiezan: es lo que permite mover sólo esas mientras se arrastra
    * en vez de rehacer la figura entera. */
   function simShapes_(shapes) {
     var box = simShapes();
@@ -3106,6 +3345,7 @@
       .concat(markerTraces(range))
       .concat(contactTraces(range))
       .concat(wrongExtremeTraces(range))
+      .concat(sessionTraces(range))
       // Y en su propio panel, abajo del todo: el RSI no comparte eje con nada
       // de lo de arriba, así que da igual dónde se apile.
       .concat(rsiTraces(cut));
@@ -3132,7 +3372,8 @@
     ["contacts", "contactos"],
     ["mid", "nivel 50 %"],
     ["wrong", "extremo de color contrario"],
-    ["frame", "marco del ID"]
+    ["frame", "marco del ID"],
+    ["sessions", "sesiones de Asia y Londres"]
   ];
 
   /* Qué nivel de ruido está puesto y qué se está dejando fuera por él. Un
@@ -3173,6 +3414,9 @@
     // El RSI sí es del motor, pero está siempre puesto y en su propio panel: hay
     // que decir de qué temporalidad es y con qué periodo, y que no decide nada.
     var indice = rsiNote();
+    // Y las sesiones, que sí son del motor: cuántas marcas hay a la vista y con
+    // qué regla se calcularon.
+    var sesiones = sessionCaption(edges);
     if (blindfolded()) {
       return "AUDITORÍA CIEGA · semilla " + state.seed + " · " + label(state.chart) + " · " +
         range.from + " → " + range.to + " · " + visible.toLocaleString("es-ES") +
@@ -3266,6 +3510,7 @@
       text += " · revelado de la ventana ciega con semilla " + state.seed;
     }
     if (indice) { text += " · " + indice; }
+    if (sesiones) { text += " · " + sesiones; }
     if (simulada) { text += " · " + simulada; }
     if (recuadros) { text += " · " + recuadros; }
     if (lineas) { text += " · " + lineas; }
@@ -3644,7 +3889,8 @@
       ["layer-marks", "marks"],
       ["layer-contacts", "contacts"],
       ["layer-mid", "mid"],
-      ["layer-wrong", "wrong"]
+      ["layer-wrong", "wrong"],
+      ["layer-sessions", "sessions"]
     ].forEach(function (pair) {
       document.getElementById(pair[0]).checked = state[pair[1]];
     });
@@ -3661,10 +3907,7 @@
     // Sólo hay algo que soltar si el encuadre está tomado a mano.
     document.getElementById("zoom-reset").disabled = !state.zoom.x && !state.zoom.y;
 
-    document.querySelectorAll("#sim-buttons button").forEach(function (button) {
-      button.setAttribute("aria-pressed", String(button.dataset.side === state.arming));
-    });
-    document.getElementById("sim-clear").disabled = !state.sim && !simArming();
+    syncSimButtons();
     syncRatioReadout();
     // Armado, el gráfico deja de ser sólo para mirar: el cursor lo dice.
     var canvas = document.getElementById("chart");
@@ -3771,7 +4014,8 @@
       ["layer-contacts", "contacts"],
       ["layer-mid", "mid"],
       ["layer-wrong", "wrong"],
-      ["layer-frame", "frame"]
+      ["layer-frame", "frame"],
+      ["layer-sessions", "sessions"]
     ].forEach(function (pair) {
       document.getElementById(pair[0]).addEventListener("change", function (event) {
         state[pair[1]] = event.target.checked;

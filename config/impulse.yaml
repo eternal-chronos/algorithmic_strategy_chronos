@@ -199,9 +199,11 @@ reporting:
   # horas del explorador y las de la plataforma de ejecución se leen iguales sin
   # traducir. Se escribe `UTC-4` en el dibujo, no el identificador.
   #
-  # Es sólo etiqueta: no entra en el cálculo ni en el `config_hash`. Ojo, no es
-  # el reloj de TradingView ni el de FXReplay, que sí siguen el horario de verano
-  # de Nueva York y en invierno van una hora por detrás de éste.
+  # No entra en el cálculo de los impulsos ni en el `config_hash`. Sí es el
+  # reloj en el que se marcan el alto y el bajo de Asia y de Londres: las 7:58
+  # de este reloj, que son las de la pantalla. Ojo, no es el reloj de
+  # TradingView ni el de FXReplay, que sí siguen el horario de verano de Nueva
+  # York y en invierno van una hora por detrás de éste.
   session_timezone: Etc/GMT+4
   text_report: true
   explorer_html: true

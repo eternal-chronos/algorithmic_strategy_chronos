@@ -38,6 +38,7 @@ from chronos.application.structure.detect_impulses import DetectDominantImpulses
 from chronos.application.structure.lateralization import measure
 from chronos.domain.indicators import rsi
 from chronos.domain.structure.enums import LegStartMode
+from chronos.domain.structure.sessions import session_levels
 from chronos.infrastructure.reporting.impulse_explorer import (
     ASSETS,
     BEARISH,
@@ -49,6 +50,7 @@ from chronos.infrastructure.reporting.impulse_explorer import (
     HAND_RECTS,
     RSI_BANDS,
     RSI_PERIOD,
+    SESSION_COLORS,
     TIMEFRAME_COLORS,
     ModeVariant,
     bar_counts,
@@ -74,7 +76,9 @@ def run() -> ImpulseRun:
             history, AggregationConfig(), config.charts.charts
         ).items()
     }
-    return DetectDominantImpulses(config).execute(series, provenance="fixture sintética")
+    return DetectDominantImpulses(config).execute(
+        series, provenance="fixture sintética", base_bars=history
+    )
 
 
 #: Un reparto con CONTEXTO: el Diario dibujado detrás del ID de H4. No es el del
@@ -1506,6 +1510,7 @@ LIMPIO_APAGADO = (
     "layer-contacts",
     "layer-mid",
     "layer-wrong",
+    "layer-sessions",
 )
 #: El marco del ID no lo apaga ningún nivel: es dónde empieza y dónde acaba el
 #: ID, que es justo lo que el nivel «Limpio» deja a la vista.
@@ -1572,7 +1577,7 @@ def test_el_estado_dice_que_capas_ha_apagado_el_nivel(
 
     assert "RUIDO: Limpio" in notas
     assert "capas apagadas:" in notas
-    for nombre in ("limbo", "contactos", "nivel 50 %"):
+    for nombre in ("limbo", "contactos", "nivel 50 %", "sesiones de Asia y Londres"):
         assert nombre in notas, nombre
     assert "siguen en los datos y en los informes" in notas
     assert "todas las capas encendidas" in _step(resultado, "ruido-todo")["notes"]
@@ -1586,12 +1591,20 @@ def test_el_estado_dice_que_capas_ha_apagado_el_nivel(
 # que el estado deja claro que no es una operación.
 
 
-def _caja(step: dict) -> dict[str, dict]:
-    return {forma["name"]: forma for forma in step["plot"]["sim"]}
+def _caja(step: dict, numero: int = 1) -> dict[str, dict]:
+    """Las tres formas de UNA caja —la 1 si no se dice otra—, con el nombre sin
+    el número (`sim-1-entrada` → `sim-entrada`): caben dos y cada una lleva el
+    suyo."""
+    prefijo = f"sim-{numero}-"
+    return {
+        "sim-" + forma["name"][len(prefijo) :]: forma
+        for forma in step["plot"]["sim"]
+        if forma["name"].startswith(prefijo)
+    }
 
 
-def _niveles(step: dict) -> dict[str, float]:
-    caja = _caja(step)
+def _niveles(step: dict, numero: int = 1) -> dict[str, float]:
+    caja = _caja(step, numero)
     return {
         "entrada": caja["sim-entrada"]["y0"],
         "objetivo": caja["sim-objetivo"]["y1"],
@@ -1657,7 +1670,8 @@ def test_las_notas_dicen_que_la_caja_no_es_una_operacion(
     assert "entrada 1.2000" in notas
     assert "stop 1.1850 (150 pips)" in notas
     assert "objetivo 1.2300 (300 pips)" in notas
-    assert "R:R 1:2 (automático: es la distancia que hay dibujada" in notas
+    assert "· R:R 1:2 ·" in notas
+    assert "R:R automático: es la distancia que hay dibujada" in notas
     assert "ES DIBUJO A MANO" in notas
     assert "no hay orden" in notas
 
@@ -1711,10 +1725,10 @@ def test_en_corto_el_objetivo_va_por_debajo_de_la_entrada(
     run: ImpulseRun, tmp_path: Path
 ) -> None:
     corto = _step(_draw(run, tmp_path), "sim-corto")
-    niveles = _niveles(corto)
+    niveles = _niveles(corto, 2)
 
     assert niveles["objetivo"] < niveles["entrada"] < niveles["stop"]
-    assert _caja(corto)["sim-entrada"]["label"].startswith("CORTO")
+    assert _caja(corto, 2)["sim-entrada"]["label"].startswith("CORTO")
     assert "simulación CORTO" in corto["notes"]
 
 
@@ -1818,12 +1832,121 @@ def test_la_caja_nace_con_el_objetivo_a_dos_riesgos(
     que salir con algo dibujado. Vale igual para la de después: cada caja nueva
     nace ahí, se haya arrastrado lo que se haya arrastrado en la anterior."""
     corto = _step(_draw(run, tmp_path), "sim-corto")
-    niveles = _niveles(corto)
+    niveles = _niveles(corto, 2)
 
     riesgo = niveles["stop"] - niveles["entrada"]
     assert niveles["entrada"] - niveles["objetivo"] == pytest.approx(2 * riesgo, abs=1e-4)
-    assert _caja(corto)["sim-entrada"]["label"] == "CORTO · R:R 1:2"
-    assert corto["simReadout"] == "R:R 1:2 · automático"
+    assert _caja(corto, 2)["sim-entrada"]["label"] == "CORTO · caja 2 (activa) · R:R 1:2"
+    assert corto["simReadout"] == "R:R 1:2 · automático · caja 2"
+
+
+# --- I.1 · dos cajas a la vez -------------------------------------------------
+#
+# El propietario suele poner dos posiciones, así que caben dos cajas: largas,
+# cortas o una de cada, numeradas por orden de plantado. Una es la ACTIVA —la
+# última plantada o agarrada— y es la que cobra la cuenta y la que quita
+# «Quitar». Con las dos puestas, los botones de armar se apagan.
+
+
+def test_la_segunda_caja_se_planta_junto_a_la_primera(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    resultado = _draw(run, tmp_path)
+    corto = _step(resultado, "sim-corto")
+
+    assert len(corto["plot"]["sim"]) == 6, "dos cajas son seis formas"
+    assert _caja(corto, 1)["sim-entrada"]["label"] == "LARGO · caja 1 · R:R " + _rr(
+        _ratio(_niveles(_step(resultado, "sim-objetivo-en-vuelo")))
+    )
+    assert "simulación LARGO (caja 1)" in corto["notes"]
+    assert "simulación CORTO (caja 2, activa)" in corto["notes"]
+    assert "caben dos cajas: la ACTIVA es la última plantada o agarrada" in corto["notes"]
+    # La primera sigue donde estaba: plantar la segunda no la mueve.
+    assert _niveles(corto, 1) == _niveles(_step(resultado, "sim-objetivo-en-vuelo"), 1)
+
+
+def _ratio(niveles: dict[str, float]) -> float:
+    return abs(niveles["objetivo"] - niveles["entrada"]) / abs(
+        niveles["entrada"] - niveles["stop"]
+    )
+
+
+def test_quitar_se_lleva_la_activa_y_deja_la_otra(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    resultado = _draw(run, tmp_path)
+    corto = _step(resultado, "sim-corto")
+    una = _step(resultado, "sim-quitada-una")
+
+    assert corto["simClearTitle"] == "Quita la caja activa (la 2); la otra se queda"
+    assert len(una["plot"]["sim"]) == 3
+    assert _caja(una, 1)["sim-entrada"]["label"].startswith("LARGO · R:R")
+    assert _niveles(una, 1) == _niveles(corto, 1)
+    # Sola, vuelve a hablar sin número: no hay con qué confundirla.
+    assert "caja 1" not in una["notes"]
+    assert una["simReadout"] == "R:R " + _rr(_ratio(_niveles(una))) + " · automático"
+    assert not una["simClearDisabled"]
+    assert una["simClearTitle"] == "Quita la caja simulada"
+
+
+def test_con_dos_cajas_los_botones_de_armar_se_apagan_y_lo_dicen(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    resultado = _draw(run, tmp_path)
+    dos = _step(resultado, "sim-dos-cajas")
+    tercera = _step(resultado, "sim-tercera-no-cabe")
+
+    assert len(dos["plot"]["sim"]) == 6
+    assert dos["simButtonsDisabled"] == [True, True]
+    assert all(
+        title == "Ya hay dos cajas: cobra o quita una para plantar otra."
+        for title in dos["simButtonTitles"]
+    )
+    assert dos["simReadout"] == "R:R 1:2 · automático · caja 2"
+    # Con una sola, los botones están encendidos y con su título de siempre.
+    una = _step(resultado, "cuenta-con-caja")
+    assert una["simButtonsDisabled"] == [False, False]
+    assert all("Caben dos" in title for title in una["simButtonTitles"])
+    # Armar y pulsar con las dos puestas no planta nada ni arma nada.
+    assert tercera["simArmed"] is None
+    assert len(tercera["plot"]["sim"]) == 6
+    assert tercera["plot"]["sim"] == dos["plot"]["sim"]
+
+
+def test_agarrar_una_caja_la_vuelve_la_activa(run: ImpulseRun, tmp_path: Path) -> None:
+    resultado = _draw(run, tmp_path)
+    dos = _step(resultado, "sim-dos-cajas")
+    primera = _step(resultado, "sim-caja-1-activa")
+
+    assert _caja(dos, 2)["sim-entrada"]["label"] == "LARGO · caja 2 (activa) · R:R 1:2"
+    assert _caja(dos, 2)["sim-entrada"]["width"] > _caja(dos, 1)["sim-entrada"]["width"]
+    assert _caja(primera, 1)["sim-entrada"]["label"] == "LARGO · caja 1 (activa) · R:R 1:2"
+    assert _caja(primera, 2)["sim-entrada"]["label"] == "LARGO · caja 2 · R:R 1:2"
+    assert primera["simReadout"] == "R:R 1:2 · automático · caja 1"
+    assert "simulación LARGO (caja 1, activa)" in primera["notes"]
+    # En este punto del recorrido la cuenta va a 100 $ con 5 $ fijos de riesgo.
+    assert "la caja activa (la 1) se juega 5,00 $ para ganar 10,00 $" in primera["notes"]
+    # Agarrarla sin moverla no la mueve.
+    assert _niveles(primera, 1) == _niveles(dos, 1)
+
+
+def test_cobrar_se_lleva_solo_la_activa(run: ImpulseRun, tmp_path: Path) -> None:
+    resultado = _draw(run, tmp_path)
+    antes = _step(resultado, "sim-caja-1-activa")
+    cobrada = _step(resultado, "sim-cobrada-la-activa")
+    devuelta = _step(resultado, "sim-devuelta-la-cobrada")
+
+    assert _cuenta(cobrada)["summary"].startswith("110,00 $ · riesgo 5,00 $ · 1 operación")
+    assert len(cobrada["plot"]["sim"]) == 3
+    # La que queda es la que era la 2, ahora sola y activa.
+    assert _niveles(cobrada, 1) == _niveles(antes, 2)
+    assert not any(_cuenta(cobrada)["resultsDisabled"])
+    assert cobrada["simButtonsDisabled"] == [False, False]
+    # Deshacer la devuelve como caja 2 y activa, con su medida intacta.
+    assert len(devuelta["plot"]["sim"]) == 6
+    assert _niveles(devuelta, 2) == _niveles(antes, 1)
+    assert _caja(devuelta, 2)["sim-entrada"]["label"].endswith("caja 2 (activa) · R:R 1:2")
+    assert not _step(resultado, "sim-dos-quitadas")["plot"]["sim"]
 
 
 # --- I.2 · la cuenta simulada -------------------------------------------------
@@ -1994,7 +2117,7 @@ def _rgb(colour: str) -> tuple[int, int, int]:
 
 # --- I.3 · los recuadros a mano ------------------------------------------------
 #
-# Tres rectángulos —PUL, UL y APUL— que planta el PROPIETARIO para señalar dónde
+# Dos rectángulos —OB y FVG— que planta el PROPIETARIO para señalar dónde
 # los ve. No los ha detectado nadie: en el proyecto no hay regla de ninguno de
 # los tres. Lo que se comprueba aquí es que caen donde se pulsa, que se mueven
 # como se dice, que cada nombre se distingue del otro y de todo lo que dibuja el
@@ -2014,9 +2137,9 @@ def test_el_boton_del_recuadro_arma_y_lo_dice_antes_de_plantar_nada(
 ) -> None:
     armado = _step(_draw(run, tmp_path), "rect-armado")
 
-    assert armado["rectArmed"] == "PUL"
+    assert armado["rectArmed"] == "OB"
     assert not _recuadros(armado), "armar no puede dibujar todavía ningún recuadro"
-    assert "RECUADRO DE PUL ARMADO" in armado["notes"]
+    assert "RECUADRO DE OB ARMADO" in armado["notes"]
     assert armado["simCursor"] == "crosshair"
 
 
@@ -2042,7 +2165,7 @@ def test_el_recuadro_se_planta_centrado_en_el_precio_del_clic(
     assert recuadro["y1"] > recuadro["y0"], "el recuadro tiene alto"
     assert recuadro["x1"] > recuadro["x0"], "y ancho"
     assert recuadro["type"] == "rect"
-    assert recuadro["label"] == "PUL 1 (a mano)"
+    assert recuadro["label"] == "OB 1 (a mano)"
 
 
 def test_el_recuadro_se_distingue_de_lo_que_dibuja_el_motor(
@@ -2052,13 +2175,13 @@ def test_el_recuadro_se_distingue_de_lo_que_dibuja_el_motor(
     así lo ha puesto una mano."""
     recuadro = _recuadros(_step(_draw(run, tmp_path), "rect-plantado"))[0]
 
-    assert _rgb(recuadro["color"]) == _rgb(HAND_RECTS["PUL"])
+    assert _rgb(recuadro["color"]) == _rgb(HAND_RECTS["OB"])
     assert recuadro["dash"] == "dot"
     del_motor = {_rgb(BULLISH), _rgb(BEARISH)} | {
         _rgb(colour) for colour in TIMEFRAME_COLORS.values()
     }
     a_mano = {_rgb(colour) for colour in HAND_RECTS.values()}
-    assert len(a_mano) == 3, "cada nombre lleva su color"
+    assert len(a_mano) == 2, "cada nombre lleva su color"
     assert not a_mano & del_motor
 
 
@@ -2087,32 +2210,32 @@ def test_arrastrar_por_dentro_mueve_el_recuadro_entero(
 def test_se_pueden_marcar_recuadros_de_nombres_distintos(
     run: ImpulseRun, tmp_path: Path
 ) -> None:
-    """En un mismo gráfico hay el PUL y el UL: enseñarlos de uno en uno no dice
+    """En un mismo gráfico hay el OB y el FVG: enseñarlos de uno en uno no dice
     lo que hay que decir, y cada nombre va con su color."""
     segundo = _step(_draw(run, tmp_path), "rect-segundo")
     recuadros = _recuadros(segundo)
 
     assert [recuadro["label"] for recuadro in recuadros] == [
-        "PUL 1 (a mano)",
-        "UL 1 (a mano)",
+        "OB 1 (a mano)",
+        "FVG 1 (a mano)",
     ]
-    assert _rgb(recuadros[0]["color"]) == _rgb(HAND_RECTS["PUL"])
-    assert _rgb(recuadros[1]["color"]) == _rgb(HAND_RECTS["UL"])
+    assert _rgb(recuadros[0]["color"]) == _rgb(HAND_RECTS["OB"])
+    assert _rgb(recuadros[1]["color"]) == _rgb(HAND_RECTS["FVG"])
     assert recuadros[1]["y1"] < recuadros[0]["y0"], "el segundo se plantó más abajo"
-    assert "recuadros marcados a mano: 2 (1 de PUL · 1 de UL)" in segundo["notes"]
+    assert "recuadros marcados a mano: 2 (1 de OB · 1 de FVG)" in segundo["notes"]
 
 
 def test_los_recuadros_se_numeran_por_nombre(run: ImpulseRun, tmp_path: Path) -> None:
-    """El segundo PUL es «PUL 2» aunque entre los dos se haya plantado un UL: lo
+    """El segundo OB es «OB 2» aunque entre los dos se haya plantado un FVG: lo
     que se cuenta al mirarlos es cuántos hay de cada cosa."""
     tercero = _step(_draw(run, tmp_path), "rect-tercero")
 
     assert [recuadro["label"] for recuadro in _recuadros(tercero)] == [
-        "PUL 1 (a mano)",
-        "UL 1 (a mano)",
-        "PUL 2 (a mano)",
+        "OB 1 (a mano)",
+        "FVG 1 (a mano)",
+        "OB 2 (a mano)",
     ]
-    assert "recuadros marcados a mano: 3 (2 de PUL · 1 de UL)" in tercero["notes"]
+    assert "recuadros marcados a mano: 3 (2 de OB · 1 de FVG)" in tercero["notes"]
 
 
 def test_quitar_el_ultimo_deja_los_demas(run: ImpulseRun, tmp_path: Path) -> None:
@@ -2120,8 +2243,8 @@ def test_quitar_el_ultimo_deja_los_demas(run: ImpulseRun, tmp_path: Path) -> Non
     deshecho = _step(resultado, "rect-deshecho")
 
     assert [recuadro["label"] for recuadro in _recuadros(deshecho)] == [
-        "PUL 1 (a mano)",
-        "UL 1 (a mano)",
+        "OB 1 (a mano)",
+        "FVG 1 (a mano)",
     ]
     assert not deshecho["rectUndoDisabled"], "todavía quedan que quitar"
 
@@ -2143,9 +2266,9 @@ def test_las_notas_dicen_que_el_recuadro_no_lo_ha_detectado_el_motor(
 ) -> None:
     notas = _step(_draw(run, tmp_path), "rect-plantado")["notes"]
 
-    assert "recuadros marcados a mano: 1 (1 de PUL)" in notas
+    assert "recuadros marcados a mano: 1 (1 de OB)" in notas
     assert "NO los ha detectado el motor" in notas
-    assert "no hay regla de PUL, UL ni APUL en el proyecto" in notas
+    assert "no hay regla de OB ni FVG en el proyecto" in notas
 
 
 def test_los_recuadros_no_cuentan_como_capa_del_motor(
@@ -2176,7 +2299,8 @@ def test_sin_recuadros_los_botones_de_quitar_estan_apagados(
 # no hay ninguna regla, y el color no es el que el motor usa por temporalidad. Lo
 # que se comprueba aquí es que nacen horizontales donde se pulsa, que se inclinan
 # y se mueven como se dice, que se distinguen de los recuadros y de todo lo que
-# dibuja el motor, y que el estado deja claro de quién son.
+# dibuja el motor, y que el estado deja claro de quién son. El alto y el bajo de
+# Asia y de Londres ya no van aquí: los marca el motor (J.1).
 
 
 def _lineas(step: dict) -> list[dict]:
@@ -2590,7 +2714,7 @@ def test_el_fibonacci_va_en_gris_y_no_en_ninguno_de_los_colores_de_la_mano(
     run: ImpulseRun, tmp_path: Path
 ) -> None:
     """No marca nada: es una regla con la que medir, y en gris no le quita sitio a
-    ninguna capa ni se confunde con un PUL, un UL o un APUL."""
+    ninguna capa ni se confunde con un OB o un FVG."""
     trazado = _step(_draw(run, tmp_path), "fib-trazado")
 
     for shape in _fib(trazado):
@@ -2694,3 +2818,224 @@ def test_sin_fibonacci_los_botones_de_quitar_estan_apagados(
     assert vacio["fibUndoDisabled"] is True
     assert vacio["fibClearDisabled"] is True
     assert vacio["fibArmed"] is False
+
+
+# --- J.1 · el alto y el bajo de Asia y de Londres ------------------------------
+#
+# Cada día, a las 7:58 del reloj de la pantalla (UTC-4 fijo), el MOTOR marca
+# cuatro niveles: el alto y el bajo de Asia (20:00 → 01:00) y los de Londres
+# (03:00 → 07:58) y los deja
+# puestos hasta las 17:00. Es capa del motor —calculada en el dominio sobre el
+# M1— y no dibujo del propietario. Lo que se comprueba aquí es que viaja ya
+# calculada, que se dibuja donde y cuando dice, que SÓLO se dibuja la marca
+# actual —la última puesta a la hora del borde derecho—, que se distingue de todo
+# lo demás, que la casilla y el nivel de ruido la quitan de verdad, que el replay
+# no la enseña antes de las 7:58 y que el estado dice qué se está viendo.
+
+SESSION_TRACES = ("Alto Asia", "Bajo Asia", "Alto Londres", "Bajo Londres")
+
+
+def _sesiones(step: dict) -> dict[str, dict]:
+    return {
+        trace["name"]: trace
+        for trace in step["plot"]["traces"]
+        if trace["name"] in SESSION_TRACES
+    }
+
+
+def _tramos(trace: dict) -> list[tuple[int, int, float]]:
+    """Los segmentos (desde, hasta, precio) de una traza de líneas con nulos."""
+    segments = trace["segments"]
+    return [
+        (_minute(segments[i][0]), _minute(segments[i + 1][0]), segments[i][1])
+        for i in range(0, len(segments), 3)
+    ]
+
+
+def test_las_sesiones_viajan_calculadas_desde_el_dominio(run: ImpulseRun) -> None:
+    """El explorador dibuja lo que le llega: ni un máximo se mide en JavaScript."""
+    payload = build_payload(run)["sessions"]
+    esperado = session_levels(run.chart_bars[M15]) if run.sessions is None else run.sessions
+
+    # El reloj se escribe como en el resto del explorador: `UTC-4`, no el
+    # nombre POSIX con el signo al revés.
+    assert payload["rule"] == (
+        "Asia 20:00 → 01:00 · Londres 03:00 → 07:58 · marca a las 07:58 · "
+        "hasta las 17:00 · reloj UTC-4"
+    )
+    assert len(payload["days"]) == len(esperado) > 0
+    primera = payload["days"][0]
+    fila = esperado.iloc[0]
+    assert primera["m"] == _minute(str(fila["marked_at"]))
+    assert primera["u"] == _minute(str(fila["until"]))
+    assert primera["ah"] == round(float(fila["asia_high"]), DECIMALS)
+    assert primera["al"] == round(float(fila["asia_low"]), DECIMALS)
+    assert primera["lh"] == round(float(fila["london_high"]), DECIMALS)
+    assert primera["ll"] == round(float(fila["london_low"]), DECIMALS)
+    assert primera["ahx"] == _minute(str(fila["asia_high_at"]))
+    assert primera["llx"] == _minute(str(fila["london_low_at"]))
+    # La marca es a las 7:58 y se retira a las 17:00: nueve horas y dos minutos
+    # después. Y en el reloj de la pantalla, UTC-4 fijo: las 11:58 UTC siempre.
+    assert all(day["u"] - day["m"] == 9 * 60 + 2 for day in payload["days"])
+    assert all(day["m"] % 1440 == 11 * 60 + 58 for day in payload["days"])
+
+
+def test_sin_el_m1_no_hay_sesiones_y_el_payload_lo_dice(context_run: ImpulseRun) -> None:
+    """La corrida con contexto no recibe el histórico base: la capa va vacía, no
+    inventada a partir de M15."""
+    assert context_run.sessions is None
+    assert build_payload(context_run)["sessions"] == {"rule": None, "days": []}
+
+
+def _actual(payload: dict, hasta: int) -> dict | None:
+    """La última marca puesta a ese minuto."""
+    puestas = [day for day in payload["sessions"]["days"] if day["m"] <= hasta]
+    return puestas[-1] if puestas else None
+
+
+def test_solo_se_dibuja_la_marca_actual_de_la_marca_a_las_17(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    """Una marca por día tapa el precio en dos meses y no decide nada hoy: se
+    dibuja la última puesta a la hora del borde derecho, y ninguna más."""
+    resultado = _draw(run, tmp_path)
+    con = _step(resultado, "con-sesiones")
+    payload = build_payload(run)
+    trazas = _sesiones(con)
+
+    assert set(trazas) == set(SESSION_TRACES)
+    hasta = _minute(con["to"] + " 23:59")
+    actual = _actual(payload, hasta)
+    assert actual is not None
+    assert len([day for day in payload["sessions"]["days"] if day["m"] <= hasta]) > 1, (
+        "la ventana tiene que dejar marcas anteriores fuera del dibujo"
+    )
+    for nombre, clave in zip(SESSION_TRACES, ("ah", "al", "lh", "ll"), strict=True):
+        assert _tramos(trazas[nombre]) == [(actual["m"], actual["u"], actual[clave])], nombre
+
+
+def test_cada_nivel_lleva_su_nombre_y_su_precio_escritos_en_la_marca(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    con = _step(_draw(run, tmp_path), "con-sesiones")
+    alto = _sesiones(con)["Alto Asia"]
+
+    assert alto["textposition"] == "top right"
+    assert _sesiones(con)["Bajo Asia"]["textposition"] == "bottom right"
+    etiquetas = [texto for texto in alto["captions"] if texto]
+    assert etiquetas, "el nombre va escrito en el gráfico"
+    assert all(re.fullmatch(r"Alto Asia \d+\.\d{4}", texto) for texto in etiquetas)
+    hover = next(texto for texto in alto["hovers"] if texto)
+    assert hover.startswith("ALTO DE ASIA ")
+    assert "marcado a las " in hover
+    assert "lo fijó la vela de " in hover
+    assert "se retira a las " in hover
+
+
+def test_un_tono_por_sesion_que_no_usa_nadie_mas(run: ImpulseRun, tmp_path: Path) -> None:
+    """Marrón Asia, púrpura Londres; el alto y el bajo de la misma sesión
+    comparten tono y se distinguen por el nombre. Ninguna otra capa —ni del
+    motor ni de la mano— usa esos dos colores."""
+    trazas = _sesiones(_step(_draw(run, tmp_path), "con-sesiones"))
+
+    assert _rgb(trazas["Alto Asia"]["color"]) == _rgb(trazas["Bajo Asia"]["color"])
+    assert _rgb(trazas["Alto Asia"]["color"]) == _rgb(SESSION_COLORS["asia"])
+    assert _rgb(trazas["Alto Londres"]["color"]) == _rgb(trazas["Bajo Londres"]["color"])
+    assert _rgb(trazas["Alto Londres"]["color"]) == _rgb(SESSION_COLORS["london"])
+    assert _rgb(SESSION_COLORS["asia"]) != _rgb(SESSION_COLORS["london"])
+    otros = {_rgb(BULLISH), _rgb(BEARISH), _rgb(HAND_FIB)}
+    otros |= {_rgb(colour) for colour in TIMEFRAME_COLORS.values()}
+    otros |= {_rgb(colour) for colour in HAND_RECTS.values()}
+    otros |= {_rgb(colour) for colour in HAND_LINES.values()}
+    assert not {_rgb(colour) for colour in SESSION_COLORS.values()} & otros
+    for trace in trazas.values():
+        assert trace["dash"] is None, "el nivel marcado va continuo"
+
+
+def test_el_punteado_va_de_la_vela_que_fijo_el_nivel_a_la_marca(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    """El precio ya había estado ahí antes de las 7:58, pero nadie lo había
+    marcado: ese tramo se dibuja punteado, como el ancla y el extremo del ID."""
+    con = _step(_draw(run, tmp_path), "con-sesiones")
+    payload = build_payload(run)["sessions"]["days"]
+    punteado = [
+        trace for trace in con["plot"]["traces"] if trace["name"] == "Asia · de dónde sale"
+    ]
+    assert punteado and punteado[0]["dash"] == "dot"
+    assert _rgb(punteado[0]["color"]) == _rgb(SESSION_COLORS["asia"])
+
+    marcas = {day["m"]: day for day in payload}
+    tramos = _tramos(punteado[0])
+    assert len(tramos) == 2, "el alto y el bajo de la marca actual, y nada más"
+    for desde, hasta, precio in tramos:
+        day = marcas[hasta]
+        assert desde in (day["ahx"], day["alx"])
+        assert precio in (day["ah"], day["al"])
+        assert desde < hasta, "la vela que fija el nivel va antes de la marca"
+
+
+def test_la_casilla_quita_las_sesiones_y_el_nivel_limpio_tambien(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    resultado = _draw(run, tmp_path)
+
+    assert not _sesiones(_step(resultado, "sin-sesiones"))
+    assert not _sesiones(_step(resultado, "ruido-limpio"))
+    assert _sesiones(_step(resultado, "ruido-normal"))
+    assert _sesiones(_step(resultado, "ruido-todo"))
+    assert _step(resultado, "ruido-de-salida")["boxes"]["layer-sessions"] is False
+
+
+def test_la_auditoria_ciega_tampoco_ensena_las_sesiones(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    assert not _sesiones(_step(_draw(run, tmp_path), "ciega"))
+
+
+def test_el_replay_no_marca_ninguna_sesion_antes_de_las_7_58(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    """A cada paso se dibuja exactamente la última marca que el reloj ya ha
+    visto poner, y no llega más allá del presente."""
+    resultado = _draw(run, tmp_path)
+    payload = build_payload(run)
+    comprobados = 0
+
+    for paso in _replay_steps(resultado):
+        reloj = _clock(payload, paso)
+        actual = _actual(payload, reloj)
+        trazas = _sesiones(paso)
+        if actual is None or actual["ah"] is None:
+            assert "Alto Asia" not in trazas, paso["label"]
+            continue
+        tramos = _tramos(trazas["Alto Asia"])
+        assert [tramo[0] for tramo in tramos] == [actual["m"]], paso["label"]
+        assert tramos[0][1] == min(actual["u"], reloj), paso["label"]
+        comprobados += 1
+
+    assert comprobados, "ningún paso del replay llegó a ver una marca"
+
+
+def test_las_notas_dicen_cuantas_marcas_hay_y_con_que_regla(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    resultado = _draw(run, tmp_path)
+    con = _step(resultado, "con-sesiones")
+
+    assert "sesiones de Asia y Londres: sólo la marca ACTUAL, la de " in con["notes"]
+    assert "las marcas anteriores no se dibujan: siguen en sesiones.csv" in con["notes"]
+    assert "Londres 03:00 → 07:58 · marca a las 07:58" in con["notes"]
+    assert "punteado desde la vela que fijó el nivel, continuo desde la marca" in con["notes"]
+    sin = _step(resultado, "sin-sesiones")["notes"]
+    assert "sesiones de Asia y Londres:" not in sin
+    assert "capas apagadas: " in sin and "sesiones de Asia y Londres" in sin
+
+
+def test_las_sesiones_no_se_dibujan_sin_datos_y_el_estado_lo_dice(
+    context_run: ImpulseRun, tmp_path: Path
+) -> None:
+    con = _step(_draw(context_run, tmp_path), "con-sesiones")
+
+    assert not _sesiones(con)
+    assert "sesiones de Asia y Londres: sin datos" in con["notes"]

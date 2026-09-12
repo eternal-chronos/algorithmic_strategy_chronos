@@ -46,6 +46,7 @@ from chronos.application.structure.statistics import summarize
 from chronos.application.structure.timezone_audit import TimezoneAudit, audit_timezone
 from chronos.domain.errors import DomainError
 from chronos.domain.structure.enums import AnchorMode, LegStartMode
+from chronos.domain.structure.sessions import SessionLevelsRule
 from chronos.infrastructure.config.loader import ConfigError, load_impulse_config
 from chronos.infrastructure.reporting.impulse_captures import (
     CaptureRequest,
@@ -195,6 +196,13 @@ def detect(
             audit=audit,
             provenance=f"{history.provenance} · lado efectivo: {history.side}",
             aggregation_notes=notes,
+            # El alto y el bajo de Asia y de Londres se marcan sobre el M1: a
+            # las 7:58 hay que ver cerrar el minuto 7:57. Y las 7:58 son las del
+            # reloj con el que el propietario mira el gráfico, el mismo que
+            # imprime el explorador: si no, en invierno la marca le saldría a
+            # las 8:58 de su pantalla y ya no le serviría para operar las 8:00.
+            base_bars=history.frame,
+            session_rule=SessionLevelsRule(timezone=run_config.reporting.session_timezone),
         )
         statistics = summarize(run)
         lateralization = measure(run)

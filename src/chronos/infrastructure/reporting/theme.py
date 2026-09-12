@@ -38,6 +38,14 @@ MAGENTA = "#c0359a"
 CYAN = "#0b8fa8"
 OLIVE = "#7c8b12"
 
+# Dos más de la mano para las líneas de SESIÓN —el alto y el bajo de Asia, el
+# alto y el bajo de Londres—: cada sesión lleva el suyo y el alto y el bajo de
+# la misma sesión comparten tono, que lo que los separa es el nombre. El marrón
+# (28°) es oscuro y apagado para no confundirse con el naranja vivo del marco de
+# H4, y el púrpura (286°) cae entre el violeta del Diario y el magenta.
+BROWN = "#8a5a2b"
+PURPLE = "#9440c8"
+
 # Polaridad (ganancia / pérdida): pareja divergente azul ↔ rojo con gris neutro.
 POSITIVE = "#2a78d6"
 NEGATIVE = "#d03b3b"

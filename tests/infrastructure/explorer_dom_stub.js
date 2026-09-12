@@ -59,7 +59,7 @@ function declare(id) {
  'mode-group', 'impulse-layers', 'chart', 'zoom-reset', 'noise-buttons',
  'prev', 'next',
  'from', 'to', 'layer-limbo', 'layer-marks', 'layer-contacts', 'layer-mid', 'layer-wrong',
- 'layer-frame',
+ 'layer-frame', 'layer-sessions',
  'blind-seed', 'blind-start', 'blind-reveal', 'blind-exit',
  'sim-group', 'sim-buttons', 'sim-rr', 'sim-clear',
  'rect-group', 'rect-buttons', 'rect-undo', 'rect-clear',
@@ -207,12 +207,18 @@ global.Plotly = {
           fill: trace.fill || null,
           fillcolor: trace.fillcolor || null,
           captions: trace.text && trace.text.length <= 200 ? trace.text.slice() : null,
+          // J.1 — las sesiones escriben el nombre en el gráfico (`text`) y
+          // cuentan el resto al pasar el ratón (`hovertext`).
+          hovers: trace.hovertext && trace.hovertext.length <= 200
+            ? trace.hovertext.slice()
+            : null,
+          textposition: trace.textposition || null,
           xs: trace.mode === 'markers' && (trace.x || []).length <= 200
             ? trace.x.slice()
             : null,
           // El trazo entero, para comprobar QUÉ nivel se dibuja en CADA tramo:
           // cada segmento es (x0, x1, precio).
-          segments: trace.mode === 'lines' && (trace.x || []).length <= 3000
+          segments: /^lines/.test(trace.mode || '') && (trace.x || []).length <= 3000
             ? (trace.x || []).map(function (x, index) { return [x, trace.y[index]]; })
             : null,
         };
@@ -229,6 +235,8 @@ global.Plotly = {
         return {
           name: shape.name, type: shape.type,
           x0: shape.x0, x1: shape.x1, y0: shape.y0, y1: shape.y1,
+          // La línea de entrada de la caja ACTIVA va más gruesa.
+          width: (shape.line && shape.line.width) || null,
           label: (shape.label && shape.label.text) || null,
         };
       }),
@@ -308,6 +316,14 @@ function snapshot(label) {
       return button.getAttribute('aria-pressed') === 'true';
     })[0] || {}).dataset?.side || null,
     simClearDisabled: elements['sim-clear'].disabled === true,
+    simClearTitle: elements['sim-clear'].title,
+    // Con dos cajas puestas los botones de armar se apagan, y dicen por qué.
+    simButtonsDisabled: elements['sim-buttons'].children.map(function (button) {
+      return button.disabled === true;
+    }),
+    simButtonTitles: elements['sim-buttons'].children.map(function (button) {
+      return button.title;
+    }),
     // El R:R que el panel dice que hay dibujado: siempre medido de la caja.
     simReadout: elements['sim-rr'].textContent,
     simReadoutSource: elements['sim-rr'].dataset.source || '',
@@ -359,7 +375,7 @@ function snapshot(label) {
     // Las casillas que el preset mueve sin que nadie las toque: si el estado y
     // el control se separan, el explorador miente sobre lo que se está viendo.
     boxes: ['layer-limbo', 'layer-marks', 'layer-contacts', 'layer-mid', 'layer-wrong',
-      'layer-frame']
+      'layer-frame', 'layer-sessions']
       .reduce(function (state, id) {
         state[id] = elements[id].checked === true;
         return state;
@@ -469,6 +485,20 @@ elements['layer-mid'].fire('change', { target: { checked: true } });
 steps.push(snapshot('con-nivel-50'));
 elements['layer-contacts'].fire('change', { target: { checked: false } });
 elements['layer-mid'].fire('change', { target: { checked: false } });
+
+// J.1 — el alto y el bajo de Asia y de Londres que marca el motor a las 7:58 de
+// Nueva York. Se retratan en M15 con la ventana corta, que es donde se leen, y
+// apagados en la misma ventana para comprobar que la casilla los quita de
+// verdad.
+const m15 = tabs.filter(function (tab) { return tab.dataset.tf === 'M15'; })[0] || tabs[0];
+m15.fire('click');
+presets[presets.length - 1].fire('click');
+elements['layer-sessions'].fire('change', { target: { checked: true } });
+steps.push(snapshot('con-sesiones'));
+elements['layer-sessions'].fire('change', { target: { checked: false } });
+steps.push(snapshot('sin-sesiones'));
+elements['layer-sessions'].fire('change', { target: { checked: true } });
+tabs[0].fire('click');
 
 // El MARCO del ID: el recuadro de la constitución a la muerte y del ancla al
 // extremo. Se enciende y se apaga sobre las mismas velas. Si el reparto tiene
@@ -819,24 +849,26 @@ function arrastrarCaja(desde, hasta) {
   fireDocument('mouseup', {});
 }
 
-function cajaSimulada() {
+// Las formas van numeradas por caja: `sim-1-entrada`, `sim-2-objetivo`...
+function cajaSimulada(numero) {
   const shapes = plotCalls[plotCalls.length - 1].sim || [];
+  const prefijo = 'sim-' + (numero || 1) + '-';
   const busca = function (name) {
-    return shapes.filter(function (shape) { return shape.name === name; })[0];
+    return shapes.filter(function (shape) { return shape.name === prefijo + name; })[0];
   };
-  const linea = busca('sim-entrada');
+  const linea = busca('entrada');
   if (!linea) { return null; }
   return {
     entry: linea.y0,
-    target: busca('sim-objetivo').y1,
-    stop: busca('sim-riesgo').y1,
+    target: busca('objetivo').y1,
+    stop: busca('riesgo').y1,
     from: minuteOf(linea.x0),
     to: minuteOf(linea.x1),
   };
 }
 
-function asaDeLaCaja(price) {
-  const caja = cajaSimulada();
+function asaDeLaCaja(price, numero) {
+  const caja = cajaSimulada(numero);
   return pixelOf(Math.round((caja.from + caja.to) / 2), caja[price]);
 }
 
@@ -883,11 +915,16 @@ const rrEnVuelo = elements['sim-rr'].textContent;
 fireDocument('mouseup', {});
 steps.push(Object.assign(snapshot('sim-objetivo-en-vuelo'), { simReadoutEnVuelo: rrEnVuelo }));
 
-// En corto el objetivo va por debajo de la entrada y el riesgo por encima.
+// En corto el objetivo va por debajo de la entrada y el riesgo por encima. Se
+// planta con la larga puesta: caben dos, así que es la caja 2 y la activa.
 armar('short');
 clicGrafico(pixelOf(minutoSimulado, entradaSimulada));
 steps.push(snapshot('sim-corto'));
 
+// «Quitar» se lleva UNA caja —la activa, la 2— y la larga se queda y pasa a
+// ser la activa. El segundo clic la quita también.
+elements['sim-clear'].fire('click');
+steps.push(snapshot('sim-quitada-una'));
 elements['sim-clear'].fire('click');
 steps.push(snapshot('sim-quitado'));
 
@@ -942,7 +979,35 @@ elements['account-reset'].fire('click');
 steps.push(snapshot('cuenta-reiniciada'));
 elements['sim-clear'].fire('click');
 
-// I.3 — los recuadros a mano: tres botones —PUL, UL y APUL— que arman, un clic
+// Dos cajas a la vez, que es como opera el propietario: dos largas —o dos
+// cortas, o una de cada—, cada una con su stop y su objetivo. Con las dos
+// puestas los botones de armar se apagan; la activa es la última plantada o
+// agarrada, y es la que cobra la cuenta y la que quita «Quitar».
+const minutoSegundaCaja = minutoSimulado + Math.round((simX[1] - simX[0]) * 0.3);
+plantarCaja('long');
+armar('long');
+clicGrafico(pixelOf(minutoSegundaCaja, entradaSimulada));
+steps.push(snapshot('sim-dos-cajas'));
+// Armar con las dos puestas no hace nada: el clic tampoco planta una tercera.
+armar('short');
+clicGrafico(pixelOf(minutoSegundaCaja, entradaSimulada * 0.9));
+steps.push(snapshot('sim-tercera-no-cabe'));
+// Agarrar la caja 1 la vuelve la activa.
+const asaPrimera = asaDeLaCaja('entry', 1);
+arrastrarCaja(asaPrimera, { x: asaPrimera.x, y: asaPrimera.y });
+steps.push(snapshot('sim-caja-1-activa'));
+// Cobrarla se lleva sólo esa: la 2 pasa a ser la 1 y la activa.
+apuntar('win');
+steps.push(snapshot('sim-cobrada-la-activa'));
+// Deshacer la devuelve como caja 2 y activa.
+elements['account-undo'].fire('click');
+steps.push(snapshot('sim-devuelta-la-cobrada'));
+elements['account-reset'].fire('click');
+elements['sim-clear'].fire('click');
+elements['sim-clear'].fire('click');
+steps.push(snapshot('sim-dos-quitadas'));
+
+// I.3 — los recuadros a mano: dos botones —OB y FVG— que arman, un clic
 // que planta el suyo y arrastres que lo mueven. Se marcan varios de cada nombre y
 // se quitan de uno en uno o de golpe. Es dibujo del propietario: no lo ha
 // detectado el motor y no cuenta como capa.
@@ -977,13 +1042,13 @@ function asaDelRecuadro(index, borde) {
 }
 
 steps.push(snapshot('rect-sin-nada'));
-armarRect('PUL');
+armarRect('OB');
 steps.push(snapshot('rect-armado'));
 // Escape suelta el botón sin plantar nada, igual que en el simulador.
 pressKey('Escape');
 steps.push(snapshot('rect-desarmado'));
 
-armarRect('PUL');
+armarRect('OB');
 clicGrafico(pixelOf(minutoSimulado, entradaSimulada));
 steps.push(snapshot('rect-plantado'));
 
@@ -999,12 +1064,12 @@ steps.push(snapshot('rect-movido'));
 
 // Se marcan varios y de nombres distintos: cada uno con su color.
 const medioSimulado = (simY[0] + entradaSimulada) / 2;
-armarRect('UL');
+armarRect('FVG');
 clicGrafico(pixelOf(minutoSimulado, medioSimulado));
 steps.push(snapshot('rect-segundo'));
 
-// Y se numeran POR NOMBRE: el segundo PUL es «PUL 2» aunque entre medias haya un UL.
-armarRect('PUL');
+// Y se numeran POR NOMBRE: el segundo OB es «OB 2» aunque entre medias haya un FVG.
+armarRect('OB');
 clicGrafico(pixelOf(minutoSimulado, (simY[0] + medioSimulado) / 2));
 steps.push(snapshot('rect-tercero'));
 
@@ -1013,10 +1078,10 @@ steps.push(snapshot('rect-deshecho'));
 elements['rect-clear'].fire('click');
 steps.push(snapshot('rect-limpio'));
 
-// I.4 — las líneas a mano: tres botones —Diario, H4 y H1— que arman, un clic que
-// planta la suya HORIZONTAL al precio pulsado y arrastres que la mueven y la
-// inclinan. Es dibujo del propietario: no la ha calculado el motor y no cuenta
-// como capa.
+// I.4 — las líneas a mano: tres botones —Diario, H4 y H1— que arman, un clic
+// que planta la suya HORIZONTAL al precio pulsado y arrastres que la mueven y
+// la inclinan. Es dibujo del propietario: no la ha calculado el motor y no
+// cuenta como capa.
 function botonLinea(kind) {
   return elements['line-buttons'].children.filter(function (button) {
     return button.dataset.kind === kind;
@@ -1076,8 +1141,8 @@ armarLinea('H4');
 clicGrafico(pixelOf(minutoSimulado, precioAlto));
 steps.push(snapshot('linea-segunda'));
 
-// Y se numeran POR TEMPORALIDAD: la segunda del Diario es «Diario 2» aunque
-// entre medias haya una de H4.
+// Y se numeran POR NOMBRE: la segunda del Diario es «Diario 2» aunque entre
+// medias haya una de H4.
 armarLinea('D');
 clicGrafico(pixelOf(minutoSimulado, (simY[1] + precioAlto) / 2));
 steps.push(snapshot('linea-tercera'));

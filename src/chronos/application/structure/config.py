@@ -293,6 +293,9 @@ class TimezoneAuditConfig:
 class StructureReportingConfig:
     output_dir: str = "reports"
     #: Zona horaria de la sesión del propietario; el explorador imprime ambas.
+    #: Es también el reloj en el que se marcan el alto y el bajo de Asia y de
+    #: Londres (las 7:58 de SU pantalla), pero no entra en el hash: no cambia
+    #: ninguna vela ni ningún impulso.
     session_timezone: str = "Etc/GMT+4"
     text_report: bool = True
     explorer_html: bool = True
