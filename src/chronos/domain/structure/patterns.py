@@ -26,6 +26,11 @@ Un patrón que cae en la ventana de dos ID consecutivos —la pierna del segundo
 arranca mientras el primero vive— es del **último** que lo reclama: es el OB
 "donde arranca el ID", y ése manda.
 
+**El FVG que no deja recorrido no se marca.** Si el hueco es tan grande —o
+está tan arriba— que del borde por el que el precio entraría al extremo del ID
+queda poco, no sirve: sólo se marca el OB. "Poco" es una fracción del rango del
+ID (`min_fvg_room`); el propietario la afina mirando el dibujo.
+
 **Usado**: el precio ha vuelto a entrar en la zona después de que el patrón se
 supiera. Se mira sólo mientras el ID vive; lo que pase después no es de este ID.
 Un patrón usado sigue en la tabla con la vela que lo usó: quien dibuje decide
@@ -92,17 +97,27 @@ class PatternRule:
     #: Velas que se le dan al precio para irse tras el OB. Con 1 el OB exige que
     #: la vela siguiente ya cierre al otro lado. El propietario no lo ha cerrado.
     displacement: int = 3
+    #: Recorrido mínimo que tiene que dejar un FVG, como fracción del rango del
+    #: ID: del borde por el que el precio entra en el hueco al extremo del ID. Un
+    #: FVG que deja menos no se marca. Con 0 se marcan todos.
+    min_fvg_room: float = 0.5
 
     def __post_init__(self) -> None:
         if self.displacement < 1:
             raise DomainError(f"El desplazamiento del OB no puede ser {self.displacement}")
+        if not 0.0 <= self.min_fvg_room <= 1.0:
+            raise DomainError(
+                f"El recorrido mínimo del FVG es una fracción del ID: {self.min_fvg_room}"
+            )
 
     def describe(self) -> str:
         return (
             "dentro del ID: en su dirección, solapando su rango, desde la vela previa "
             "a la pierna hasta la que lo mata · OB: vela contraria y cierre más allá "
             f"de su extremo en {self.displacement} velas, zona = la vela entera · "
-            "FVG: hueco de tres velas · usado: el precio vuelve a entrar en la zona"
+            "FVG: hueco de tres velas, y sólo si deja al menos el "
+            f"{self.min_fvg_room:.0%} del ID de recorrido hasta el extremo · "
+            "usado: el precio vuelve a entrar en la zona"
         )
 
 
@@ -160,6 +175,9 @@ def patterns_inside(
             & ~claimed[impulse.direction]
         )
         claimed[impulse.direction] |= inside
+        # El FVG que no deja recorrido es de este ID —nadie más lo reclama—
+        # pero no se marca.
+        inside &= _leaves_room(candidates, impulse.direction, lower, upper, rule.min_fvg_room)
         for position in np.flatnonzero(inside):
             origin = int(candidates.origin[position])
             known = int(candidates.known[position])
@@ -292,6 +310,31 @@ def _fair_value_gaps(
         gap_low, gap_high = high[2:], low[:-2]
     offset = np.flatnonzero(gap_low < gap_high)
     return offset + 1, offset + 2, gap_low[offset], gap_high[offset]
+
+
+def _leaves_room(
+    candidates: _Candidates,
+    direction: ImpulseDirection,
+    lower: float,
+    upper: float,
+    min_room: float,
+) -> np.ndarray:
+    """`True` para el OB siempre y para el FVG que deja al menos `min_room` del
+    rango del ID entre su borde de entrada y el extremo.
+
+    En un ID alcista el precio entra en el hueco por arriba y el recorrido va de
+    ahí al extremo, que es el techo; en uno bajista, al revés. Un ID sin rango
+    —ancla y extremo cruzados, que se cuenta en los diagnósticos— no deja
+    recorrido a ningún FVG.
+    """
+    is_gap = np.asarray(candidates.kind == PatternKind.FAIR_VALUE_GAP.value, dtype=bool)
+    span = upper - lower
+    if span <= 0:
+        return ~is_gap
+    room = (upper - candidates.high) if direction is ImpulseDirection.ALCISTA else (
+        candidates.low - lower
+    )
+    return np.asarray(~is_gap | (room >= min_room * span), dtype=bool)
 
 
 def _first_use(

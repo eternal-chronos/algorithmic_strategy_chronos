@@ -365,3 +365,84 @@ def test_un_hueco_que_se_toca_justo_no_es_fvg() -> None:
     found = patterns_inside(bars, timeframe="H4", impulses=[impulse], id_bars=bars)
 
     assert "FVG" not in found["tipo"].tolist()
+
+
+# --- El FVG que no deja recorrido ---------------------------------------------
+#
+# Lo dijo el propietario mirando H4: un FVG muy grande y muy pegado al extremo
+# del ID no permite que el precio se desplace, así que sólo se marca el OB. Se
+# mide como el recorrido que deja el hueco —de su borde de entrada al extremo—
+# en fracción del rango del ID.
+
+#: ID alcista de 99 a 111 con un hueco [103, 109] que sólo deja 2 de 12 hasta
+#: el extremo. La vela 1 sigue siendo el OB del arranque.
+TALL_GAP: list[Bar] = [
+    (100.0, 101.0, 99.0, 100.5),
+    (100.5, 103.0, 98.0, 99.0),
+    (99.0, 110.0, 98.5, 109.5),
+    (109.5, 112.0, 109.0, 111.0),
+    (111.0, 112.0, 107.0, 108.0),
+]
+
+
+def test_el_fvg_que_no_deja_recorrido_no_se_marca_y_el_ob_si() -> None:
+    bars = _bars(TALL_GAP)
+    impulse = _impulse(bars, leg_start=2, constitution=4, anchor=99.0, extreme=111.0)
+
+    found = patterns_inside(bars, timeframe="H4", impulses=[impulse], id_bars=bars)
+
+    assert found["tipo"].tolist() == ["OB"]
+    assert found["indice_origen"].tolist() == [1]
+
+
+def test_el_recorrido_minimo_del_fvg_es_un_parametro() -> None:
+    """Con el umbral en cero el hueco vuelve a marcarse; con más de la mitad, el
+    de la pierna de siempre (7 de 12) también cae."""
+    tall = _bars(TALL_GAP)
+    impulse = _impulse(tall, leg_start=2, constitution=4, anchor=99.0, extreme=111.0)
+    everything = patterns_inside(
+        tall, timeframe="H4", impulses=[impulse], id_bars=tall, rule=PatternRule(min_fvg_room=0.0)
+    )
+    assert everything["tipo"].tolist() == ["OB", "FVG"]
+    assert (everything.iloc[1]["precio_bajo"], everything.iloc[1]["precio_alto"]) == (103.0, 109.0)
+
+    leg = _bars(LEG)
+    strict = patterns_inside(
+        leg, timeframe="H4", impulses=[_first(leg)], id_bars=leg, rule=PatternRule(min_fvg_room=0.6)
+    )
+    assert "FVG" not in strict["tipo"].tolist()
+
+
+def test_en_un_id_bajista_el_recorrido_se_mide_hacia_abajo() -> None:
+    """Espejo del anterior: ID de 111 a 99 con el hueco [101, 107], que deja 2
+    de 12 hasta el extremo de abajo."""
+    bars = _bars(
+        [
+            (100.0, 101.0, 99.0, 99.5),
+            (109.5, 112.0, 107.0, 111.0),
+            (111.0, 111.5, 100.0, 100.5),
+            (100.5, 101.0, 98.0, 99.0),
+            (99.0, 103.0, 98.5, 102.0),
+        ]
+    )
+    impulse = _impulse(
+        bars,
+        direction=ImpulseDirection.BAJISTA,
+        leg_start=2,
+        constitution=4,
+        anchor=111.0,
+        extreme=99.0,
+    )
+
+    found = patterns_inside(bars, timeframe="H4", impulses=[impulse], id_bars=bars)
+    everything = patterns_inside(
+        bars, timeframe="H4", impulses=[impulse], id_bars=bars, rule=PatternRule(min_fvg_room=0.0)
+    )
+
+    assert found["tipo"].tolist() == ["OB"]
+    assert everything["tipo"].tolist() == ["OB", "FVG"]
+
+
+def test_el_recorrido_minimo_tiene_que_ser_una_fraccion() -> None:
+    with pytest.raises(DomainError):
+        PatternRule(min_fvg_room=1.5)

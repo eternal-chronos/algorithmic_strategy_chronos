@@ -207,6 +207,11 @@ global.Plotly = {
           fill: trace.fill || null,
           fillcolor: trace.fillcolor || null,
           captions: trace.text && trace.text.length <= 200 ? trace.text.slice() : null,
+          // K.1 — los recuadros del motor escriben el nombre en la esquina y el
+          // resto lo dejan vacío: sólo los nombres, para que quepan aunque
+          // haya cientos de patrones a la vista.
+          labels: trace.text ? trace.text.filter(Boolean).slice(0, 200) : null,
+          hoverLabels: trace.hovertext ? trace.hovertext.filter(Boolean).slice(0, 200) : null,
           // J.1 — las sesiones escriben el nombre en el gráfico (`text`) y
           // cuentan el resto al pasar el ratón (`hovertext`).
           hovers: trace.hovertext && trace.hovertext.length <= 200

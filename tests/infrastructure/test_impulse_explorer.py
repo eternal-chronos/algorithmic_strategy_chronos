@@ -3090,7 +3090,7 @@ def _cajas(step: dict) -> dict[str, list[tuple[str, str, float, float]]]:
 
 
 def _etiquetas(trace: dict) -> list[str]:
-    return [texto for texto in (trace["captions"] or []) if texto]
+    return list(trace["labels"] or [])
 
 
 def test_los_patrones_viajan_calculados_desde_el_dominio(run: ImpulseRun) -> None:
@@ -3144,16 +3144,10 @@ def test_cada_patron_es_un_recuadro_relleno_con_su_tono_y_su_nombre(
         assert _rgb(trace["fillcolor"]) == _rgb(PATTERN_COLORS[kind])
         assert trace["dash"] is None
         assert trace["textposition"] == "bottom right"
-    actual = _step(_draw(run, tmp_path), "patrones-id-actual")
-    etiquetas = [texto for trace in _patrones(actual).values() for texto in _etiquetas(trace)]
+    etiquetas = [texto for trace in trazas.values() for texto in _etiquetas(trace)]
     assert etiquetas, "el nombre va escrito dentro del recuadro"
     assert all(re.match(r"^(OB|FVG) H1 · ID H4 nº \d+", texto) for texto in etiquetas)
-    globos = [
-        texto
-        for trace in _patrones(actual).values()
-        for texto in (trace["hovers"] or [])
-        if texto
-    ]
+    globos = [texto for trace in trazas.values() for texto in (trace["hoverLabels"] or [])]
     assert all(re.match(r"^(OB|FVG) DEL MOTOR · H1 · dentro del ID H4 nº \d+", g) for g in globos)
     assert all("se supo al cerrar la de " in g for g in globos)
 
