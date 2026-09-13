@@ -72,19 +72,19 @@
     clean: {
       visible: "current",
       limbo: false, marks: true, contacts: false, mid: false, wrong: false,
-      frame: true, zones: true,
+      frame: true, zones: true, pullback: true, accumulation: true,
       signals: false, avoided: false, steps: false
     },
     normal: {
       visible: "pair",
       limbo: true, marks: true, contacts: false, mid: false, wrong: true,
-      frame: true, zones: true,
+      frame: true, zones: true, pullback: true, accumulation: true,
       signals: true, avoided: true, steps: true
     },
     all: {
       visible: "all",
       limbo: true, marks: true, contacts: true, mid: true, wrong: true,
-      frame: true, zones: true,
+      frame: true, zones: true, pullback: true, accumulation: true,
       signals: true, avoided: true, steps: true
     }
   };
@@ -132,6 +132,15 @@
      * encendida en los tres niveles de ruido —es lo que el propietario ha pedido
      * ver— y sólo existe donde existen las zonas: Diario y H4. */
     signals: true,
+    /* La CAJA DEL 50 % DEL RETROCESO del mentor: del ancla del ID a su PUL, con
+     * la línea media que él mira, el paso de la tendencia (rápida espera el
+     * PUL, lenta el 50 %) y la confluencia con la caja de la temporalidad de
+     * encima. Nace encendida en los tres niveles: es lo que se ha pedido ver. */
+    pullback: true,
+    /* La ACUMULACIÓN: desde la vela en que el ID cumple la firma del propietario
+     * —dos toques arriba y dos abajo sin romper— hasta que muere. Encendida en
+     * los tres niveles por lo mismo. */
+    accumulation: true,
     /* Fase 2.1. Las roturas evitadas son lo primero que hay que auditar de la
      * regla nueva, así que la capa nace encendida cuando la corrida trae alguna.
      * Con `break_by_zone: false` no hay ninguna y la casilla ni se enseña. */
@@ -1038,6 +1047,407 @@
     };
   }
 
+  /* --- El RSI por zonas, bajo el precio --------------------------------------
+   *
+   * Un panel propio DEBAJO del precio con el RSI de la temporalidad que se está
+   * mirando y las tres referencias del propietario: 55 arriba, 50 en medio y 45
+   * abajo. No se lee como sobrecompra/sobreventa sino como LIQUIDEZ y como
+   * NIVEL: por encima de 55 hay liquidez alcista, por debajo de 45 bajista, y
+   * dentro de la banda el 50 hace de SOPORTE si el índice bajó desde arriba y de
+   * RESISTENCIA si subió desde abajo. Por eso la línea va de tres colores —verde
+   * arriba, rojo abajo, tinta dentro— y la banda sombreada: es la lectura que
+   * hace el propietario en su plataforma, dibujada igual.
+   *
+   * Sólo va en el Diario, H4 y H1 (`DATA.meta.rsiCharts`): en M15 y M5 el
+   * propietario no lo mira —ahí rompe en falso— y esos gráficos no lo llevan.
+   * No es una capa que se apague: o el gráfico lo lleva, o no.
+   *
+   * Lo CALCULA EL MOTOR y viaja ya LEÍDO: una lectura por vela (`rsi`), en qué
+   * zona está (`rz`) y de qué lado entró en la banda (`rf`). Aquí no se calcula
+   * ni se interpreta nada: se recorta por el mismo sitio que las velas —así el
+   * replay no lo adelanta— y se pinta. Las velas del arranque no tienen lectura
+   * y llegan como hueco: se dibujan como hueco, no como un cero.
+   *
+   * NO DECIDE NADA: ni entra en la detección, ni mueve un ID, ni abre ni cierra.
+   */
+  var RSI_DOMAIN = [0, 0.2];
+
+  /* Cuánto alto se queda el precio con el RSI puesto. El hueco entre los dos
+   * paneles es lo que impide que la última vela y el índice se toquen. */
+  var PRICE_DOMAIN = [0.28, 1];
+
+  var RSI_ZONE = { above: 1, inside: 0, below: -1 };
+
+  function rsiPeriod() { return DATA.meta.rsiPeriod; }
+
+  function rsiBands() { return DATA.meta.rsiBands || []; }
+
+  function rsiUpper() { return Math.max.apply(null, rsiBands()); }
+
+  function rsiLower() { return Math.min.apply(null, rsiBands()); }
+
+  function hasRsi() {
+    var b = bars();
+    return !!(rsiPeriod() && b && b.rsi && b.rsi.length);
+  }
+
+  /* En auditoría ciega no se enseña: el RSI lo ha calculado el motor y el punto
+   * de la prueba es mirar el gráfico pelado antes de ver una sola lectura. */
+  function rsiOn() { return hasRsi() && !blindfolded(); }
+
+  function priceDomain() { return rsiOn() ? PRICE_DOMAIN : [0, 1]; }
+
+  function rsiColor(zone) {
+    var colors = COLORS.rsi || {};
+    if (zone === RSI_ZONE.above) { return colors.above || COLORS.bullish; }
+    if (zone === RSI_ZONE.below) { return colors.below || COLORS.bearish; }
+    return colors.inside || COLORS.ink;
+  }
+
+  /* Qué dice la lectura de UNA vela, con las palabras del propietario. */
+  function rsiWords(value, zone, origin) {
+    if (value === null || value === undefined) { return "sin lectura todavía"; }
+    var head = "RSI " + rsiPeriod() + " " + value.toFixed(1);
+    if (zone === RSI_ZONE.above) {
+      return head + " · por encima de " + rsiUpper() + ": LIQUIDEZ ALCISTA";
+    }
+    if (zone === RSI_ZONE.below) {
+      return head + " · por debajo de " + rsiLower() + ": LIQUIDEZ BAJISTA";
+    }
+    var inside = head + " · en la banda " + rsiLower() + "–" + rsiUpper();
+    if (origin === RSI_ZONE.above) {
+      return inside + " · bajó desde arriba: el 50 hace de SOPORTE, se espera rebote al alza";
+    }
+    if (origin === RSI_ZONE.below) {
+      return inside + " · subió desde abajo: el 50 hace de RESISTENCIA, se espera rechazo a la baja";
+    }
+    return inside + " · no ha salido de la banda desde que hay lectura";
+  }
+
+  function rsiTraces(cut) {
+    if (!rsiOn()) { return []; }
+    var b = bars();
+    var x = b.t.slice(cut.start, cut.end).map(iso);
+    if (!x.length) { return []; }
+    var y = b.rsi.slice(cut.start, cut.end);
+    var zone = (b.rz || []).slice(cut.start, cut.end);
+    var origin = (b.rf || []).slice(cut.start, cut.end);
+    var first = x[0], last = x[x.length - 1];
+    var traces = [{
+      // La banda 45–55 sombreada, como en la plataforma del propietario.
+      type: "scatter", mode: "lines", name: "Banda " + rsiLower() + "–" + rsiUpper(),
+      x: [first, last, last, first, first], yaxis: "y2",
+      y: [rsiLower(), rsiLower(), rsiUpper(), rsiUpper(), rsiLower()],
+      fill: "toself", fillcolor: rgba(COLORS.muted, 0.12),
+      line: { color: COLORS.muted, width: 1, dash: "dot" },
+      hoverinfo: "skip", showlegend: false
+    }, {
+      type: "scatter", mode: "lines", name: "Referencia 50",
+      x: [first, last], y: [50, 50], yaxis: "y2",
+      line: { color: COLORS.muted, width: 1, dash: "dash" },
+      hoverinfo: "skip", showlegend: false
+    }];
+    // Tres trazas por zona, con nulos donde la vela no está en esa zona: así la
+    // línea cambia de color al cruzar la banda sin partir la serie en trozos.
+    // Cada tramo lleva además la vela anterior para que no queden huecos en el
+    // cruce. El color lo pone `rz`, que viene leído del motor.
+    [RSI_ZONE.above, RSI_ZONE.inside, RSI_ZONE.below].forEach(function (which) {
+      var ys = y.map(function (value, position) {
+        if (value === null) { return null; }
+        if (zone[position] === which) { return value; }
+        // La vela anterior a un tramo de esta zona cierra el hueco del cruce.
+        if (position + 1 < y.length && zone[position + 1] === which && y[position + 1] !== null) {
+          return value;
+        }
+        return null;
+      });
+      if (!ys.some(function (value) { return value !== null; })) { return; }
+      traces.push({
+        type: "scatter", mode: "lines",
+        name: "RSI " + rsiPeriod() + (which === RSI_ZONE.above ? " · sobre " + rsiUpper()
+          : which === RSI_ZONE.below ? " · bajo " + rsiLower() : " · en banda"),
+        x: x, y: ys, yaxis: "y2", connectgaps: false,
+        line: { color: rsiColor(which), width: 1.6 },
+        text: y.map(function (value, position) {
+          return stamp(b.t[cut.start + position]) + "<br>" +
+            rsiWords(value, zone[position], origin[position]) +
+            "<br>ES DIBUJO: lo lee el motor y no decide nada";
+        }),
+        hoverinfo: "text", hoverlabel: { align: "left" }
+      });
+    });
+    return traces;
+  }
+
+  /* El eje del panel de abajo. Se autoescala con lo que haya dibujado —índice y
+   * bandas—, y los ticks son las tres referencias: son los números que se
+   * miran, y ponerle una escala de diez en diez sólo añadiría ruido. */
+  function rsiAxis() {
+    return {
+      domain: RSI_DOMAIN, gridcolor: COLORS.grid, fixedrange: true,
+      tickmode: "array", tickvals: rsiBands(),
+      tickfont: { size: 10, color: COLORS.muted },
+      title: { text: "RSI " + rsiPeriod(), font: { size: 11, color: COLORS.muted } }
+    };
+  }
+
+  /* La lectura de la ÚLTIMA vela a la vista: es la que se mira para saber en qué
+   * zona está el índice ahora y de dónde viene. En replay es la última cerrada. */
+  function rsiReading(cut) {
+    var b = bars();
+    for (var position = cut.end - 1; position >= cut.start; position--) {
+      if (b.rsi[position] !== null) {
+        return {
+          at: b.t[position],
+          words: rsiWords(b.rsi[position], (b.rz || [])[position], (b.rf || [])[position])
+        };
+      }
+    }
+    return null;
+  }
+
+  /* Qué se está viendo abajo. Un panel con una línea de tres colores y una
+   * banda no dice de quién es ni con qué está hecho: el estado lo tiene que
+   * decir, y decir también la lectura de la última vela con las palabras del
+   * propietario. En M15 y M5 dice por qué no hay panel. */
+  function rsiNote(cut) {
+    if (blindfolded()) { return null; }
+    if (!hasRsi()) {
+      var where = (DATA.meta.rsiCharts || []).map(label).join(", ");
+      return "sin RSI en " + label(state.chart) + ": el propietario sólo lo mira en " +
+        where + " (en las finas rompe en falso)";
+    }
+    var reading = rsiReading(cut);
+    return "abajo, el RSI " + rsiPeriod() + " de " + label(state.chart) +
+      " leído por zonas —verde sobre " + rsiUpper() + ", rojo bajo " + rsiLower() +
+      ", tinta en la banda— " +
+      (reading
+        ? "· última vela (" + stamp(reading.at) + "): " + reading.words + " "
+        : "· sin lectura en la ventana ") +
+      "· lo calcula y lo lee el motor sobre las velas cerradas de esta " +
+      "temporalidad y no decide nada: no entra en la detección, no mueve un ID " +
+      "y no abre ni cierra nada";
+  }
+
+  /* --- La caja del 50 % del retroceso ----------------------------------------
+   *
+   * NO ES EL NIVEL 50 % DEL ID (ése es el punto medio entre ancla y extremo y
+   * tiene su propia casilla). Ésta es la caja del mentor: cuando un ID se rompe
+   * a favor y nace el siguiente en el mismo sentido, el rectángulo va del ANCLA
+   * del ID nuevo al UL del ID anterior —que es el PUL del nuevo— y su LÍNEA
+   * MEDIA es el 50 % que él mira. Sólo la llevan los ID con PUL.
+   *
+   * Con ella viajan, ya calculados por el motor:
+   *   · el PASO de la tendencia, leído de los ID anteriores de la cadena: RÁPIDA
+   *     cuando ninguno llegó a su 50 % (el retroceso se frena en el PUL y se
+   *     espera ahí) y LENTA cuando alguno sí (se espera el 50 %). Sin ID
+   *     anteriores con caja no hay paso: no se inventa;
+   *   · cuándo la mecha LLEGÓ al PUL y al 50 % en la vida del ID, si llegó, y
+   *     hasta dónde devolvió el precio. En replay se esconden hasta que el reloj
+   *     los alcanza: son hechos de la vida entera del ID;
+   *   · la CONFLUENCIA: la caja de la temporalidad de encima (H4 para H1, el
+   *     Diario para H4) dentro de la que cae este 50 %, cuando cae. Es lo que
+   *     el mentor hace a mano al «encajar» el 50 % de H1 en el de H4.
+   *
+   * Obedece el mismo filtro que las zonas: sólo las del ID que se está mirando.
+   */
+  function hasPullbacks() { return DATA.hasPullbacks === true; }
+
+  function pullbacksOf(timeframe) {
+    if (!zonesAvailable()) { return []; }
+    return impulsesOf(timeframe).pullbacks || [];
+  }
+
+  var PACE_WORDS = {
+    rapida: "tendencia RÁPIDA: los ID anteriores no llegaron a su 50 % → el nivel " +
+      "a esperar es el PUL",
+    lenta: "tendencia LENTA: algún ID anterior llegó a su 50 % → el nivel a esperar " +
+      "es el 50 % de la caja"
+  };
+
+  function paceWords(box) {
+    if (!box.pace) {
+      return "sin paso: no hay ID anteriores con caja en la cadena" +
+        (box.chain ? " (" + box.chain + " detrás, sin PUL propio)" : "");
+    }
+    return PACE_WORDS[box.pace] + " (leído de " + box.chain + " ID detrás)";
+  }
+
+  function pullbackCaption(box, timeframe, edges) {
+    var until = knownUntil(timeframe, edges);
+    var text = "CAJA 50 % DEL RETROCESO · ID " + timeframe + " nº " + box.id + " · " + box.d +
+      "<br>del ANCLA del ID al PUL (el UL del ID anterior): " + price(box.lo) + " → " +
+      price(box.hi) +
+      "<br>línea media (el 50 % del mentor): " + price(box.m) +
+      "<br>" + paceWords(box);
+    if (box.xp !== null && box.xp <= until) {
+      text += "<br>llegó al PUL (" + price(box.pul) + ") en la vela de " + stamp(box.xp);
+    } else {
+      text += "<br>no ha llegado al PUL" + (state.replay ? " todavía" : "");
+    }
+    if (box.xm !== null && box.xm <= until) {
+      text += "<br>llegó al 50 % en la vela de " + stamp(box.xm);
+    } else {
+      text += "<br>no ha llegado al 50 %" + (state.replay ? " todavía" : "");
+    }
+    text += "<br>pierna: " + price(box.leg[0]) + " en " + box.leg[1] + " velas";
+    if (box.xr !== null && box.xr <= until) {
+      var share = box.leg[0] > 0 ? Math.round(box.ret[0] / box.leg[0] * 100) : 0;
+      text += "<br>retroceso: " + price(box.ret[0]) + " (" + share + " % de la pierna) en " +
+        box.ret[1] + " velas, hasta la vela de " + stamp(box.xr);
+    } else if (box.xr !== null) {
+      text += "<br>retroceso en curso: hasta dónde llega se sabrá al verlo";
+    } else {
+      text += "<br>sin retroceso: no devolvió nada";
+    }
+    if (box.c) {
+      text += "<br>CONFLUENCIA con la caja del ID " + box.c.tf + " nº " + box.c.id +
+        " (" + price(box.c.lo) + " → " + price(box.c.hi) + ", 50 % en " + price(box.c.m) +
+        "): este 50 % cae dentro de ella";
+    } else {
+      text += "<br>sin confluencia: no cae dentro de la caja de la temporalidad de encima";
+    }
+    return text + "<br>ES DIBUJO: no decide nada";
+  }
+
+  function pullbackTraces(range) {
+    if (blindfolded() || !state.pullback || !hasPullbacks() || !zonesAvailable()) { return []; }
+    var edges = window_(range);
+    var traces = [];
+    overlays().forEach(function (timeframe) {
+      if (!isVisible(timeframe)) { return; }
+      var allowed = zoneIds(timeframe, edges);
+      var boxes = shape(), mids = shape(), joint = shape();
+      var marks = { x: [], y: [], text: [], symbol: [] };
+      pullbacksOf(timeframe).forEach(function (box) {
+        if (box.x1 < edges.lo || box.x0 > edges.hi) { return; }
+        if (pending(box.x0, timeframe, edges)) { return; }
+        if (!keeps(allowed, box.id)) { return; }
+        var a = iso(box.x0), b = iso(clip(box.x1, edges));
+        var caption = pullbackCaption(box, timeframe, edges);
+        boxes.x.push(a, b, b, a, a, null);
+        boxes.y.push(box.lo, box.lo, box.hi, box.hi, box.lo, null);
+        boxes.text.push(caption, caption, caption, caption, caption, "");
+        mids.x.push(a, b, null);
+        mids.y.push(box.m, box.m, null);
+        mids.text.push(caption, caption, "");
+        if (box.c) {
+          // La franja entre los dos 50 %: la de este ID y la de encima. Es lo
+          // que el mentor llama «encajar».
+          var lo = Math.min(box.m, box.c.m), hi = Math.max(box.m, box.c.m);
+          var what = "CONFLUENCIA 50 % " + timeframe + " · " + box.c.tf +
+            "<br>50 % del ID " + timeframe + " nº " + box.id + ": " + price(box.m) +
+            "<br>50 % del ID " + box.c.tf + " nº " + box.c.id + ": " + price(box.c.m) +
+            "<br>el de " + timeframe + " cae dentro de la caja de " + box.c.tf +
+            " (" + price(box.c.lo) + " → " + price(box.c.hi) + ")";
+          joint.x.push(a, b, b, a, a, null);
+          joint.y.push(lo, lo, hi, hi, lo, null);
+          joint.text.push(what, what, what, what, what, "");
+        }
+        var until = knownUntil(timeframe, edges);
+        if (box.xp !== null && box.xp <= until && box.xp >= edges.lo) {
+          marks.x.push(iso(box.xp)); marks.y.push(box.pul); marks.symbol.push("triangle-down");
+          marks.text.push("LLEGA AL PUL · ID " + timeframe + " nº " + box.id +
+            "<br>la mecha toca " + price(box.pul) + " en la vela de " + stamp(box.xp));
+        }
+        if (box.xm !== null && box.xm <= until && box.xm >= edges.lo) {
+          marks.x.push(iso(box.xm)); marks.y.push(box.m); marks.symbol.push("diamond-wide");
+          marks.text.push("LLEGA AL 50 % · ID " + timeframe + " nº " + box.id +
+            "<br>la mecha toca " + price(box.m) + " en la vela de " + stamp(box.xm));
+        }
+      });
+      if (!boxes.x.length) { return; }
+      var tag = " " + label(timeframe) + (timeframe === primary() ? "" : " (contexto)");
+      traces.push({
+        type: "scatter", mode: "lines", name: "Caja 50 % retroceso" + tag,
+        x: boxes.x, y: boxes.y, text: boxes.text,
+        hoverinfo: "text", hoverlabel: { align: "left" }, connectgaps: false,
+        fill: "toself", fillcolor: rgba(COLORS.pullback, 0.1),
+        line: { color: COLORS.pullback, width: 1, dash: "dashdot" }
+      });
+      traces.push({
+        type: "scatter", mode: "lines", name: "50 % del retroceso" + tag,
+        x: mids.x, y: mids.y, text: mids.text,
+        hoverinfo: "text", hoverlabel: { align: "left" }, connectgaps: false,
+        line: { color: COLORS.pullback, width: 1.8 }
+      });
+      if (joint.x.length) {
+        traces.push({
+          type: "scatter", mode: "lines", name: "Confluencia 50 %" + tag,
+          x: joint.x, y: joint.y, text: joint.text,
+          hoverinfo: "text", hoverlabel: { align: "left" }, connectgaps: false,
+          fill: "toself", fillcolor: rgba(COLORS.pullback, 0.35),
+          fillpattern: { shape: "/", fgcolor: COLORS.pullback, bgcolor: rgba(COLORS.pullback, 0.15), size: 6 },
+          line: { color: COLORS.pullback, width: 1.2 }
+        });
+      }
+      if (marks.x.length) {
+        traces.push({
+          type: "scatter", mode: "markers", name: "Llegada al PUL / al 50 %" + tag,
+          x: marks.x, y: marks.y, text: marks.text,
+          hoverinfo: "text", hoverlabel: { align: "left" },
+          marker: { symbol: marks.symbol, size: 9, color: COLORS.pullback,
+            line: { color: COLORS.surface, width: 1 } }
+        });
+      }
+    });
+    return traces;
+  }
+
+  /* --- La acumulación ---------------------------------------------------------
+   *
+   * La firma del propietario: el precio toca la parte alta del ID, toca la
+   * baja, y repite —dos toques en cada límite sin romper ninguno—. Cuando se
+   * cumple, el ID está ACUMULANDO entre su ancla y su extremo y, como dice el
+   * mentor, dentro de una acumulación las estructuras «las puede pasar por la
+   * piedra»: lo que vale es el rango de extremo a extremo.
+   *
+   * Viene fechada del motor: `x` es la vela del toque que completa la firma y
+   * desde ahí hasta que el ID muere se sombrea el rango. Antes de esa vela no
+   * se sabía, y por eso el sombreado no empieza en la constitución.
+   */
+  function hasAccumulations() { return DATA.hasAccumulations === true; }
+
+  function accumulationsOf(timeframe) { return impulsesOf(timeframe).accumulations || []; }
+
+  function accumulationTraces(range) {
+    if (blindfolded() || !state.accumulation || !hasAccumulations()) { return []; }
+    var edges = window_(range);
+    var traces = [];
+    overlays().forEach(function (timeframe) {
+      if (!isVisible(timeframe)) { return; }
+      var allowed = visibleIds(timeframe, edges);
+      var bucket = shape();
+      accumulationsOf(timeframe).forEach(function (item) {
+        if (item.x1 < edges.lo || item.x > edges.hi) { return; }
+        if (pending(item.x, timeframe, edges)) { return; }
+        if (!keeps(allowed, item.id)) { return; }
+        var a = iso(item.x), b = iso(clip(item.x1, edges));
+        var caption = "ACUMULACIÓN · ID " + timeframe + " nº " + item.id + " · " + item.d +
+          "<br>desde la vela de " + stamp(item.x) + ": ahí se cumple la firma —" +
+          "dos toques arriba y dos abajo sin romper—" +
+          "<br>rango: " + price(item.lo) + " → " + price(item.hi) +
+          "<br>toques en toda la vida del ID: " + item.up + " arriba, " + item.dn + " abajo" +
+          "<br>dentro de una acumulación vale el rango de extremo a extremo, no la " +
+          "estructura de dentro<br>ES DIBUJO: no decide nada";
+        bucket.x.push(a, b, b, a, a, null);
+        bucket.y.push(item.lo, item.lo, item.hi, item.hi, item.lo, null);
+        bucket.text.push(caption, caption, caption, caption, caption, "");
+      });
+      if (!bucket.x.length) { return; }
+      traces.push({
+        type: "scatter", mode: "lines",
+        name: "Acumulación " + label(timeframe) + (timeframe === primary() ? "" : " (contexto)"),
+        x: bucket.x, y: bucket.y, text: bucket.text,
+        hoverinfo: "text", hoverlabel: { align: "left" }, connectgaps: false,
+        fill: "toself", fillcolor: rgba(COLORS.accumulation, 0.2),
+        fillpattern: { shape: "x", fgcolor: COLORS.accumulation, bgcolor: rgba(COLORS.accumulation, 0.08), size: 8 },
+        line: { color: COLORS.accumulation, width: 1, dash: "longdash" }
+      });
+    });
+    return traces;
+  }
+
   /* --- El marco del ID ------------------------------------------------------
    *
    * Dónde EMPIEZA y dónde ACABA cada ID, dibujado como un recuadro: las dos
@@ -1583,7 +1993,12 @@
   /* Sobre qué eje cae el punto: la banda de la izquierda es la de los precios y
    * la de abajo la de las fechas. Fuera de las dos, no es este gesto. */
   function axisAt(box, x, y) {
-    if (x - box.left < MARGIN.l) { return "y"; }
+    if (x - box.left < MARGIN.l) {
+      // Al lado del RSI no hay precios que escalar: ese panel tiene su propia
+      // escala y no se toca, así que el gesto se deja pasar.
+      var plot = plotBox(box);
+      if (y <= plot.top + plot.height) { return "y"; }
+    }
     if (box.top + box.height - y < MARGIN.b) { return "x"; }
     return null;
   }
@@ -1883,13 +2298,26 @@
   function plotBox(box) {
     var chart = document.getElementById("chart");
     var size = chart && chart._fullLayout && chart._fullLayout._size;
+    var axis = chart && chart._fullLayout && chart._fullLayout.yaxis;
+    // Con el RSI abajo, el precio ya no ocupa todo el alto: su panel es la
+    // franja que dice el `domain` de su eje. Si no se descontara, precio y píxel
+    // se separarían y agarrar el stop volvería a ser cuestión de suerte.
+    var domain = (axis && axis.domain) || priceDomain();
+    var share = domain[1] - domain[0];
     if (size && size.w > 0 && size.h > 0) {
-      return { left: box.left + size.l, top: box.top + size.t, width: size.w, height: size.h };
+      return {
+        left: box.left + size.l,
+        top: box.top + size.t + size.h * (1 - domain[1]),
+        width: size.w,
+        height: size.h * share
+      };
     }
+    var height = box.height - MARGIN.t - MARGIN.b;
     return {
-      left: box.left + MARGIN.l, top: box.top + MARGIN.t,
+      left: box.left + MARGIN.l,
+      top: box.top + MARGIN.t + height * (1 - domain[1]),
       width: box.width - MARGIN.l - MARGIN.r,
-      height: box.height - MARGIN.t - MARGIN.b
+      height: height * share
     };
   }
 
@@ -2913,7 +3341,7 @@
 
   function layout(range) {
     var x = xRange(range);
-    return {
+    var figure = {
       height: 720,
       margin: MARGIN,
       paper_bgcolor: COLORS.surface,
@@ -2934,16 +3362,24 @@
         // El rango va siempre con su `autorange`: si se diera uno sin apagar el
         // otro, Plotly reescalaría el eje y el encuadre no aguantaría el paso.
         range: x, autorange: x ? false : true,
+        // Las fechas van al pie de la figura, que con el RSI puesto es el suelo
+        // de SU panel: los dos comparten el mismo eje de tiempo.
+        anchor: rsiOn() ? "y2" : "y",
         title: { text: "UTC", font: { size: 11, color: COLORS.muted } }
       },
       yaxis: {
         gridcolor: COLORS.grid, tickformat: "." + DECIMALS + "f", fixedrange: false,
+        // El precio deja abajo la franja del RSI. `plotBox` lee este mismo
+        // reparto: es lo que mantiene los tiradores donde se ve la línea.
+        domain: priceDomain(),
         // Sin esto el eje de precios se rehace en cada paso y el gráfico "salta"
         // en vertical: con encuadre manual manda lo que fijó el propietario.
         range: state.zoom.y || undefined,
         autorange: state.zoom.y ? false : true
       }
     };
+    if (rsiOn()) { figure.yaxis2 = rsiAxis(); }
+    return figure;
   }
 
   function draw() {
@@ -2958,6 +3394,10 @@
       // Las zonas van las primeras: son cajas con relleno y encima de cualquier
       // línea taparían justo lo que se audita.
       .concat(zoneTraces(range))
+      // La acumulación y la caja del retroceso son rellenos: van con las zonas,
+      // detrás de todo lo que es línea o marca.
+      .concat(accumulationTraces(range))
+      .concat(pullbackTraces(range))
       .concat(frameTraces(range))
       .concat(impulseTraces(range))
       .concat(stepTraces(range))
@@ -2966,7 +3406,10 @@
       .concat(avoidedTraces(range))
       .concat(signalTraces(range))
       .concat(contactTraces(range))
-      .concat(wrongExtremeTraces(range));
+      .concat(wrongExtremeTraces(range))
+      // Y en su propio panel, abajo del todo: el RSI no comparte eje con nada
+      // de lo de arriba, así que da igual dónde se apile.
+      .concat(rsiTraces(cut));
 
     Plotly.react("chart", traces, layout(range), {
       responsive: true, scrollZoom: true, displaylogo: false,
@@ -2994,6 +3437,8 @@
     ["wrong", "extremo de color contrario", function () { return true; }],
     ["frame", "marco del ID", function () { return true; }],
     ["zones", "zonas del ID (UL, PUL y APUL)", hasZones],
+    ["pullback", "caja 50 % del retroceso", hasPullbacks],
+    ["accumulation", "acumulación", hasAccumulations],
     ["signals", "señales de zona", hasSignals],
     ["avoided", "roturas evitadas", hasAvoided],
     ["steps", "escalera del extremo", hasSteps]
@@ -3165,6 +3610,48 @@
       text += " · roturas evitadas a la vista: " + evitadas.toLocaleString("es-ES") +
         " (velas que con la regla antigua habrían matado el ID)";
     }
+    if (hasPullbacks() && zonesAvailable() && state.pullback) {
+      var cajas50 = [];
+      overlays().filter(isVisible).forEach(function (timeframe) {
+        var allowed50 = zoneIds(timeframe, edges);
+        var until50 = knownUntil(timeframe, edges);
+        pullbacksOf(timeframe).forEach(function (box) {
+          if (box.x1 < edges.lo || box.x0 > edges.hi) { return; }
+          if (pending(box.x0, timeframe, edges) || !keeps(allowed50, box.id)) { return; }
+          cajas50.push("ID " + timeframe + " nº " + box.id + ": 50 % en " + price(box.m) +
+            " (" + price(box.lo) + " → " + price(box.hi) + "), " +
+            (box.pace ? "tendencia " + box.pace + " → esperar " +
+              (box.pace === "rapida" ? "el PUL" : "el 50 %") : "sin paso") +
+            (box.xp !== null && box.xp <= until50 ? ", llegó al PUL" : "") +
+            (box.xm !== null && box.xm <= until50 ? ", llegó al 50 %" : "") +
+            (box.c ? ", CONFLUYE con el 50 % del ID " + box.c.tf + " nº " + box.c.id : ""));
+        });
+      });
+      text += " · caja 50 % del retroceso (del ancla al PUL, la del mentor; NO es " +
+        "el nivel 50 % del ID): " + (cajas50.length ? cajas50.join("; ") : "ninguna a la vista") +
+        " · sólo la llevan los ID con PUL y sólo se dibuja la del ID que se mira";
+    } else if (hasPullbacks() && zonesAvailable()) {
+      text += " · la caja 50 % del retroceso no se está dibujando (capa apagada)";
+    }
+    if (hasAccumulations() && state.accumulation) {
+      var acumulando = [];
+      overlays().filter(isVisible).forEach(function (timeframe) {
+        var allowedAcc = visibleIds(timeframe, edges);
+        accumulationsOf(timeframe).forEach(function (item) {
+          if (item.x1 < edges.lo || item.x > edges.hi) { return; }
+          if (pending(item.x, timeframe, edges) || !keeps(allowedAcc, item.id)) { return; }
+          acumulando.push("ID " + timeframe + " nº " + item.id + " desde " + stamp(item.x) +
+            " (" + price(item.lo) + " → " + price(item.hi) + ")");
+        });
+      });
+      text += " · ACUMULACIÓN (dos toques arriba y dos abajo sin romper): " +
+        (acumulando.length ? acumulando.join("; ") : "ninguna a la vista") +
+        " · el sombreado empieza en el toque que completa la firma, no en la constitución";
+    } else if (hasAccumulations()) {
+      text += " · la acumulación no se está dibujando (capa apagada)";
+    }
+    var indice = rsiNote(cut);
+    if (indice) { text += " · " + indice; }
     if (hasSteps()) {
       var escalones = 0;
       var estirados = 0;
@@ -3449,6 +3936,8 @@
    * de cada preset, porque el preset no sabe qué llevaba el payload. */
   function enforceAvailability() {
     if (!hasZones()) { state.zones = false; }
+    if (!hasPullbacks()) { state.pullback = false; }
+    if (!hasAccumulations()) { state.accumulation = false; }
     if (!hasSignals()) { state.signals = false; }
     if (!hasSteps()) { state.steps = false; }
     if (!hasAvoided()) { state.avoided = false; }
@@ -3459,6 +3948,16 @@
   function buildZoneLayers() {
     if (hasZones()) { return; }
     hide("zone-layers");
+  }
+
+  /* La caja del retroceso cuelga de las zonas —sin PUL no hay caja— y la
+   * acumulación de los contactos: cada una se esconde por su cuenta cuando la
+   * corrida no trae ni una. */
+  function buildAnalysisLayers() {
+    if (!hasPullbacks()) { hide("pullback-layer"); }
+    if (!hasAccumulations()) { hide("accumulation-layer"); }
+    if (hasPullbacks() || hasAccumulations()) { return; }
+    hide("analysis-layers");
   }
 
   /* Mismo criterio para las señales: sin zonas no hay ni una, y una casilla que
@@ -3682,6 +4181,13 @@
       document.getElementById("layer-signals").disabled = !zonesAvailable();
       document.getElementById("layer-signals").checked = state.signals;
     }
+    if (hasPullbacks()) {
+      document.getElementById("layer-pullback").disabled = !zonesAvailable();
+      document.getElementById("layer-pullback").checked = state.pullback;
+    }
+    if (hasAccumulations()) {
+      document.getElementById("layer-accumulation").checked = state.accumulation;
+    }
     if (hasAvoided()) {
       document.getElementById("layer-avoided").checked = state.avoided;
     }
@@ -3751,6 +4257,8 @@
       ["layer-frame", "frame"],
       ["layer-zones", "zones"],
       ["layer-signals", "signals"],
+      ["layer-pullback", "pullback"],
+      ["layer-accumulation", "accumulation"],
       ["layer-avoided", "avoided"],
       ["layer-steps", "steps"]
     ].forEach(function (pair) {
@@ -3855,6 +4363,7 @@
   buildModeButtons();
   buildZoneLayers();
   buildSignalLayers();
+  buildAnalysisLayers();
   buildBreakLayers();
   buildNoiseButtons();
   // El nivel de salida se aplica aquí, con el payload ya leído: así lo que no

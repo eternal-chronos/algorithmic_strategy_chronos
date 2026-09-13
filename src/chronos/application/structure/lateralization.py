@@ -102,6 +102,24 @@ class ImpulseContacts:
     def is_degenerate(self) -> bool:
         return bool(np.isfinite(self.range_atr) and self.range_atr < DEGENERATE_RANGE_ATR)
 
+    @property
+    def signature_index(self) -> int | None:
+        """La barra en que se cumple la firma: el segundo toque del límite que
+        más tardó en tenerlos. Desde ahí el ID está en ACUMULACIÓN.
+
+        Es causal: en esa barra ya se han visto dos toques arriba y dos abajo,
+        y ninguno posterior cambia el momento en que se cumplió. `None` si el
+        ID murió sin llegar a cumplirla.
+        """
+        seen = {ContactSide.SUPERIOR: 0, ContactSide.INFERIOR: 0}
+        for contact in self.series.contacts:
+            if contact.kind is ContactKind.ROTURA_REAL:
+                continue
+            seen[contact.side] += 1
+            if all(count >= SIGNATURE_MIN_TOUCHES for count in seen.values()):
+                return contact.index
+        return None
+
     def count(self, kind: ContactKind, side: ContactSide) -> int:
         return sum(
             1

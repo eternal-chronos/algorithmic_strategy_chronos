@@ -39,6 +39,7 @@ from chronos.application.structure.config import (
 from chronos.application.structure.detect_impulses import DetectDominantImpulses, ImpulseRun
 from chronos.application.structure.lateralization import measure
 from chronos.application.structure.zones import ZonesRun, detect_zones
+from chronos.domain.indicators import rsi
 from chronos.domain.structure.enums import LegStartMode
 from chronos.domain.structure.zone_signals import ZoneSignalKind
 from chronos.infrastructure.reporting.impulse_explorer import (
@@ -46,6 +47,9 @@ from chronos.infrastructure.reporting.impulse_explorer import (
     BEARISH,
     BULLISH,
     HAND_RECTS,
+    RSI_BANDS,
+    RSI_CHARTS,
+    RSI_PERIOD,
     TIMEFRAME_COLORS,
     ModeVariant,
     bar_counts,
@@ -261,7 +265,12 @@ def test_el_payload_no_lleva_texto_montado(run: ImpulseRun) -> None:
     el texto ya hecho serían decenas de megabytes."""
     payload = build_payload(run)
     assert "hover" not in payload["bars"][H4]
-    assert set(payload["bars"][H4]) == {"truncated", "total", "t", "o", "h", "l", "c"}
+    # El RSI y su lectura por zonas son NÚMEROS por vela, no texto: el texto del
+    # globo sigue montándose en el navegador. M15 no lleva RSI y va pelado.
+    assert set(payload["bars"][H4]) == {
+        "truncated", "total", "t", "o", "h", "l", "c", "rsi", "rz", "rf"
+    }
+    assert set(payload["bars"][M15]) == {"truncated", "total", "t", "o", "h", "l", "c"}
     # Guardarraíl de tamaño, no un presupuesto ajustado: con el texto montado en
     # Python esto pasaba de 200 bytes por vela, y ocho años de M15 son ~200.000.
     total_velas = sum(bar_counts(payload).values())
@@ -2671,7 +2680,9 @@ def test_arrastrar_el_stop_no_mueve_la_entrada_y_respeta_el_ratio(
     assert despues["objetivo"] > antes["objetivo"], "el objetivo sigue al stop"
     # El dinero en juego no lo mueve el stop: el riesgo es del capital y lo que
     # cambia con los pips es el tamaño de la posición, no lo que se arriesga.
-    assert _caja(paso)["sim-riesgo"]["label"] == "riesgo 332 pips · -1,00 $"
+    # Los pips salen de la geometría del recorrido —40 px arrastrados sobre el
+    # panel del precio, que con el RSI abajo se queda con el 72 % del alto—.
+    assert _caja(paso)["sim-riesgo"]["label"] == "riesgo 403 pips · -1,00 $"
     assert _caja(paso)["sim-entrada"]["label"] == "LARGO · R:R 1:2,0"
     assert paso["simRatio"] == "2"
 
@@ -3221,3 +3232,380 @@ def test_sin_recuadros_los_botones_de_quitar_estan_apagados(
 
     assert vacio["rectUndoDisabled"] and vacio["rectClearDisabled"]
     assert vacio["rectArmed"] is None
+
+
+# --- El RSI por zonas ---------------------------------------------------------
+#
+# El propietario lee el RSI(21) con tres referencias —55, 50, 45— y no como
+# sobrecompra/sobreventa: por encima de 55 hay liquidez alcista, por debajo de 45
+# bajista, y dentro de la banda el 50 hace de soporte si el índice bajó desde
+# arriba y de resistencia si subió desde abajo. Lo calcula y lo LEE el motor; el
+# explorador lo pinta en su panel, con un color por zona, y sólo donde él lo
+# mira: el Diario, H4 y H1.
+
+
+def _rsi_traces(step: dict) -> list[dict]:
+    return [trace for trace in step["plot"]["traces"] if trace["name"].startswith("RSI ")]
+
+
+def test_el_payload_trae_una_lectura_de_rsi_por_vela(run: ImpulseRun) -> None:
+    payload = build_payload(run)
+    barras = payload["bars"][H4]
+
+    assert len(barras["rsi"]) == len(barras["c"]) == len(barras["rz"]) == len(barras["rf"])
+    assert barras["rsi"][:RSI_PERIOD] == [None] * RSI_PERIOD, (
+        "las velas del arranque no tienen lectura: van como hueco, no como cero"
+    )
+    assert barras["rsi"][RSI_PERIOD] is not None
+    assert all(0.0 <= value <= 100.0 for value in barras["rsi"] if value is not None)
+
+
+def test_el_rsi_del_payload_es_el_del_motor(run: ImpulseRun) -> None:
+    """El explorador no calcula indicadores: el número tiene que ser el mismo."""
+    payload = build_payload(run)
+    esperado = rsi(run.chart_bars[H4]["close"].to_numpy(dtype=float), RSI_PERIOD)
+    dibujado = payload["bars"][H4]["rsi"]
+
+    assert dibujado[-1] == pytest.approx(float(esperado[-1]), abs=1e-2)
+    assert dibujado[RSI_PERIOD] == pytest.approx(float(esperado[RSI_PERIOD]), abs=1e-2)
+
+
+def test_la_zona_y_el_origen_viajan_leidos_por_el_motor(run: ImpulseRun) -> None:
+    """El color de la línea y la frase del globo salen de `rz` y `rf`, no de que
+    el navegador compare el índice con 55 y 45."""
+    barras = build_payload(run)["bars"][H4]
+    arriba, abajo = max(RSI_BANDS), min(RSI_BANDS)
+    for value, zone, origin in zip(barras["rsi"], barras["rz"], barras["rf"], strict=True):
+        if value is None:
+            assert zone == 0 and origin == 0
+        elif value > arriba:
+            assert zone == 1 and origin == 0
+        elif value < abajo:
+            assert zone == -1 and origin == 0
+        else:
+            assert zone == 0 and origin in (-1, 0, 1)
+    assert 1 in barras["rz"] and -1 in barras["rz"], "la fixture tiene que salir de la banda"
+    assert any(origin != 0 for origin in barras["rf"]), "y volver a entrar en ella"
+
+
+def test_el_periodo_las_bandas_y_los_graficos_los_pone_el_motor(run: ImpulseRun) -> None:
+    """Ni el 21 ni el 55 se escriben en el JavaScript: son decisión del propietario."""
+    meta = build_payload(run)["meta"]
+
+    assert meta["rsiPeriod"] == RSI_PERIOD == 21
+    assert meta["rsiBands"] == list(RSI_BANDS) == [55, 50, 45]
+    assert meta["rsiCharts"] == list(RSI_CHARTS) == [DAILY, H4, H1]
+
+
+def test_las_temporalidades_finas_no_llevan_rsi(run: ImpulseRun) -> None:
+    """En M15 y M5 el propietario no lo mira —rompe en falso— y no viaja."""
+    bars = build_payload(run)["bars"]
+    for chart in (M15, M5):
+        assert "rsi" not in bars[chart] and "rz" not in bars[chart]
+
+
+def test_el_rsi_se_dibuja_en_su_panel_sin_comerse_el_del_precio(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    paso = _step(_draw(run, tmp_path), "rsi-en-diario")
+
+    precio = paso["plot"]["priceDomain"]
+    indice = paso["plot"]["rsiAxis"]
+    assert indice is not None, "el RSI está puesto en el Diario"
+    assert indice["domain"][1] <= precio[0], "los dos paneles no se pueden solapar"
+    assert precio[1] == 1, "el precio se queda con la parte de arriba"
+    # Las fechas van al pie de la figura, que ahora es el suelo del panel del RSI.
+    assert paso["plot"]["xAnchor"] == "y2"
+    assert indice["ticks"] == list(RSI_BANDS)
+    assert indice["title"] == f"RSI {RSI_PERIOD}"
+
+
+def test_la_linea_del_rsi_va_por_zonas_con_el_color_de_cada_una(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    """Verde sobre 55, rojo bajo 45, tinta en la banda: la lectura del propietario."""
+    resultado = _draw(run, tmp_path)
+    colores = build_payload(run)["colors"]["rsi"]
+    paso = _step(resultado, "rsi-en-h4")
+    trazas = {trace["name"]: trace for trace in _rsi_traces(paso)}
+
+    assert f"RSI {RSI_PERIOD} · sobre 55" in trazas
+    assert f"RSI {RSI_PERIOD} · bajo 45" in trazas
+    assert f"RSI {RSI_PERIOD} · en banda" in trazas
+    assert trazas[f"RSI {RSI_PERIOD} · sobre 55"]["color"] == colores["above"] == BULLISH
+    assert trazas[f"RSI {RSI_PERIOD} · bajo 45"]["color"] == colores["below"] == BEARISH
+    assert trazas[f"RSI {RSI_PERIOD} · en banda"]["color"] == colores["inside"]
+    assert all(trace["yaxis"] == "y2" for trace in trazas.values())
+    # Y la banda sombreada, como en la plataforma del propietario.
+    banda = [trace for trace in paso["plot"]["traces"] if trace["name"].startswith("Banda 45")]
+    assert banda and banda[0]["fill"] == "toself" and banda[0]["yaxis"] == "y2"
+
+
+def test_nada_del_precio_cae_en_el_eje_del_rsi(run: ImpulseRun, tmp_path: Path) -> None:
+    paso = _step(_draw(run, tmp_path), "rsi-en-h4")
+    for trace in paso["plot"]["traces"]:
+        if trace["yaxis"] == "y2":
+            assert trace["name"].startswith(("RSI ", "Banda ", "Referencia "))
+        else:
+            assert not trace["name"].startswith(("RSI ", "Banda ", "Referencia "))
+
+
+def test_en_las_finas_no_hay_panel_y_el_estado_dice_por_que(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    paso = _step(_draw(run, tmp_path), "rsi-en-m15")
+
+    assert not _rsi_traces(paso)
+    assert paso["plot"]["rsiAxis"] is None
+    assert paso["plot"]["priceDomain"] == [0, 1], "sin RSI el precio recupera el alto"
+    assert "sin RSI en M15" in paso["notes"]
+
+
+def test_el_estado_lee_la_ultima_vela_con_las_palabras_del_propietario(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    resultado = _draw(run, tmp_path)
+    for label in ("rsi-en-diario", "rsi-en-h4"):
+        notas = _step(resultado, label)["notes"]
+        assert f"RSI {RSI_PERIOD}" in notas
+        assert "última vela" in notas
+        assert any(
+            frase in notas
+            for frase in ("LIQUIDEZ ALCISTA", "LIQUIDEZ BAJISTA", "SOPORTE", "RESISTENCIA",
+                          "no ha salido de la banda")
+        ), notas
+        assert "no decide nada" in notas
+
+
+def test_la_auditoria_ciega_tampoco_ensena_el_rsi(run: ImpulseRun, tmp_path: Path) -> None:
+    """Lo ha calculado el motor: enseñarlo antes de revelar invalidaría la prueba."""
+    ciega = _step(_draw(run, tmp_path), "ciega")
+
+    assert len(ciega["plot"]["traces"]) == 1, "no puede quedar ninguna capa del motor"
+    assert ciega["plot"]["rsiAxis"] is None, "sin RSI, el precio recupera el alto"
+    assert ciega["plot"]["priceDomain"] == [0, 1]
+
+
+# --- La caja del 50 % del retroceso ------------------------------------------
+#
+# La del mentor: del ancla del ID nuevo al UL del ID anterior —su PUL—, con la
+# línea media como 50 %. No es el nivel 50 % del ID. Con ella viajan el paso de
+# la tendencia, los toques del PUL y del 50 %, y la confluencia con la caja de la
+# temporalidad de encima.
+
+
+def _cajas(step: dict) -> list[dict]:
+    return [trace for trace in step["plot"]["traces"] if trace["name"].startswith("Caja 50 %")]
+
+
+def _medias(step: dict) -> list[dict]:
+    return [trace for trace in step["plot"]["traces"] if trace["name"].startswith("50 % del retroceso")]
+
+
+def test_sin_zonas_no_hay_cajas_del_retroceso(run: ImpulseRun) -> None:
+    payload = build_payload(run)
+    assert payload["hasPullbacks"] is False
+    assert payload["impulses"][H4]["pullbacks"] == []
+
+
+def test_la_caja_va_del_ancla_al_pul_y_solo_en_los_id_con_pul(
+    run: ImpulseRun, zones: ZonesRun
+) -> None:
+    payload = build_payload(run, zones=zones)
+    assert payload["hasPullbacks"] is True
+    registros = payload["impulses"][H4]
+    con_pul = {zone["id"] for zone in registros["zones"] if zone["k"] == "PUL"}
+    pul = {zone["id"]: zone for zone in registros["zones"] if zone["k"] == "PUL"}
+    anclas = {impulse["id"]: impulse["a"] for impulse in registros["list"]}
+
+    assert {box["id"] for box in registros["pullbacks"]} == con_pul
+    for box in registros["pullbacks"]:
+        assert box["lo"] <= box["m"] <= box["hi"]
+        assert {box["lo"], box["hi"]} == {anclas[box["id"]], pul[box["id"]]["o"]}
+        assert box["m"] == pytest.approx((box["lo"] + box["hi"]) / 2, abs=1e-4)
+        assert box["pace"] in (None, "rapida", "lenta")
+        assert box["x0"] <= box["x1"]
+
+
+def test_la_caja_se_dibuja_con_su_linea_media_y_se_apaga(
+    run: ImpulseRun, zones: ZonesRun, tmp_path: Path
+) -> None:
+    resultado = _draw(run, tmp_path, zones=zones)
+    con = _step(resultado, "retroceso-por-defecto")
+    sin = _step(resultado, "retroceso-apagado")
+    color = build_payload(run, zones=zones)["colors"]["pullback"]
+
+    assert _cajas(con) and _medias(con), _trace_names(con)
+    assert all(trace["fill"] == "toself" and trace["color"] == color for trace in _cajas(con))
+    assert all(trace["color"] == color and trace["fill"] is None for trace in _medias(con))
+    assert not _cajas(sin) and not _medias(sin)
+    assert "capa apagada" in sin["notes"]
+    # Y el estado dice qué caja se ve, con su 50 %, y que no es el nivel 50 % del ID.
+    assert "caja 50 % del retroceso" in con["notes"]
+    assert "NO es el nivel 50 % del ID" in con["notes"]
+
+
+def test_cada_caja_dibujada_es_la_del_payload(
+    run: ImpulseRun, zones: ZonesRun, tmp_path: Path
+) -> None:
+    """El dibujo no calcula: los bordes y la media salen del registro."""
+    paso = _step(_draw(run, tmp_path, zones=zones), "retroceso-por-defecto")
+    registros = {box["id"]: box for box in build_payload(run, zones=zones)["impulses"][H4]["pullbacks"]}
+    for trace in _cajas(paso):
+        if trace["name"].endswith("(contexto)"):
+            continue
+        for caption in trace["captions"] or []:
+            if not caption:
+                continue
+            id_num = int(re.search(r"nº (\d+)", caption).group(1))
+            box = registros[id_num]
+            assert f"{box['lo']:.4f} → {box['hi']:.4f}" in caption
+            assert f"{box['m']:.4f}" in caption
+            assert "ES DIBUJO" in caption
+
+
+def test_el_globo_de_la_caja_dice_el_paso_y_que_nivel_esperar(
+    run: ImpulseRun, zones: ZonesRun, tmp_path: Path
+) -> None:
+    paso = _step(_draw(run, tmp_path, zones=zones), "retroceso-por-defecto")
+    captions = [
+        caption for trace in _cajas(paso) for caption in (trace["captions"] or []) if caption
+    ]
+    assert captions
+    for caption in captions:
+        assert any(
+            frase in caption
+            for frase in ("tendencia RÁPIDA", "tendencia LENTA", "sin paso")
+        ), caption
+        assert "PUL" in caption and "50 %" in caption
+
+
+def test_sin_zonas_la_capa_del_retroceso_no_dibuja_nada(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    resultado = _draw(run, tmp_path)
+    assert not _cajas(_step(resultado, "retroceso-por-defecto"))
+    assert not _cajas(_step(resultado, "retroceso-apagado"))
+
+
+def test_los_toques_del_retroceso_no_se_adelantan_al_reloj(
+    run: ImpulseRun, zones: ZonesRun, tmp_path: Path
+) -> None:
+    """Un marcador de «llegó al 50 %» plantado antes de que el precio llegara
+    sería mirar el futuro: en replay ninguno puede caer más allá del reloj."""
+    resultado = _draw(run, tmp_path, zones=zones)
+    payload = build_payload(run, zones=zones)
+    for step in _replay_steps(resultado):
+        reloj = _clock(payload, step)
+        for trace in step["plot"]["traces"]:
+            if not trace["name"].startswith("Llegada al PUL"):
+                continue
+            for x in trace["xs"] or []:
+                assert _minute(x) <= reloj, (step["label"], x)
+
+
+def test_en_h1_la_confluencia_con_h4_viaja_y_se_dibuja_rayada(
+    hourly_run: ImpulseRun, hourly_zones: ZonesRun, tmp_path: Path
+) -> None:
+    registros = build_payload(hourly_run, zones=hourly_zones)["impulses"][H1]["pullbacks"]
+    con = [box for box in registros if box["c"] is not None]
+    assert con, "la fixture tiene que dar alguna confluencia H1 → H4"
+    for box in con:
+        assert box["c"]["tf"] == H4
+        assert box["c"]["lo"] <= box["m"] <= box["c"]["hi"]
+    # El Diario no tiene temporalidad de encima: nunca confluye.
+    assert all(
+        box["c"] is None
+        for box in build_payload(hourly_run, zones=hourly_zones)["impulses"][DAILY]["pullbacks"]
+    )
+
+
+# --- La acumulación ------------------------------------------------------------
+#
+# La firma del propietario —dos toques arriba y dos abajo sin romper— fechada
+# en el toque que la completa, y sombreada desde ahí hasta que el ID muere.
+
+
+def _acumulaciones(step: dict) -> list[dict]:
+    return [trace for trace in step["plot"]["traces"] if trace["name"].startswith("Acumulación")]
+
+
+def test_la_acumulacion_viaja_fechada_en_el_toque_que_completa_la_firma(
+    run: ImpulseRun,
+) -> None:
+    medicion = measure(run)
+    payload = build_payload(run, lateralization=medicion)
+    assert payload["hasAccumulations"] is True
+    registros = payload["impulses"][H4]["accumulations"]
+    con_firma = {
+        item.id_num for item in medicion.per_timeframe[H4].impulses if item.meets_signature
+    }
+    publicados = {impulse["id"] for impulse in payload["impulses"][H4]["list"]}
+    limites = {impulse["id"]: (impulse["a"], impulse["e"]) for impulse in payload["impulses"][H4]["list"]}
+
+    assert {item["id"] for item in registros} == con_firma & publicados
+    for item in registros:
+        assert item["x"] <= item["x1"]
+        assert item["lo"] < item["hi"]
+        assert item["up"] >= 2 and item["dn"] >= 2
+        # El rango es el del ID: ancla y extremo, sin recalcular nada.
+        assert {item["lo"], item["hi"]} == set(limites[item["id"]])
+
+
+def test_sin_contactos_no_hay_acumulacion(run: ImpulseRun) -> None:
+    payload = build_payload(run)
+    assert payload["hasAccumulations"] is False
+    assert payload["impulses"][H4]["accumulations"] == []
+
+
+def test_la_acumulacion_se_dibuja_con_trama_y_se_apaga(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    resultado = _draw(run, tmp_path)
+    con = _step(resultado, "acumulacion-por-defecto")
+    sin = _step(resultado, "acumulacion-apagada")
+    color = build_payload(run)["colors"]["accumulation"]
+
+    assert _acumulaciones(con), _trace_names(con)
+    for trace in _acumulaciones(con):
+        assert trace["fill"] == "toself"
+        assert trace["fillpattern"] == "x", "la trama es lo que la separa de las zonas"
+        assert trace["color"] == color
+        assert all("ACUMULACIÓN" in caption for caption in trace["captions"] if caption)
+    assert not _acumulaciones(sin)
+    assert "ACUMULACIÓN" in con["notes"] and "capa apagada" in sin["notes"]
+
+
+def test_el_sombreado_de_la_acumulacion_empieza_en_la_firma_y_no_en_la_constitucion(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    paso = _step(_draw(run, tmp_path), "acumulacion-por-defecto")
+    payload = build_payload(run, lateralization=measure(run))
+    inicio = {item["id"]: item["x"] for item in payload["impulses"][H4]["accumulations"]}
+    constitucion = {impulse["id"]: impulse["x0"] for impulse in payload["impulses"][H4]["list"]}
+    comprobadas = 0
+    for trace in _acumulaciones(paso):
+        if trace["name"].endswith("(contexto)"):
+            continue
+        for x, caption in zip(trace["segments"] or [], trace["captions"] or [], strict=False):
+            if not caption:
+                continue
+            id_num = int(re.search(r"nº (\d+)", caption).group(1))
+            assert _minute(x[0]) >= inicio[id_num] >= constitucion[id_num]
+            comprobadas += 1
+    assert comprobadas
+
+
+def test_la_acumulacion_no_se_adelanta_al_reloj(run: ImpulseRun, tmp_path: Path) -> None:
+    """La firma se cumple en una vela concreta: en replay no se sombrea antes."""
+    resultado = _draw(run, tmp_path)
+    payload = build_payload(run, lateralization=measure(run))
+    inicio = {item["id"]: item["x"] for item in payload["impulses"][H4]["accumulations"]}
+    for step in _replay_steps(resultado):
+        reloj = _clock(payload, step)
+        for trace in _acumulaciones(step):
+            for caption in trace["captions"] or []:
+                if not caption or "ID H4 " not in caption:
+                    continue
+                id_num = int(re.search(r"nº (\d+)", caption).group(1))
+                assert inicio[id_num] <= reloj, (step["label"], id_num)

@@ -34,6 +34,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import plotly.offline as pyo
 
@@ -43,11 +44,17 @@ from chronos.application.structure.lateralization import (
     LateralizationStudy,
     TimeframeLateralization,
 )
+from chronos.application.structure.pullback import (
+    PullbackBox,
+    pullback_boxes,
+    with_confluence,
+)
 from chronos.application.structure.zone_signals import (
     TimeframeSignals,
     detect_zone_signals,
 )
 from chronos.application.structure.zones import ImpulseZones, TimeframeZones, ZonesRun
+from chronos.domain.indicators import rsi, rsi_zones
 from chronos.domain.structure.enums import BreakKind, ContactKind, MachineState
 from chronos.domain.structure.zone_signals import ZoneSignalKind
 from chronos.domain.structure.zones import Zone
@@ -83,6 +90,24 @@ HAND_RECTS: dict[str, str] = {
     "UL": theme.CYAN,
     "APUL": theme.OLIVE,
 }
+
+#: El RSI que se dibuja bajo el precio en el Diario, H4 y H1, con el periodo y
+#: las tres referencias que mira el propietario: 55 arriba, 50 en medio y 45
+#: abajo. No es sobrecompra/sobreventa: por encima de 55 hay liquidez alcista,
+#: por debajo de 45 bajista, y dentro de la banda el 50 hace de soporte si el
+#: índice bajó desde arriba y de resistencia si subió desde abajo. Es DIBUJO
+#: —no decide nada, no entra en la detección y no abre ni cierra nada—, pero lo
+#: calcula el motor sobre las velas de cada temporalidad y viaja ya leído: el
+#: explorador no calcula indicadores ni interpreta zonas.
+RSI_PERIOD = 21
+RSI_BANDS: tuple[int, ...] = (55, 50, 45)
+#: Dónde se mira: en M15 y M5 el propietario no lo usa —ahí rompe en falso— y
+#: por eso esos gráficos no lo llevan, ni siquiera apagado.
+RSI_CHARTS: tuple[str, ...] = (DAILY, H4, H1)
+
+#: Dos decimales bastan para un índice de 0 a 100 y ahorran megabytes frente a
+#: los cuatro del precio.
+RSI_DECIMALS = 2
 
 DECIMALS = 4
 
@@ -172,8 +197,10 @@ def build_payload(
     # ninguna corrida en la que tuviera sentido dar unas sin las otras— y el
     # cálculo sigue viviendo en `application`, no en el dibujo.
     signals = detect_zone_signals(run, zones).per_timeframe if zoned else {}
+    pullbacks = _pullbacks(run, zoned)
     bars = {
-        chart: _bars_payload(frame, max_bars) for chart, frame in run.chart_bars.items()
+        chart: _bars_payload(frame, max_bars, with_rsi=chart in RSI_CHARTS)
+        for chart, frame in run.chart_bars.items()
     }
     # Sólo se ofrecen los gráficos que tienen velas: si el histórico no daba
     # para construir M15 o M5, su pestaña no puede quedarse ahí esperando a que
@@ -199,6 +226,12 @@ def build_payload(
             "h4OffsetHours": run.config.aggregation.h4_offset_hours,
             "dSessionStart": run.config.aggregation.d_session_start,
             "decimals": DECIMALS,
+            #: El RSI del panel de abajo: periodo, referencias y en qué gráficos
+            #: va. Sin esto el explorador tendría que escribir un 21 y un 55 que
+            #: no ha decidido él.
+            "rsiPeriod": RSI_PERIOD,
+            "rsiBands": list(RSI_BANDS),
+            "rsiCharts": list(RSI_CHARTS),
         },
         "colors": {
             "bullish": BULLISH,
@@ -216,6 +249,14 @@ def build_payload(
             #: PUL, un UL o un APUL. Ninguna capa del motor usa estos tonos: con
             #: ellos sólo se dibuja lo que ha puesto una mano.
             "rects": dict(HAND_RECTS),
+            #: El RSI por zonas: verde con liquidez alcista (sobre 55), rojo
+            #: con bajista (bajo 45) y tinta dentro de la banda. Son los
+            #: colores de la dirección del ID: la lectura es la misma.
+            "rsi": {"above": BULLISH, "below": BEARISH, "inside": theme.INK_PRIMARY},
+            #: La caja del 50 % del retroceso y la acumulación llevan tono
+            #: propio: no son zonas ni marcos y no pueden confundirse con ellos.
+            "pullback": theme.SERIES[3],
+            "accumulation": theme.VIOLET,
         },
         "charts": list(available),
         "layout": {chart: list(charts.overlays(chart)) for chart in available},
@@ -228,9 +269,18 @@ def build_payload(
                 contacts.get(timeframe),
                 zoned.get(timeframe),
                 signals.get(timeframe),
+                pullbacks.get(timeframe, ()),
             )
             for timeframe, analysis in run.analyses.items()
         },
+        #: La caja del 50 % del retroceso (ancla → PUL) y la acumulación: sin
+        #: zonas no hay PUL del que sacar la caja, y sin contactos no hay firma.
+        "hasPullbacks": any(pullbacks.values()),
+        "hasAccumulations": any(
+            item.signature_index is not None
+            for measurement in contacts.values()
+            for item in measurement.impulses
+        ),
         #: `False` cuando la corrida no llevaba zonas: sin ellas ni la capa de
         #: zonas ni la de señales tienen nada que enseñar.
         "hasZones": bool(zoned),
@@ -323,13 +373,20 @@ def _spans(run: ImpulseRun) -> dict[str, int]:
 # --- Velas ------------------------------------------------------------------
 
 
-def _bars_payload(frame: pd.DataFrame, max_bars: int) -> dict[str, Any]:
+def _bars_payload(frame: pd.DataFrame, max_bars: int, *, with_rsi: bool) -> dict[str, Any]:
     total = len(frame)
     truncated = 0 < max_bars < total
+    # El RSI se calcula sobre el histórico ENTERO y se recorta después. Al revés
+    # —calcularlo sobre el tramo ya cortado— las primeras velas que se ven
+    # saldrían con un indicador arrancado de cero en ese punto, que es un número
+    # distinto del que tiene esa vela de verdad.
+    momentum = rsi(frame["close"].to_numpy(dtype=float), RSI_PERIOD) if with_rsi else None
     if truncated:
         frame = frame.iloc[-max_bars:]
+        if momentum is not None:
+            momentum = momentum[-max_bars:]
     index = pd.DatetimeIndex(frame.index)
-    return {
+    payload: dict[str, Any] = {
         "truncated": truncated,
         "total": total,
         "t": _epoch_minutes(index),
@@ -338,6 +395,26 @@ def _bars_payload(frame: pd.DataFrame, max_bars: int) -> dict[str, Any]:
         "l": _round(frame["low"]),
         "c": _round(frame["close"]),
     }
+    if momentum is not None:
+        zone, origin = rsi_zones(momentum, upper=max(RSI_BANDS), lower=min(RSI_BANDS))
+        #: Una lectura por vela, alineada con `t`. `None` en las velas del
+        #: arranque, que no tienen variaciones suficientes: es un HUECO y se
+        #: dibuja como tal, no como un cero. `rz` es la zona (1 arriba, 0 en la
+        #: banda, -1 abajo) y `rf` de qué lado entró en la banda (1 desde
+        #: arriba → el 50 hace de soporte; -1 desde abajo → resistencia; 0 sin
+        #: haber salido). Las lee el motor: el explorador sólo las pinta.
+        payload["rsi"] = _rsi_payload(momentum)
+        payload["rz"] = [int(value) for value in zone]
+        payload["rf"] = [int(value) for value in origin]
+    return payload
+
+
+def _rsi_payload(values: np.ndarray) -> list[float | None]:
+    """El RSI listo para JSON: `NaN` no lo es, y `JSON.parse` se atraganta con él."""
+    return [
+        None if np.isnan(value) else round(float(value), RSI_DECIMALS)
+        for value in values
+    ]
 
 
 def _epoch_minutes(index: pd.DatetimeIndex) -> list[int]:
@@ -362,6 +439,7 @@ def _impulse_payload(
     measurement: TimeframeLateralization | None,
     zones: TimeframeZones | None = None,
     signals: TimeframeSignals | None = None,
+    pullbacks: Sequence[PullbackBox] = (),
 ) -> dict[str, Any]:
     bars = analysis.bars
     last = pd.Timestamp(pd.DatetimeIndex(bars.index)[-1])
@@ -383,6 +461,11 @@ def _impulse_payload(
         "zones": _zones(zones, analysis, last),
         #: Toques del PUL y rechazos/roturas del UL. Vacío sin zonas.
         "signals": _zone_signals(signals),
+        #: La caja del 50 % del retroceso del mentor, con su paso y su
+        #: confluencia. Vacío sin zonas: sin PUL no hay caja.
+        "pullbacks": _pullback_records(pullbacks, last),
+        #: Desde qué vela cada ID está en ACUMULACIÓN. Vacío sin contactos.
+        "accumulations": _accumulations(measurement, analysis, last),
     }
 
 
@@ -768,3 +851,114 @@ def bar_counts(payload: dict[str, Any]) -> dict[str, int]:
     return {chart: len(bars["t"]) for chart, bars in payload["bars"].items()}
 
 
+
+
+# --- La caja del 50 % del retroceso ------------------------------------------
+
+
+def _pullbacks(run: ImpulseRun, zoned: dict[str, TimeframeZones]) -> dict[str, tuple[PullbackBox, ...]]:
+    """Las cajas de cada temporalidad con zonas, con la confluencia hacia arriba.
+
+    La confluencia se mide contra la temporalidad detectada inmediatamente
+    superior —H1 contra H4, H4 contra el Diario—, que es la cadena que sigue el
+    propietario. Los `spans` son los mismos que usa el replay para saber cuándo
+    se supo cada cosa: la caja de H4 no se conoce hasta que cierra su vela.
+    """
+    detected = [tf for tf in run.config.charts.detected if tf in zoned and tf in run.analyses]
+    boxes = {tf: pullback_boxes(run.analyses[tf], zoned[tf]) for tf in detected}
+    spans = _spans(run)
+    for position, timeframe in enumerate(detected):
+        if position == 0:
+            continue
+        upper = detected[position - 1]
+        boxes[timeframe] = with_confluence(
+            boxes[timeframe],
+            boxes[upper],
+            lower_span=pd.Timedelta(minutes=spans[timeframe]).to_pytimedelta(),
+            upper_span=pd.Timedelta(minutes=spans[upper]).to_pytimedelta(),
+        )
+    return boxes
+
+
+def _pullback_records(boxes: Sequence[PullbackBox], last: pd.Timestamp) -> list[dict[str, Any]]:
+    """Capa "Caja 50 % del retroceso". Puramente visual: no interviene en nada.
+
+    La caja existe desde la constitución del ID hasta su muerte, igual que sus
+    zonas. `xp` y `xm` son las velas en que la mecha llegó al PUL y al 50 %, o
+    `None`; `xr` la del punto más lejano del retroceso. Son hechos de la vida
+    entera del ID y el replay los esconde hasta que el reloj los alcanza: sin
+    eso, una caja recién nacida ya diría hasta dónde va a devolver el precio.
+    `pace` es el paso leído de los ID anteriores —rápida espera el PUL, lenta el
+    50 %— y `c` la caja de la temporalidad superior dentro de la que cae este
+    50 %, cuando cae.
+    """
+    return [
+        {
+            "id": box.id_num,
+            "d": box.direction.value,
+            "x0": _minute(pd.Timestamp(box.ts_constitution)),
+            "x1": _minute(pd.Timestamp(box.ts_end) if box.ts_end is not None else last),
+            "lo": round(box.low, DECIMALS),
+            "hi": round(box.high, DECIMALS),
+            "m": round(box.mid, DECIMALS),
+            "pul": round(box.pul_inner, DECIMALS),
+            "xp": None if box.ts_pul_touch is None else _minute(pd.Timestamp(box.ts_pul_touch)),
+            "xm": None if box.ts_mid_touch is None else _minute(pd.Timestamp(box.ts_mid_touch)),
+            "leg": [round(box.leg_range, DECIMALS), box.leg_bars],
+            "ret": [round(box.retrace_range, DECIMALS), box.retrace_bars],
+            "xr": None if box.ts_retrace is None else _minute(pd.Timestamp(box.ts_retrace)),
+            "chain": box.chain,
+            "pace": None if box.pace is None else box.pace.value,
+            "c": (
+                None
+                if box.confluence is None
+                else {
+                    "tf": box.confluence.timeframe,
+                    "id": box.confluence.id_num,
+                    "lo": round(box.confluence.low, DECIMALS),
+                    "hi": round(box.confluence.high, DECIMALS),
+                    "m": round(box.confluence.mid, DECIMALS),
+                }
+            ),
+            "v": box.ts_end is None,
+        }
+        for box in boxes
+    ]
+
+
+def _accumulations(
+    measurement: TimeframeLateralization | None,
+    analysis: TimeframeAnalysis,
+    last: pd.Timestamp,
+) -> list[dict[str, Any]]:
+    """Capa "Acumulación". Puramente visual: no interviene en nada.
+
+    Es la firma del propietario —dos toques arriba y dos abajo sin romper
+    ninguno— leída en el momento en que se cumple: desde esa vela (`x`) hasta
+    que el ID muere (`x1`), el precio está acumulando entre el ancla y el
+    extremo. La cuenta la hace la medición de lateralización; aquí sólo se
+    fecha el toque que la completa.
+    """
+    if measurement is None:
+        return []
+    stamps = pd.DatetimeIndex(analysis.bars.index)
+    ends = _impulse_ends(analysis, last)
+    published = {impulse.id_num for impulse in analysis.published}
+    records: list[dict[str, Any]] = []
+    for item in measurement.impulses:
+        onset = item.signature_index
+        if onset is None or item.id_num not in published:
+            continue
+        records.append(
+            {
+                "id": item.id_num,
+                "d": item.direction,
+                "x": _minute(pd.Timestamp(stamps[onset])),
+                "x1": _minute(ends[item.id_num]),
+                "lo": round(item.lower, DECIMALS),
+                "hi": round(item.upper, DECIMALS),
+                "up": item.touches_upper,
+                "dn": item.touches_lower,
+            }
+        )
+    return records

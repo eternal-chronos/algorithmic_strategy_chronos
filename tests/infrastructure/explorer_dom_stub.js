@@ -62,6 +62,8 @@ function declare(id) {
  'layer-frame',
  'zone-layers', 'layer-zones',
  'signal-layers', 'layer-signals',
+ 'analysis-layers', 'pullback-layer', 'layer-pullback',
+ 'accumulation-layer', 'layer-accumulation',
  'break-layers', 'avoided-layer', 'layer-avoided', 'steps-layer', 'layer-steps',
  'blind-seed', 'blind-start', 'blind-reveal', 'blind-exit',
  'sim-group', 'sim-buttons', 'sim-ratio', 'sim-clear',
@@ -196,6 +198,14 @@ global.Plotly = {
           // desde su vela definitoria, sólo con el contorno. Se comprueba aquí.
           fill: trace.fill || null,
           fillcolor: trace.fillcolor || null,
+          // La confluencia y la acumulación van con TRAMA: es lo que las separa
+          // de las zonas y de la caja, que son rellenos lisos.
+          fillpattern: (trace.fillpattern && trace.fillpattern.shape) || null,
+          // El RSI vive en su propio eje: nada del precio puede caer ahí.
+          yaxis: trace.yaxis || 'y',
+          symbols: trace.mode === 'markers' && trace.marker && Array.isArray(trace.marker.symbol)
+            ? trace.marker.symbol.slice()
+            : null,
           captions: trace.text && trace.text.length <= 200 ? trace.text.slice() : null,
           xs: trace.mode === 'markers' && (trace.x || []).length <= 200
             ? trace.x.slice()
@@ -236,6 +246,17 @@ global.Plotly = {
         };
       }),
       yTickFormat: layout.yaxis && layout.yaxis.tickformat,
+      // El RSI vive en su propio panel: el reparto de alto entre precio e índice
+      // es lo que mantiene los tiradores donde se ve la línea.
+      priceDomain: (layout.yaxis && layout.yaxis.domain) || null,
+      xAnchor: (layout.xaxis && layout.xaxis.anchor) || null,
+      rsiAxis: layout.yaxis2
+        ? {
+          domain: layout.yaxis2.domain,
+          ticks: layout.yaxis2.tickvals,
+          title: layout.yaxis2.title && layout.yaxis2.title.text,
+        }
+        : null,
       xRange: (layout.xaxis && layout.xaxis.range) || null,
       yRange: (layout.yaxis && layout.yaxis.range) || null,
     });
@@ -303,6 +324,7 @@ function snapshot(label) {
     // el control se separan, el explorador miente sobre lo que se está viendo.
     boxes: ['layer-limbo', 'layer-marks', 'layer-contacts', 'layer-mid', 'layer-wrong',
       'layer-frame', 'layer-zones', 'layer-signals',
+      'layer-pullback', 'layer-accumulation',
       'layer-avoided', 'layer-steps']
       .reduce(function (state, id) {
         state[id] = elements[id].checked === true;
@@ -502,6 +524,22 @@ steps.push(snapshot('senales-por-defecto'));
 elements['layer-signals'].fire('change', { target: { checked: false } });
 steps.push(snapshot('senales-apagadas'));
 elements['layer-signals'].fire('change', { target: { checked: true } });
+
+// La caja del 50 % del retroceso y la acumulación: se encienden y se apagan
+// sobre las mismas velas; sin zonas (o sin contactos) en el payload los dos
+// pasos salen iguales, que es lo que comprueba el test de la corrida sin zonas.
+steps.push(snapshot('retroceso-por-defecto'));
+elements['layer-pullback'].fire('change', { target: { checked: false } });
+steps.push(snapshot('retroceso-apagado'));
+elements['layer-pullback'].fire('change', { target: { checked: true } });
+// La acumulación obedece el selector de ID visibles y el ID vigente al final
+// del histórico rara vez está acumulando: se retrata con «Todos», que es lo que
+// el bloque de las evitadas dejó puesto, para que el paso compruebe la capa y
+// no el filtro.
+steps.push(snapshot('acumulacion-por-defecto'));
+elements['layer-accumulation'].fire('change', { target: { checked: false } });
+steps.push(snapshot('acumulacion-apagada'));
+elements['layer-accumulation'].fire('change', { target: { checked: true } });
 
 // Fase 2.1 (§3.2): la escalera del extremo. Los saltos son una capa propia que se
 // apaga; los ESCALONES no, porque no son una capa sino la línea del ID dibujada
@@ -763,13 +801,19 @@ const simX = [
 const simY = precios;
 zoomTo(simX, simY);
 
-// El mismo cálculo que hace el explorador: MARGIN sobre el div de 1200 x 720.
+// El mismo cálculo que hace el explorador: MARGIN sobre el div de 1200 x 720, y
+// de ese alto, la franja que le queda al PRECIO. El RSI se lleva la de abajo
+// (`PRICE_DOMAIN` = [0.28, 1] en el explorador), así que sin descontarla precio
+// y píxel se separarían y ningún tirador caería donde se ve.
+const PRICE_DOMAIN = [0.28, 1];
+
 function pixelOf(minute, price) {
   const width = 1200 - 66 - 18;
-  const height = 720 - 16 - 44;
+  const height = (720 - 16 - 44) * (PRICE_DOMAIN[1] - PRICE_DOMAIN[0]);
+  const top = 16 + (720 - 16 - 44) * (1 - PRICE_DOMAIN[1]);
   return {
     x: 66 + (minute - simX[0]) / (simX[1] - simX[0]) * width,
-    y: 16 + (simY[1] - price) / (simY[1] - simY[0]) * height,
+    y: top + (simY[1] - price) / (simY[1] - simY[0]) * height,
   };
 }
 
@@ -996,6 +1040,15 @@ elements['rect-undo'].fire('click');
 steps.push(snapshot('rect-deshecho'));
 elements['rect-clear'].fire('click');
 steps.push(snapshot('rect-limpio'));
+
+// El RSI no se enciende ni se apaga: está puesto en el Diario, H4 y H1 y no en
+// las finas; sólo desaparece con la venda de la ciega, porque lo calcula el motor.
+tabs[1].fire('click');
+steps.push(snapshot('rsi-en-h4'));
+tabs[3].fire('click');
+steps.push(snapshot('rsi-en-m15'));
+tabs[0].fire('click');
+steps.push(snapshot('rsi-en-diario'));
 
 console.log(JSON.stringify({
   unknownElements: missing,

@@ -200,6 +200,37 @@ operación. El proyecto sigue sin entradas, stops ni targets.
 Obedecen el selector de ID visibles: con «ID actual» se ven las del ID vigente y su zona.">
             <input type="checkbox" id="layer-signals" checked> Señales de zona</label>
         </span>
+        <span id="analysis-layers" style="display:flex; gap:16px; flex-wrap:wrap;">
+          <span id="pullback-layer">
+            <label class="toggle" title="La CAJA DEL 50 % DEL RETROCESO, la del mentor. NO es el
+nivel 50 % del ID (ése es el punto medio entre ancla y extremo, con su propia casilla): cuando
+un ID se rompe a favor y nace el siguiente en el mismo sentido, el rectángulo va del ANCLA del
+ID nuevo al UL del ID anterior —que es el PUL del nuevo— y su LÍNEA MEDIA es el 50 % que él
+mira. Sólo la llevan los ID con PUL.
+Con ella viaja el PASO de la tendencia, leído de los ID anteriores de la cadena: RÁPIDA si
+ninguno llegó a su 50 % (el retroceso se frena en el PUL y se espera ahí), LENTA si alguno sí
+(se espera el 50 %). Sin ID anteriores con caja no hay paso.
+Los marcadores dicen cuándo la mecha LLEGÓ al PUL (triángulo) y al 50 % (rombo) en la vida
+del ID; en replay se esconden hasta que el reloj los alcanza.
+La franja rayada es la CONFLUENCIA: el 50 % de esta temporalidad cae dentro de la caja del ID
+de la temporalidad de encima (H4 para H1, el Diario para H4), que es lo que el mentor hace a
+mano al «encajar» el 50 % de H1 en el de H4. Los dos 50 % se leen en el globo.
+Sólo se dibuja la del ID que se está mirando, como las zonas. ES DIBUJO: no decide nada.">
+              <input type="checkbox" id="layer-pullback" checked> Caja 50 % del retroceso</label>
+          </span>
+          <span id="accumulation-layer">
+            <label class="toggle" title="La ACUMULACIÓN, con la firma del propietario: el precio
+toca la parte alta del ID, toca la baja, y repite —dos toques en cada límite sin romper
+ninguno—. Desde la vela del toque que completa la firma hasta que el ID muere, el rango del
+ancla al extremo va sombreado en violeta con trama: ahí el precio está acumulando y, como
+dice el mentor, dentro de una acumulación las estructuras de dentro «las puede pasar por la
+piedra»; lo que vale es el rango de extremo a extremo.
+El sombreado empieza en ese toque, no en la constitución: antes no se sabía. Lo fecha el
+motor con la medición de contactos; aquí sólo se pinta. Obedece el selector de ID visibles.
+ES DIBUJO: no decide nada.">
+              <input type="checkbox" id="layer-accumulation" checked> Acumulación</label>
+          </span>
+        </span>
         <span id="break-layers" style="display:flex; gap:16px; flex-wrap:wrap;">
           <span id="avoided-layer">
             <label class="toggle" title="Fase 2.1: velas que bajo la regla antigua habrían roto el ID
@@ -378,7 +409,29 @@ configuración, el historial y las estadísticas, en texto">Copiar</button>
     <span>✕ ROTURA_EN_CONTRA</span>
     <span>○ TOQUE_MECHA</span>
     <span>□ ROTURA_FALLIDA</span>
-    <span>línea punteada fina = nivel del 50 % del ID</span>
+    <span>línea punteada fina = nivel del 50 % del ID (punto medio entre ancla y extremo)</span>
+    <span><i class="box" style="background:#eda100; opacity:.35"></i><b>CAJA 50 % DEL
+      RETROCESO</b> (ámbar, borde raya-punto): la del mentor, NO el nivel 50 % del ID. Va del
+      ANCLA del ID al PUL —el UL del ID anterior— y la línea ámbar entera es su 50 %. Sólo la
+      llevan los ID con PUL y sólo se dibuja la del ID que se mira. El globo dice el PASO de la
+      tendencia leído de los ID anteriores —<b>rápida</b>: se espera el PUL; <b>lenta</b>: se
+      espera el 50 %—, cuándo la mecha llegó al PUL (▼) y al 50 % (◆), y la pierna frente al
+      retroceso. La franja ámbar RAYADA es la <b>confluencia</b>: este 50 % cae dentro de la
+      caja de la temporalidad de encima (H4 para H1, Diario para H4)</span>
+    <span><i class="box" style="background:#6f4bd8; opacity:.3"></i><b>ACUMULACIÓN</b> (violeta
+      con trama, borde a rayas largas): desde la vela en que el ID cumple la firma del
+      propietario —dos toques arriba y dos abajo sin romper— hasta que muere, el rango del ancla
+      al extremo. Dentro vale el rango de extremo a extremo, no la estructura de dentro. Empieza
+      en el toque que completa la firma, no en la constitución</span>
+    <span><i style="background:#1baf7a"></i><i style="background:#0b0b0b"></i><i
+      style="background:#d03b3b"></i><b>RSI 21</b> en el panel de abajo, en el Diario, H4 y H1
+      (en M15 y M5 no va: ahí rompe en falso). Leído por ZONAS, como lo lee el propietario:
+      <b>verde</b> por encima de 55 = liquidez alcista; <b>rojo</b> por debajo de 45 = liquidez
+      bajista; <b>tinta</b> dentro de la banda sombreada 45–55, donde el 50 (raya) hace de
+      SOPORTE si el índice bajó desde arriba y de RESISTENCIA si subió desde abajo. El globo y
+      el estado lo dicen vela a vela. Lo calcula y lo lee el motor sobre velas cerradas; las
+      primeras velas no tienen lectura y ahí la línea va cortada (HUECO, no cero). ES DIBUJO:
+      no decide nada. En la auditoría ciega no se enseña</span>
     <span><i style="background:#6f4bd8"></i>
       <i style="background:#eb6834"></i>
       <i style="background:#2a78d6"></i>MARCO del ID: el recuadro que va de la vela que
