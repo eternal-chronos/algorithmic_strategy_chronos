@@ -289,6 +289,9 @@ function snapshot(label) {
       return button.getAttribute('aria-pressed') === 'true';
     })[0] || {}).dataset?.ratio || null,
     simCursor: elements['chart'].style.cursor || '',
+    // La acumulación está aparcada: la casilla tiene que esconderse cuando el
+    // payload no la trae, y el payload no la trae hasta que se vuelva a encender.
+    accumulationHidden: elements['accumulation-layer'].style.display === 'none',
     // I.3 — los recuadros a mano: qué botón espera el clic y si hay algo que quitar.
     rectArmed: (elements['rect-buttons'].children.filter(function (button) {
       return button.getAttribute('aria-pressed') === 'true';

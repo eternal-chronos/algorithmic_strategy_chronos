@@ -109,6 +109,13 @@ RSI_CHARTS: tuple[str, ...] = (DAILY, H4, H1)
 #: los cuatro del precio.
 RSI_DECIMALS = 2
 
+#: La capa de ACUMULACIÓN está APARCADA: el propietario la ha dejado apagada
+#: hasta que se revise cómo se cuentan los toques (hoy cuatro velas seguidas
+#: rozando el ancla son cuatro toques, sin separación mínima ni tope de
+#: barras). Con esto en `False` el payload no lleva ni una y el explorador
+#: esconde la casilla; la medición de contactos sigue calculándose igual.
+ACCUMULATIONS_ENABLED = False
+
 DECIMALS = 4
 
 #: Minuto cero de la escala de tiempos del explorador.
@@ -276,7 +283,8 @@ def build_payload(
         #: La caja del 50 % del retroceso (ancla → PUL) y la acumulación: sin
         #: zonas no hay PUL del que sacar la caja, y sin contactos no hay firma.
         "hasPullbacks": any(pullbacks.values()),
-        "hasAccumulations": any(
+        "hasAccumulations": ACCUMULATIONS_ENABLED
+        and any(
             item.signature_index is not None
             for measurement in contacts.values()
             for item in measurement.impulses
@@ -938,8 +946,11 @@ def _accumulations(
     que el ID muere (`x1`), el precio está acumulando entre el ancla y el
     extremo. La cuenta la hace la medición de lateralización; aquí sólo se
     fecha el toque que la completa.
+
+    Con `ACCUMULATIONS_ENABLED` en `False` no sale ni una: la capa está
+    aparcada y el payload no puede llevar lo que el explorador no debe pintar.
     """
-    if measurement is None:
+    if measurement is None or not ACCUMULATIONS_ENABLED:
         return []
     stamps = pd.DatetimeIndex(analysis.bars.index)
     ends = _impulse_ends(analysis, last)

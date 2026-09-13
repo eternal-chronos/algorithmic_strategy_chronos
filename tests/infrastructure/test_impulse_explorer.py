@@ -42,6 +42,7 @@ from chronos.application.structure.zones import ZonesRun, detect_zones
 from chronos.domain.indicators import rsi
 from chronos.domain.structure.enums import LegStartMode
 from chronos.domain.structure.zone_signals import ZoneSignalKind
+from chronos.infrastructure.reporting import impulse_explorer
 from chronos.infrastructure.reporting.impulse_explorer import (
     ASSETS,
     BEARISH,
@@ -3546,14 +3547,41 @@ def test_en_h1_la_confluencia_con_h4_viaja_y_se_dibuja_rayada(
 #
 # La firma del propietario —dos toques arriba y dos abajo sin romper— fechada
 # en el toque que la completa, y sombreada desde ahí hasta que el ID muere.
+#
+# La capa está APARCADA (`ACCUMULATIONS_ENABLED = False`): por defecto el
+# payload no lleva ni una y la casilla no se enseña. Los tests del dibujo la
+# encienden a mano para que la maquinaria siga probada hasta que vuelva.
 
 
 def _acumulaciones(step: dict) -> list[dict]:
     return [trace for trace in step["plot"]["traces"] if trace["name"].startswith("Acumulación")]
 
 
+@pytest.fixture
+def acumulacion_encendida(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(impulse_explorer, "ACCUMULATIONS_ENABLED", True)
+
+
+def test_la_acumulacion_esta_aparcada_por_defecto(run: ImpulseRun, tmp_path: Path) -> None:
+    """Con la capa aparcada, ni el payload la lleva ni el explorador la pinta,
+    aunque la medición de contactos encuentre ID que cumplen la firma."""
+    medicion = measure(run)
+    assert any(item.meets_signature for item in medicion.per_timeframe[H4].impulses)
+    payload = build_payload(run, lateralization=medicion)
+    assert payload["hasAccumulations"] is False
+    assert all(payload["impulses"][tf]["accumulations"] == [] for tf in payload["impulses"])
+
+    resultado = _draw(run, tmp_path)
+    for label in ("acumulacion-por-defecto", "acumulacion-apagada"):
+        paso = _step(resultado, label)
+        assert not _acumulaciones(paso), _trace_names(paso)
+        assert paso["accumulationHidden"] is True
+        assert "ACUMULACIÓN" not in paso["notes"]
+        assert "acumulación no se está dibujando" not in paso["notes"]
+
+
 def test_la_acumulacion_viaja_fechada_en_el_toque_que_completa_la_firma(
-    run: ImpulseRun,
+    run: ImpulseRun, acumulacion_encendida: None
 ) -> None:
     medicion = measure(run)
     payload = build_payload(run, lateralization=medicion)
@@ -3581,11 +3609,12 @@ def test_sin_contactos_no_hay_acumulacion(run: ImpulseRun) -> None:
 
 
 def test_la_acumulacion_se_dibuja_con_trama_y_se_apaga(
-    run: ImpulseRun, tmp_path: Path
+    run: ImpulseRun, tmp_path: Path, acumulacion_encendida: None
 ) -> None:
     resultado = _draw(run, tmp_path)
     con = _step(resultado, "acumulacion-por-defecto")
     sin = _step(resultado, "acumulacion-apagada")
+    assert con["accumulationHidden"] is False
     color = build_payload(run)["colors"]["accumulation"]
 
     assert _acumulaciones(con), _trace_names(con)
@@ -3599,7 +3628,7 @@ def test_la_acumulacion_se_dibuja_con_trama_y_se_apaga(
 
 
 def test_el_sombreado_de_la_acumulacion_empieza_en_la_firma_y_no_en_la_constitucion(
-    run: ImpulseRun, tmp_path: Path
+    run: ImpulseRun, tmp_path: Path, acumulacion_encendida: None
 ) -> None:
     paso = _step(_draw(run, tmp_path), "acumulacion-por-defecto")
     payload = build_payload(run, lateralization=measure(run))
@@ -3618,7 +3647,9 @@ def test_el_sombreado_de_la_acumulacion_empieza_en_la_firma_y_no_en_la_constituc
     assert comprobadas
 
 
-def test_la_acumulacion_no_se_adelanta_al_reloj(run: ImpulseRun, tmp_path: Path) -> None:
+def test_la_acumulacion_no_se_adelanta_al_reloj(
+    run: ImpulseRun, tmp_path: Path, acumulacion_encendida: None
+) -> None:
     """La firma se cumple en una vela concreta: en replay no se sombrea antes."""
     resultado = _draw(run, tmp_path)
     payload = build_payload(run, lateralization=measure(run))

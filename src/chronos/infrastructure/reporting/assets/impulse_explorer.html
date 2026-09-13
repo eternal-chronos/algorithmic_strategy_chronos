@@ -219,7 +219,9 @@ Sólo se dibuja la del ID que se está mirando, como las zonas. ES DIBUJO: no de
               <input type="checkbox" id="layer-pullback" checked> Caja 50 % del retroceso</label>
           </span>
           <span id="accumulation-layer">
-            <label class="toggle" title="La ACUMULACIÓN, con la firma del propietario: el precio
+            <label class="toggle" title="APARCADA: la acumulación está desactivada de momento y
+no se dibuja; la casilla sólo se enseña si el motor la vuelve a traer.
+La ACUMULACIÓN, con la firma del propietario: el precio
 toca la parte alta del ID, toca la baja, y repite —dos toques en cada límite sin romper
 ninguno—. Desde la vela del toque que completa la firma hasta que el ID muere, el rango del
 ancla al extremo va sombreado en violeta con trama: ahí el precio está acumulando y, como
@@ -228,7 +230,7 @@ piedra»; lo que vale es el rango de extremo a extremo.
 El sombreado empieza en ese toque, no en la constitución: antes no se sabía. Lo fecha el
 motor con la medición de contactos; aquí sólo se pinta. Obedece el selector de ID visibles.
 ES DIBUJO: no decide nada.">
-              <input type="checkbox" id="layer-accumulation" checked> Acumulación</label>
+              <input type="checkbox" id="layer-accumulation" disabled> Acumulación (desactivada)</label>
           </span>
         </span>
         <span id="break-layers" style="display:flex; gap:16px; flex-wrap:wrap;">
@@ -422,7 +424,8 @@ configuración, el historial y las estadísticas, en texto">Copiar</button>
       retroceso. La franja ámbar RAYADA es la <b>confluencia</b>: este 50 % cae dentro de la
       caja de la temporalidad de encima (H4 para H1, Diario para H4)</span>
     <span><i class="box" style="background:#6f4bd8; opacity:.3"></i><b>ACUMULACIÓN</b> (violeta
-      con trama, borde a rayas largas): desde la vela en que el ID cumple la firma del
+      con trama, borde a rayas largas) — <b>DESACTIVADA de momento</b>, no se dibuja hasta que
+      se revise cómo se cuentan los toques. Cuando vuelva: desde la vela en que el ID cumple la firma del
       propietario —dos toques arriba y dos abajo sin romper— hasta que muere, el rango del ancla
       al extremo. Dentro vale el rango de extremo a extremo, no la estructura de dentro. Empieza
       en el toque que completa la firma, no en la constitución</span>
