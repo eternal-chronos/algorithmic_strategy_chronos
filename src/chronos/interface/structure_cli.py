@@ -69,6 +69,7 @@ from chronos.infrastructure.reporting.session_audit_report import (
     SessionAuditReport,
     render_session_audit,
 )
+from chronos.infrastructure.reporting.timezones import session_label
 from chronos.infrastructure.reporting.zone_captures import write_zone_captures
 from chronos.infrastructure.reporting.zone_report import render_zone_report
 from chronos.infrastructure.structure.aggregation import (
@@ -446,7 +447,8 @@ def _print_entries(entries: EntriesRun) -> None:
         return
     counts = entries.counts()
     console.print(
-        f"\nEntradas ({entries.day.label}, 1:{entries.risk_reward:g}, en {entries.source}): "
+        f"\nEntradas ({entries.day.describe(session_label(entries.day.timezone))}, "
+        f"1:{entries.risk_reward:g}, en {entries.source}): "
         f"{counts['LIMITES']:,} límites, {counts['ENTRADAS']:,} operaciones. "
         "Se ven en el explorador y en entradas.csv."
     )

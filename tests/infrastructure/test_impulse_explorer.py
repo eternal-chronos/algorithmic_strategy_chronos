@@ -3298,7 +3298,8 @@ def test_cada_entrada_viaja_con_lo_que_hace_falta_para_juzgarla(
     assert payload["hasEntries"] is True
     assert payload["entrySource"] == M5
     assert payload["riskReward"] == 4.0
-    assert "America/New_York" in payload["entryDay"]
+    # El reloj se escribe como se lee —`UTC-4`—, no con el nombre IANA al revés.
+    assert "02:00 a 12:00 de UTC-4" in payload["entryDay"]
     registros = payload["entries"]
     assert len(registros) == len(entries.entries)
     for registro in registros:

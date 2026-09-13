@@ -49,8 +49,9 @@ chronos structure verify-tz --config config/impulse.yaml
 # La ESTRUCTURA —el ID del Diario, de H4, de H1 y de M15 con sus zonas UL, PUL y
 # APUL, con la regla del propietario (el UL manda a favor y el ancla en contra)—
 # y LAS ENTRADAS del propietario encima (bloque `entries` del YAML): rotura del
-# PUL y toque de la zona en H1 con M15 detrás, franja de Nueva York, una al día
-# a 1:4. M5 se dibuja con los ID de M15, H1 y H4 detrás. Es lo que hay en `now/`.
+# PUL y toque de la zona en H1 con M15 detrás, franja 02:00-11:59 en el reloj de
+# la plataforma (UTC-4 fijo, el de cTrader), una al día a 1:4. M5 se dibuja con
+# los ID de M15, H1 y H4 detrás. Es lo que hay en `now/`.
 # El explorador embebe los tres LEG_START_MODE de R-36 para poder alternarlos
 # sobre las mismas velas; `--sin-modos-r36` se ahorra las dos corridas extra.
 chronos structure detect --config config/impulse.yaml
@@ -73,7 +74,8 @@ y de M15** con sus tres zonas —el UL a favor y el PUL o el APUL en contra— y
 desde el 2026-09-13, **las entradas del propietario** en su primera forma
 (`src/chronos/application/entries/trades.py`): el Diario manda sobre H4 y H4
 sobre H1, se entra en H1 por rotura del PUL o por toque de la zona con M15
-confirmando, sólo de las 02:00 a las 11:59 de Nueva York, una al día y a 1:4.
+confirmando, sólo de las 02:00 a las 11:59 del reloj de la plataforma —el UTC-4
+fijo de cTrader, no la plaza de Nueva York—, una al día y a 1:4.
 **Sin medición de rentabilidad**: se audita operación a operación en el
 explorador. M5 no lleva detector y sobre ella se dibujan los de M15, H1 y H4.
 Ver [`docs/MODULO_1_IMPULSO_DOMINANTE.md`](docs/MODULO_1_IMPULSO_DOMINANTE.md) y

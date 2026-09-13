@@ -54,7 +54,7 @@ implementada, testeada y con un backtest reproducible.
 | 2.2 | — | *(aparcada: FVG)* | — | — |
 | 3.0 | Señales de entrada | La cascada H4 → H1 con el Diario de veto | **Retirada** (setup 1, borrado del árbol) | — |
 | 3.1 | Entradas | Las operaciones con límite, stop y objetivo | **Retirada** (setup 1, borrado del árbol) | — |
-| 4 | Las entradas del propietario | Diario → H4 → H1 con M15 detrás: rotura del PUL y toque de la zona, franja de Nueva York, una al día a 1:4 | **Primera forma** (2026-09-13), se ajusta mirando el dibujo; sin medición de rentabilidad | `chronos structure detect` |
+| 4 | Las entradas del propietario | Diario → H4 → H1 con M15 detrás: rotura del PUL y toque de la zona, franja en el reloj de la plataforma (UTC-4 fijo), una al día a 1:4 | **Primera forma** (2026-09-13), se ajusta mirando el dibujo; sin medición de rentabilidad | `chronos structure detect` |
 
 ### Estado actual: la estructura con el ID en M15 y las entradas encima
 
@@ -79,8 +79,13 @@ Las entradas, en corto (la regla entera y sus supuestos declarados están en
   PUL) y **toque de la zona** (a favor del ID de H1, en el borde interior de su
   PUL o APUL). El stop va al borde exterior de la zona de H1 o al de la zona en
   contra de M15 si queda más cerca; el objetivo es 1:4;
-- **el reloj**: sólo de las 02:00 a las 11:59 de Nueva York, una operación por
-  día, y a las 16:00 se cierra lo que quede vivo al precio de esa vela.
+- **el reloj**: sólo de las 02:00 a las 11:59, una operación por día, y a las
+  16:00 se cierra lo que quede vivo al precio de esa vela. Las horas son las del
+  reloj de la **plataforma** —el UTC-4 fijo de cTrader, `Etc/GMT+4`, el mismo
+  que escribe el explorador—, no las de la plaza de Nueva York: es el **primer
+  ajuste** (2026-09-13), porque con `America/New_York` el corto del 16-01-2023
+  —rotura del PUL alcista de H1 con M15 bajista, armado a las 06:00 UTC, las
+  02:00 de cTrader y la 01:00 de Nueva York— no salía.
 
 Se entrega dibujado —capa «Entradas» y fondo «Qué se busca» del explorador— y
 en `entradas.csv` y `busqueda.csv`. **No hay medición de rentabilidad** y es a

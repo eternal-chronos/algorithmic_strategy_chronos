@@ -1695,7 +1695,7 @@
     CIERRE_SESION: {
       field: "xe", price: "px", symbol: "hourglass", size: 12,
       name: "Cierre de las 16:00", colour: "ink", outcome: true,
-      title: "CIERRE DE SESIÓN: llegan las 16:00 de Nueva York y la posición se " +
+      title: "CIERRE DE SESIÓN: llegan las 16:00 del reloj de la plataforma y la posición se " +
         "cierra al precio de esa vela, sin haber llegado al stop ni al objetivo"
     },
     cancel: {

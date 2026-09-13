@@ -101,7 +101,7 @@ class EntriesSchema(_Strict):
     #: Las entradas del 2026-09-13. Apagadas por defecto: el fichero tal cual no
     #: abre ninguna operación.
     enabled: bool = False
-    timezone: str = "America/New_York"
+    timezone: str = "Etc/GMT+4"
     window_start: str = "02:00"
     window_end: str = "12:00"
     flat_at: str = "16:00"

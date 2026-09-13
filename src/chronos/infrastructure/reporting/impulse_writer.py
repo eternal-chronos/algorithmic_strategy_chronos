@@ -33,6 +33,7 @@ from chronos.infrastructure.clock import SystemClock
 from chronos.infrastructure.reporting.impulse_captures import write_captures
 from chronos.infrastructure.reporting.impulse_explorer import ModeVariant, render_explorer
 from chronos.infrastructure.reporting.impulse_report import render_report
+from chronos.infrastructure.reporting.timezones import session_label
 from chronos.infrastructure.reporting.zone_report import render_zone_report
 
 
@@ -214,7 +215,7 @@ def _entries_summary(entries: EntriesRun) -> dict[str, object]:
         return {"activas": False}
     return {
         "activas": True,
-        "franja": entries.day.label,
+        "franja": entries.day.describe(session_label(entries.day.timezone)),
         "temporalidad_fina": entries.source,
         "risk_reward": entries.risk_reward,
         "recuento": entries.counts(),

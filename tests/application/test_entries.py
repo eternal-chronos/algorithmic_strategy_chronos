@@ -2,7 +2,7 @@
 
 Lo que se comprueba es sobre todo lo que las entradas NO pueden hacer: no salen
 sin zonas ni sin ID en H1 y M15, no se arman antes de saberse lo que las
-justifica, no entran fuera de la franja de Nueva York, no viven más allá de las
+justifica, no entran fuera de la franja de la plataforma, no viven más allá de las
 16:00, no hay dos en un día y no mueven un solo impulso. Las cuentas de cada
 regla —stop, objetivo, rotura del PUL— están en `tests/domain/entries`.
 """
@@ -48,7 +48,8 @@ from tests.conftest import make_m1_history
 CHARTS = ChartsConfig(
     {DAILY: (DAILY,), H4: (H4,), H1: (H1, H4), M15: (M15, H1, H4), M5: (M15, H1, H4)}
 )
-NY = "America/New_York"
+#: El reloj de la plataforma: el UTC-4 fijo de cTrader.
+PLATFORM = "Etc/GMT+4"
 
 
 def _run(*, entries: bool = True, zones: bool = True, charts: ChartsConfig = CHARTS) -> ImpulseRun:
@@ -87,7 +88,7 @@ def entries(run: ImpulseRun, zones: ZonesRun) -> EntriesRun:
 
 
 def _local(moment: object) -> pd.Timestamp:
-    return pd.Timestamp(moment).tz_convert(NY)
+    return pd.Timestamp(moment).tz_convert(PLATFORM)
 
 
 # --- Cuándo no hay nada -------------------------------------------------------
@@ -169,7 +170,7 @@ def test_el_stop_es_el_mas_cercano_entre_h1_y_m15(entries: EntriesRun) -> None:
             assert item.stop == pytest.approx(max(candidates))
 
 
-# --- El reloj de Nueva York ---------------------------------------------------
+# --- El reloj de la plataforma ------------------------------------------------
 
 
 def test_solo_se_arma_y_se_entra_dentro_de_la_franja(entries: EntriesRun) -> None:
@@ -312,25 +313,38 @@ def test_el_recuento_declara_todos_los_finales(entries: EntriesRun) -> None:
 # --- El día de operativa ------------------------------------------------------
 
 
-def test_la_franja_sigue_el_horario_de_verano_de_nueva_york() -> None:
+def test_la_franja_va_con_el_reloj_fijo_de_la_plataforma() -> None:
+    """Las 02:00 de cTrader son las 06:00 UTC todo el año: el reloj no se mueve
+    con el horario de verano de Nueva York."""
     day = TradingDay()
-    invierno = pd.DatetimeIndex(["2024-01-15 06:59", "2024-01-15 07:00", "2024-01-15 17:00"], tz="UTC")
+    invierno = pd.DatetimeIndex(["2024-01-15 05:59", "2024-01-15 06:00", "2024-01-15 16:00"], tz="UTC")
     verano = pd.DatetimeIndex(["2024-07-15 05:59", "2024-07-15 06:00", "2024-07-15 16:00"], tz="UTC")
 
     assert list(day.in_window(invierno)) == [False, True, False]
     assert list(day.in_window(verano)) == [False, True, False]
 
 
+def test_el_corto_del_propietario_del_16_01_2023_cae_dentro_de_la_franja() -> None:
+    """Primer ajuste (2026-09-13). El ID alcista de H1 rompe su PUL, M15 se pone
+    bajista y el corto se arma al cierre de la vela fina de las 05:55 UTC y se
+    llena en la de las 06:05: las 02:00 de cTrader. En la hora de Nueva York
+    —la 01:00, enero— el motor lo descartaba, y el propietario lo quiere."""
+    velas = pd.DatetimeIndex(["2023-01-16 05:55", "2023-01-16 06:05"], tz="UTC")
+
+    assert list(TradingDay().in_window(velas)) == [False, True]
+    assert list(TradingDay(timezone="America/New_York").in_window(velas)) == [False, False]
+
+
 def test_el_cierre_es_la_ultima_vela_antes_de_las_16_00() -> None:
     day = TradingDay()
-    velas = pd.date_range("2024-01-15 20:45", periods=5, freq="5min", tz="UTC")  # 15:45..16:05 NY
+    velas = pd.date_range("2024-01-15 19:45", periods=5, freq="5min", tz="UTC")  # 15:45..16:05 UTC-4
 
     assert list(day.flat(velas)) == [False, False, True, False, False]
 
 
-def test_el_dia_se_cuenta_en_la_plaza() -> None:
+def test_el_dia_se_cuenta_en_el_reloj_de_la_plataforma() -> None:
     day = TradingDay()
-    velas = pd.DatetimeIndex(["2024-01-15 03:00", "2024-01-15 05:00"], tz="UTC")  # 22:00 y 00:00 NY
+    velas = pd.DatetimeIndex(["2024-01-15 03:00", "2024-01-15 05:00"], tz="UTC")  # 23:00 y 01:00 UTC-4
 
     dias = day.days(velas)
     assert dias[0] != dias[1]

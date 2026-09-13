@@ -68,11 +68,13 @@ def test_el_reparto_de_graficos_del_yaml_es_el_del_propietario() -> None:
 
 
 def test_el_yaml_del_proyecto_lleva_las_entradas_del_propietario() -> None:
-    """Las entradas del 2026-09-13: franja de Nueva York, 1:4 y una por día."""
+    """Las entradas del 2026-09-13: franja en el reloj de la plataforma, 1:4 y
+    una por día. El reloj es el UTC-4 fijo de cTrader —primer ajuste—, no la
+    plaza de Nueva York con horario de verano."""
     config = load_impulse_config(Path("config/impulse.yaml"))
 
     assert config.entries.enabled is True
-    assert config.entries.timezone == "America/New_York"
+    assert config.entries.timezone == "Etc/GMT+4"
     assert config.entries.window_start == "02:00"
     assert config.entries.window_end == "12:00"
     assert config.entries.flat_at == "16:00"

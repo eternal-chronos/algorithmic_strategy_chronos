@@ -259,7 +259,11 @@ def build_payload(
         "entries": _entries(entries),
         "seeking": _seeking(entries),
         "entrySource": entries.source if entries is not None and entries.enabled else None,
-        "entryDay": entries.day.label if entries is not None and entries.enabled else None,
+        "entryDay": (
+            entries.day.describe(session_label(entries.day.timezone))
+            if entries is not None and entries.enabled
+            else None
+        ),
         "riskReward": entries.risk_reward if entries is not None and entries.enabled else None,
         "modes": [_mode_summary(variant) for variant in variants],
         # El modo activo ya viaja en `impulses` y repetirlo aquí costaba 4,5 MB

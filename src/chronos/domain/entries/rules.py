@@ -37,7 +37,7 @@ class TradeOutcome(StrEnum):
 
     OBJETIVO = "OBJETIVO"
     STOP = "STOP"
-    #: Llegaron las 16:00 de Nueva York con la posición viva: se cierra al
+    #: Llegaron las 16:00 de la plataforma con la posición viva: se cierra al
     #: precio de esa vela, ni en ganancia entera ni en pérdida entera.
     CIERRE_SESION = "CIERRE_SESION"
     #: Se acabó el histórico con la posición abierta.
@@ -49,7 +49,7 @@ class OrderEnd(StrEnum):
 
     #: Murió el ID de H1 del que colgaba, o entró en limbo.
     MUERTE_ID_H1 = "MUERTE_ID_H1"
-    #: Se salió de la franja de operativa (las 12:00 de Nueva York).
+    #: Se salió de la franja de operativa (las 12:00 de la plataforma).
     FIN_FRANJA = "FIN_FRANJA"
     #: El Diario o H4 dejaron de permitir esa dirección.
     CAMBIO_CONTEXTO = "CAMBIO_CONTEXTO"

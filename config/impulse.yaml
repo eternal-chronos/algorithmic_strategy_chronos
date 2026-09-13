@@ -288,13 +288,25 @@ zones:
 # El stop va al borde exterior de la zona de H1 o al de la zona en contra del ID
 # de M15 si queda más cerca. El objetivo es siempre 1:4.
 #
-# El reloj es el de Nueva York: sólo se arma y se entra de las 02:00 a las 11:59,
-# la posición viva se cierra a las 16:00 al precio de esa vela y hay UNA
-# operación por día. Nada de esto entra en el `config_hash`: una entrada no mueve
-# un impulso. No hay medición de rentabilidad: lo que se entrega es el dibujo.
+# El reloj es el de la PLATAFORMA —cTrader dibuja en UTC-4 fijo todo el año, el
+# mismo `session_timezone` con el que el explorador escribe las horas—: sólo se
+# arma y se entra de las 02:00 a las 11:59 de ese reloj, la posición viva se
+# cierra a las 16:00 al precio de esa vela y hay UNA operación por día.
+#
+# PRIMER AJUSTE (2026-09-13): la primera forma leía "las 2 de Nueva York" con el
+# horario de verano de la plaza (`America/New_York`) y en invierno eso va una
+# hora por detrás de lo que el propietario ve en su pantalla. Su ejemplo: el
+# 16-01-2023 el ID alcista de H1 rompe su PUL, M15 se pone bajista y el corto
+# se arma a las 06:00 UTC, que en cTrader son las 02:00 y en Nueva York la
+# 01:00; con la plaza el motor no lo daba. Las horas que dicta las lee en la
+# plataforma, así que manda ese reloj: en UTC la franja es 06:00-15:59 y el
+# cierre las 20:00, todo el año.
+#
+# Nada de esto entra en el `config_hash`: una entrada no mueve un impulso. No hay
+# medición de rentabilidad: lo que se entrega es el dibujo.
 entries:
   enabled: true
-  timezone: America/New_York
+  timezone: Etc/GMT+4
   window_start: "02:00"
   window_end: "12:00"
   flat_at: "16:00"

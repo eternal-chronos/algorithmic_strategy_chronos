@@ -331,9 +331,10 @@ class EntriesConfig:
 
     #: Con `False` no se calcula ni se dibuja ninguna entrada.
     enabled: bool = False
-    #: Plaza cuyo reloj manda: la franja y el cierre se leen en su hora local,
-    #: con horario de verano real.
-    timezone: str = "America/New_York"
+    #: Reloj con el que se leen la franja y el cierre. Es el de la PLATAFORMA
+    #: —`Etc/GMT+4`, el UTC-4 fijo con el que dibuja cTrader—, no el de la
+    #: plaza: las horas que dicta el propietario las lee en su pantalla.
+    timezone: str = "Etc/GMT+4"
     #: Sólo se buscan entradas —y sólo se llenan— entre estas dos horas, la
     #: primera incluida y la segunda no: de las 02:00 a las 11:59.
     window_start: str = "02:00"

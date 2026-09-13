@@ -1,19 +1,23 @@
-"""El día de operativa, en la hora de Nueva York.
+"""El día de operativa, en el reloj de la plataforma.
 
 Tres relojes, los tres del propietario (2026-09-13):
 
 - **la franja**: sólo se buscan entradas —y sólo se llenan— de las 02:00 a las
-  11:59 de Nueva York. A las 12:00 en punto ya no se mira nada hasta el día
-  siguiente, y un límite que siga puesto se quita;
-- **el cierre**: una posición viva se cierra a las 16:00 de Nueva York al precio
-  de esa vela, sin esperar al stop ni al objetivo;
-- **el día**: una operación por día, contando por el día de Nueva York en que
-  ENTRA.
+  11:59. A las 12:00 en punto ya no se mira nada hasta el día siguiente, y un
+  límite que siga puesto se quita;
+- **el cierre**: una posición viva se cierra a las 16:00 al precio de esa vela,
+  sin esperar al stop ni al objetivo;
+- **el día**: una operación por día, contando por el día en que ENTRA.
 
-La hora es la de la plaza y no un desfase fijo en UTC: Nueva York abre a la
-misma hora local todo el año, y en UTC la franja se mueve una hora dos veces al
-año. Se resuelve convirtiendo a `America/New_York`, con el mismo criterio que
-el ancla de sesión del corte diario (`NY_17:00`).
+La hora es la de la PLATAFORMA, no la de la plaza (primer ajuste, 2026-09-13).
+cTrader dibuja en UTC-4 fijo todo el año —`Etc/GMT+4`, el mismo reloj con el
+que el explorador escribe las horas— y el propietario dicta "las 2" mirando esa
+pantalla. Leerlo como `America/New_York` daba, en invierno, una hora menos: su
+corto del 16-01-2023 se arma a las 06:00 UTC, que en cTrader son las 02:00 y en
+Nueva York la 01:00, y el motor no lo daba. Con el reloj fijo la franja es
+06:00-15:59 UTC y el cierre las 20:00 UTC, todo el año. Esto es distinto del
+ancla de sesión del corte diario (`NY_17:00`), que sí sigue a la plaza porque
+así arma cTrader las velas.
 
 Todo se responde para una serie entera de una vez: preguntar vela a vela sería
 un bucle Python en el camino caliente.
@@ -35,7 +39,7 @@ from chronos.domain.errors import DomainError
 class TradingDay:
     """La franja, el cierre y el día, resueltos sobre una serie de velas."""
 
-    timezone: str = "America/New_York"
+    timezone: str = "Etc/GMT+4"
     start: time = time(2, 0)
     end: time = time(12, 0)
     flat_at: time = time(16, 0)
@@ -56,11 +60,12 @@ class TradingDay:
             flat_at=_clock(config.flat_at),
         )
 
-    @property
-    def label(self) -> str:
-        """Cómo se escribe allí donde se lee: el explorador y el CSV."""
+    def describe(self, clock: str | None = None) -> str:
+        """Cómo se escribe allí donde se lee. `clock` es el nombre del reloj que
+        se imprime —`UTC-4`— cuando el de la zona se lee al revés (`Etc/GMT+4`).
+        """
         return (
-            f"{_text(self.start)} a {_text(self.end)} de {self.timezone}, "
+            f"{_text(self.start)} a {_text(self.end)} de {clock or self.timezone}, "
             f"cierre a las {_text(self.flat_at)}"
         )
 

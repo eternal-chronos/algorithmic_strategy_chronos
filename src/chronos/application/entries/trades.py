@@ -2,7 +2,7 @@
 
 No es la forma definitiva —se irá ajustando mirando el dibujo— pero es la idea
 plasmada entera: el contexto del Diario y de H4, las dos maneras de entrar en H1
-con M15 detrás, la franja de Nueva York y una operación al día a 1:4. **No hay
+con M15 detrás, la franja horaria y una operación al día a 1:4. **No hay
 medición de rentabilidad** y es a propósito: lo que se entrega es el dibujo.
 
 ## 1. El contexto: el Diario manda sobre H4 y H4 sobre H1
@@ -55,12 +55,18 @@ El stop va al borde exterior de la zona de H1, o al de la zona en contra del ID
 de M15 **si queda más cerca de la entrada**; si el de M15 queda más lejos, se
 deja el de H1 (imagen 4 del propietario). El objetivo es siempre 1:4.
 
-## 3. El reloj: Nueva York
+## 3. El reloj: el de la plataforma
 
-Sólo se buscan y se llenan entradas de las 02:00 a las 11:59 de Nueva York; a
-las 12:00 se quita el límite que siga puesto. Una posición viva se cierra a las
-16:00 al precio de esa vela. **Una operación por día**, contando el día en que
-entra. Si una vela llena el límite y alcanza el stop, manda el stop.
+Sólo se buscan y se llenan entradas de las 02:00 a las 11:59; a las 12:00 se
+quita el límite que siga puesto. Una posición viva se cierra a las 16:00 al
+precio de esa vela. **Una operación por día**, contando el día en que entra. Si
+una vela llena el límite y alcanza el stop, manda el stop.
+
+Las horas son las del reloj de la PLATAFORMA —UTC-4 fijo, el de cTrader y el que
+escribe el explorador—, no las de la plaza de Nueva York (primer ajuste del
+2026-09-13: su corto del 16-01-2023 se arma a las 06:00 UTC, que son las 02:00
+en cTrader y la 01:00 en Nueva York en invierno; con la plaza no salía). Ver
+`trading_day.py`.
 
 ## 4. Qué se dibuja
 
