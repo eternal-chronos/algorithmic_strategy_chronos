@@ -18,7 +18,7 @@ from dataclasses import dataclass, replace
 import pandas as pd
 
 from chronos.application.structure.causal import PriorBarAtr
-from chronos.application.structure.config import ChartsConfig, ImpulseConfig
+from chronos.application.structure.config import ChartsConfig, ImpulseConfig, ZonesConfig
 from chronos.application.structure.detect_impulses import DetectDominantImpulses
 from chronos.domain.structure.body import BodyBar
 from chronos.domain.structure.detector import DominantImpulseDetector
@@ -51,6 +51,25 @@ PHASE1_BASELINE: dict[str, int] = {"D": 401, "H4": 2027}
 #: Era `8e51cd9140c8` cuando H1 llevaba detector y `f2f2a87f8efe` con la sesión
 #: anclada a las 18:00 de Nueva York.
 BASELINE_HASH = "e27d20d0fa4e"
+
+
+
+def phase1_config(config: ImpulseConfig) -> ImpulseConfig:
+    """La configuración de la LÍNEA BASE de la fase 1 a partir de la del fichero.
+
+    El fichero del proyecto ya no es la línea base: corre la estructura con el
+    ID también en H1, las zonas encendidas y la rotura del propietario. La línea
+    base sigue siendo el mismo histórico y la misma rejilla con el reparto por
+    defecto —el ID sólo en el Diario y en H4—, la rotura por línea y sin zonas.
+    Es lo que reproduce `BASELINE_HASH`.
+    """
+    return replace(
+        config,
+        charts=ChartsConfig(),
+        rules=replace(config.rules, break_by_zone=False, break_against_by_zone=True),
+        zones=ZonesConfig(enabled=False),
+    )
+
 
 #: Línea base anterior, con el ancla A2 y el corte diario en 00:00 UTC. Queda
 #: escrita para que quien lea un informe archivado sepa a qué corrida pertenece;
@@ -436,4 +455,5 @@ __all__ = [
     "Evidence",
     "collect",
     "format_counts",
+    "phase1_config",
 ]

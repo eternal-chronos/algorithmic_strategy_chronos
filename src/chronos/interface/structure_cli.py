@@ -18,7 +18,12 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from chronos.application.structure import baseline_comparison
+from chronos.application.structure import (
+    baseline_comparison,
+    break_comparison,
+    break_evidence,
+    zone_evidence,
+)
 from chronos.application.structure.anchor_comparison import AnchorComparison, compare_anchor_modes
 from chronos.application.structure.baseline_comparison import (
     BaselineComparison,
@@ -30,9 +35,10 @@ from chronos.application.structure.config import (
     AggregationConfig,
     ChartsConfig,
     ImpulseConfig,
+    ZonesConfig,
 )
 from chronos.application.structure.detect_impulses import DetectDominantImpulses, ImpulseRun
-from chronos.application.structure.evidence import collect
+from chronos.application.structure.evidence import BASELINE_HASH, PHASE1_BASELINE, collect
 from chronos.application.structure.lateralization import measure
 from chronos.application.structure.session_audit import (
     SessionAudit,
@@ -44,22 +50,26 @@ from chronos.application.structure.session_audit import (
 )
 from chronos.application.structure.statistics import summarize
 from chronos.application.structure.timezone_audit import TimezoneAudit, audit_timezone
+from chronos.application.structure.zones import ZonesRun, detect_zones
 from chronos.domain.errors import DomainError
-from chronos.domain.structure.enums import AnchorMode, LegStartMode
-from chronos.domain.structure.sessions import SessionLevelsRule
+from chronos.domain.structure.enums import AnchorMode, LegStartMode, OverlapPriority
 from chronos.infrastructure.config.loader import ConfigError, load_impulse_config
+from chronos.infrastructure.reporting.break_captures import write_break_captures
+from chronos.infrastructure.reporting.break_report import render_break_report
 from chronos.infrastructure.reporting.impulse_captures import (
     CaptureRequest,
     id_card_figure,
     window_figure,
 )
-from chronos.infrastructure.reporting.impulse_explorer import ModeVariant
+from chronos.infrastructure.reporting.impulse_explorer import ModeVariant, render_explorer
 from chronos.infrastructure.reporting.impulse_report import render_evidence, render_report
 from chronos.infrastructure.reporting.impulse_writer import ImpulseReportWriter
 from chronos.infrastructure.reporting.session_audit_report import (
     SessionAuditReport,
     render_session_audit,
 )
+from chronos.infrastructure.reporting.zone_captures import write_zone_captures
+from chronos.infrastructure.reporting.zone_report import render_zone_report
 from chronos.infrastructure.structure.aggregation import (
     AggregatedSeries,
     aggregate,
@@ -196,16 +206,12 @@ def detect(
             audit=audit,
             provenance=f"{history.provenance} · lado efectivo: {history.side}",
             aggregation_notes=notes,
-            # El alto y el bajo de Asia y de Londres se marcan sobre el M1: a
-            # las 7:58 hay que ver cerrar el minuto 7:57. Y las 7:58 son las del
-            # reloj con el que el propietario mira el gráfico, el mismo que
-            # imprime el explorador: si no, en invierno la marca le saldría a
-            # las 8:58 de su pantalla y ya no le serviría para operar las 8:00.
-            base_bars=history.frame,
-            session_rule=SessionLevelsRule(timezone=run_config.reporting.session_timezone),
         )
         statistics = summarize(run)
         lateralization = measure(run)
+        # Fase 2.0. Respeta el YAML sin discutir: con `zones.enabled: false` esto
+        # devuelve vacío y la corrida sale exactamente como en la fase 1.
+        zones = detect_zones(run)
         # §B: el módulo entero con el otro modo de ancla. R-02 está cerrado, así
         # que por defecto no se ejecuta; queda disponible para regresión.
         anchors = (
@@ -228,6 +234,7 @@ def detect(
             _print_anchor_verdicts(anchors)
             _print_baseline(baseline)
             _print_leg_start_modes(variants)
+            _print_zones(zones)
         if report:
             folder = ImpulseReportWriter(run_config.reporting.output_dir).write(
                 run,
@@ -236,10 +243,13 @@ def detect(
                 lateralization=lateralization,
                 baseline=baseline,
                 variants=variants,
+                zones=zones,
             )
             if folder is not None:
                 console.print(f"\nInforme: [bold]{folder / 'reporte.txt'}[/bold]")
                 console.print(f"Explorador: [bold]{folder / 'explorador.html'}[/bold]")
+                if zones.enabled:
+                    console.print(f"Zonas: [bold]{folder / 'reporte_zonas.txt'}[/bold]")
         else:
             console.print(
                 render_report(
@@ -250,6 +260,441 @@ def detect(
                     baseline=baseline,
                 )
             )
+
+
+@structure_app.command("zonas-evidencia")
+def zones_evidence(
+    config: Annotated[Path, typer.Option("--config", "-c")] = DEFAULT_CONFIG,
+) -> None:
+    """Evidencia de la fase 2.0: esperado y obtenido lado a lado (§9.3).
+
+    Los mismos casos que cubre pytest, pero con las dos columnas a la vista y
+    corridos sobre el histórico de verdad: el día sintético del §6 en sus dos
+    direcciones, las cuatro vías del `LookaheadError`,
+    el apagado y la regresión de la línea base **con las zonas encendidas**.
+    """
+    with _handled():
+        run_config = load_impulse_config(config)
+        history = load_history(run_config.data, run_config.structure_side)
+        series, _ = _aggregate_available(history, run_config)
+        collected = zone_evidence.collect(
+            run_config,
+            {
+                timeframe: aggregated.frame
+                for timeframe, aggregated in series.items()
+                if timeframe in run_config.charts.detected
+            },
+        )
+        console.print(render_evidence(collected, "Z. Evidencia de la fase 2.0 · zonas UL y PUL"))
+        if not collected.ok:
+            raise typer.Exit(code=1)
+
+
+@structure_app.command("zonas")
+def zones_command(
+    config: Annotated[Path, typer.Option("--config", "-c")] = DEFAULT_CONFIG,
+    output: Annotated[Path, typer.Option("--salida", "-o")] = Path("now/fase20"),
+    captures: Annotated[bool, typer.Option("--capturas/--sin-capturas")] = True,
+    respect_config: Annotated[
+        bool,
+        typer.Option(
+            "--respetar-config/--forzar-zonas",
+            help=(
+                "Obedecer `zones.enabled` del YAML en vez de encender las zonas para "
+                "esta corrida. Con las zonas apagadas el comando no tiene nada que hacer."
+            ),
+        ),
+    ] = False,
+    skip_tz_audit: Annotated[bool, typer.Option("--skip-tz-audit")] = False,
+) -> None:
+    """Fase 2.0: detecta y dibuja las zonas UL y PUL de cada impulso (§7 y §8).
+
+    **Sólo detección.** No cambia la detección del impulso dominante, no cambia
+    la regla de rotura —que sigue siendo por línea— y no emite ninguna señal. La
+    corrida verifica de paso que el recuento de impulsos y el `config_hash` son
+    los mismos con las zonas puestas que sin ellas.
+
+    Este comando enciende las zonas para su propia corrida, porque correrlo con
+    ellas apagadas no produciría nada; `chronos structure detect` sigue
+    obedeciendo el YAML sin discutir. Con `--respetar-config` se comporta igual
+    que `detect`.
+    """
+    with _handled():
+        run_config = load_impulse_config(config)
+        if not run_config.enabled:
+            console.print(
+                "[yellow]El módulo de impulso dominante está desactivado "
+                "(`enabled: false`). Sin impulsos no hay zonas.[/yellow]"
+            )
+            return
+        if not respect_config and not run_config.zones.enabled:
+            console.print(
+                "[dim]Zonas encendidas para esta corrida (el YAML las trae apagadas). "
+                "Con --respetar-config se obedece el fichero.[/dim]"
+            )
+            run_config = replace(run_config, zones=ZonesConfig(enabled=True))
+        if not run_config.zones.enabled:
+            console.print(
+                "[yellow]`zones.enabled: false` y se ha pedido respetar la "
+                "configuración: no hay nada que calcular.[/yellow]"
+            )
+            return
+
+        history = load_history(run_config.data, run_config.structure_side)
+        audit = _audit_or_stop(run_config, history, skip_tz_audit)
+        series, skipped = _aggregate_available(history, run_config)
+        aggregated = {tf: item.frame for tf, item in series.items()}
+
+        run = DetectDominantImpulses(run_config).execute(
+            aggregated,
+            audit=audit,
+            provenance=f"{history.provenance} · lado efectivo: {history.side}",
+            aggregation_notes=[item.description for item in series.values()] + skipped,
+        )
+        zones = detect_zones(run)
+
+        # La comprobación que el enunciado exige a la vista: con las zonas
+        # apagadas sobre las mismas velas tienen que salir los mismos impulsos.
+        without = DetectDominantImpulses(
+            replace(run_config, zones=ZonesConfig(enabled=False))
+        ).execute(aggregated)
+        _print_zone_regression(run, without)
+        _print_zones(zones)
+
+        output.mkdir(parents=True, exist_ok=True)
+        report = output / "reporte_zonas.txt"
+        report.write_text(render_zone_report(run, zones), encoding="utf-8")
+        # §9.3: el esperado y el obtenido, lado a lado, en la misma carpeta que
+        # los números. Es el mismo panel que imprime `zonas-evidencia`.
+        evidence = zone_evidence.collect(run_config, aggregated)
+        (output / "evidencia_zonas.txt").write_text(
+            render_evidence(evidence, "Z. Evidencia de la fase 2.0 · zonas UL y PUL"), encoding="utf-8"
+        )
+        if not evidence.ok:
+            console.print(
+                "\n[bold red]La evidencia de la fase 2.0 NO pasa.[/bold red] "
+                f"Revisa {output / 'evidencia_zonas.txt'}."
+            )
+        zones.table().to_csv(output / "zonas.csv", index=False)
+        zones.survivals().to_csv(output / "roturas_y_zonas.csv", index=False)
+        console.print(f"\nInforme: [bold]{report}[/bold]")
+        console.print(f"Tabla de zonas: [bold]{output / 'zonas.csv'}[/bold]")
+
+        # El explorador con las dos capas encendidas, para que la carpeta de la
+        # fase 2.0 se pueda auditar sin abrir la del informe de la fase 1.
+        explorer = output / "explorador_zonas.html"
+        explorer.write_text(
+            render_explorer(
+                run,
+                run_config.reporting.max_explorer_bars,
+                lateralization=measure(run),
+                zones=zones,
+            ),
+            encoding="utf-8",
+        )
+        console.print(f"Explorador: [bold]{explorer}[/bold]")
+
+        if captures:
+            console.print("[dim]Capturas (Kaleido abre un navegador por imagen)...[/dim]")
+            written = write_zone_captures(
+                run, zones, output, session_timezone=run_config.reporting.session_timezone
+            )
+            console.print(f"  [dim]{len(written)} capturas en {output}[/dim]")
+            console.print(f"Índice de capturas: [bold]{output / 'LEEME.txt'}[/bold]")
+
+
+def _print_zone_regression(run: ImpulseRun, without: ImpulseRun) -> None:
+    """Las zonas no pueden mover ni un impulso, y se enseña en vez de prometerlo."""
+    table = Table(box=None, pad_edge=False)
+    table.add_column("Temporalidad", style="dim")
+    table.add_column("Impulsos con zonas", justify="right")
+    table.add_column("Impulsos sin zonas", justify="right")
+    table.add_column("", justify="left")
+    ok = run.config_hash == without.config_hash
+    for timeframe, analysis in run.analyses.items():
+        other = len(without.analyses[timeframe].impulses)
+        same = len(analysis.impulses) == other
+        ok = ok and same
+        table.add_row(
+            timeframe,
+            f"{len(analysis.impulses):,}",
+            f"{other:,}",
+            "[green]igual[/green]" if same else "[bold red]DISTINTO[/bold red]",
+        )
+    console.print("\n[bold]Las zonas no tocan la detección:[/bold]")
+    console.print(table)
+    console.print(
+        f"[dim]hash con zonas {run.config_hash} · sin zonas {without.config_hash}[/dim]"
+    )
+    if not ok:
+        console.print(
+            "[bold red]FALLO:[/bold red] encender las zonas ha movido la detección. "
+            "Eso es un defecto de la fase 2.0, no un resultado."
+        )
+        raise typer.Exit(code=1)
+
+
+def _print_zones(zones: ZonesRun) -> None:
+    if not zones.enabled:
+        return
+    table = Table(box=None, pad_edge=False)
+    table.add_column("Temporalidad", style="dim")
+    table.add_column("ID", justify="right")
+    table.add_column("Con PUL", justify="right")
+    table.add_column("Con APUL", justify="right")
+    table.add_column("APUL heredado", justify="right")
+    table.add_column("APUL extremo contrario", justify="right")
+    table.add_column("SIN ZONA", justify="right")
+    table.add_column("UL altura cero", justify="right")
+    table.add_column("UL extendidos", justify="right")
+    for timeframe, item in zones.per_timeframe.items():
+        total = len(item.items)
+        without = len(item.without_against_zone)
+        table.add_row(
+            timeframe,
+            f"{total:,}",
+            f"{len(item.with_penultimate):,}",
+            f"{len(item.with_ante_penultimate):,}",
+            f"{len(item.with_inherited_ante_penultimate):,}",
+            f"{len(item.with_counter_extreme_ante_penultimate):,}",
+            f"{without:,} ({without / total:.1%})" if total else "—",
+            f"{sum(1 for zoned in item.items if zoned.last.is_flat):,}",
+            f"{sum(1 for zoned in item.items if zoned.last.extended):,}",
+        )
+    console.print("\n[bold]Zonas de la fase 2.0:[/bold]")
+    console.print(table)
+    console.print(
+        "[dim]El % SIN ZONA es la cifra que manda: en la fase 2.1 esos ID —los que no "
+        "tienen ID anterior— se romperán por línea en el lado en contra.[/dim]"
+    )
+
+
+@structure_app.command("rotura-por-zona")
+def break_by_zone_command(
+    config: Annotated[Path, typer.Option("--config", "-c")] = DEFAULT_CONFIG,
+    output: Annotated[Path, typer.Option("--salida", "-o")] = Path("now/fase21"),
+    captures: Annotated[bool, typer.Option("--capturas/--sin-capturas")] = True,
+    skip_tz_audit: Annotated[bool, typer.Option("--skip-tz-audit")] = False,
+) -> None:
+    """Fase 2.1: la zona decide la vida y la muerte del impulso (§6, §7 y §8).
+
+    Ejecuta el módulo **entero** dos veces sobre las mismas velas —con la rotura
+    por línea y con la rotura por zona— y las compara. No reetiqueta ninguna
+    tabla: salvar una rotura cambia toda la historia posterior.
+
+    Antes de nada verifica que con `BREAK_BY_ZONE = false` sale la línea base
+    exacta. Si no sale, **para y avisa**: eso sería un bug de la refactorización
+    y no un resultado.
+
+    El comando enciende la regla nueva para su propia corrida, porque correrlo
+    con ella apagada no compararía nada; `chronos structure detect` sigue
+    obedeciendo el YAML sin discutir.
+    """
+    with _handled():
+        run_config = load_impulse_config(config)
+        if not run_config.enabled:
+            console.print(
+                "[yellow]El módulo de impulso dominante está desactivado "
+                "(`enabled: false`). No hay nada que romper.[/yellow]"
+            )
+            return
+
+        history = load_history(run_config.data, run_config.structure_side)
+        audit = _audit_or_stop(run_config, history, skip_tz_audit)
+        series, skipped = _aggregate_available(history, run_config)
+        aggregated = {tf: item.frame for tf, item in series.items()}
+        notes = [item.description for item in series.values()] + skipped
+        provenance = f"{history.provenance} · lado efectivo: {history.side}"
+
+        # Las zonas se encienden en las dos corridas: la fase 2.0 mide y dibuja,
+        # y su medición del solape hace falta con las dos reglas para el §6.8.
+        base_config = replace(
+            run_config,
+            rules=replace(run_config.rules, break_by_zone=False),
+            zones=ZonesConfig(enabled=True),
+        )
+        zoned_config = replace(
+            run_config,
+            rules=replace(run_config.rules, break_by_zone=True),
+            zones=ZonesConfig(enabled=True),
+        )
+        other = (
+            OverlapPriority.EN_CONTRA_FIRST
+            if run_config.rules.overlap_priority is OverlapPriority.A_FAVOR_FIRST
+            else OverlapPriority.A_FAVOR_FIRST
+        )
+        alternative_config = replace(
+            zoned_config, rules=replace(zoned_config.rules, overlap_priority=other)
+        )
+
+        console.print("[dim]Corrida con la rotura por LÍNEA (línea base)...[/dim]")
+        baseline = DetectDominantImpulses(base_config).execute(
+            aggregated, audit=audit, provenance=provenance, aggregation_notes=notes
+        )
+        ok, note = _print_break_regression(baseline)
+        if not ok:
+            raise typer.Exit(code=1)
+
+        console.print("[dim]Corrida con la rotura por ZONA...[/dim]")
+        zoned = DetectDominantImpulses(zoned_config).execute(
+            aggregated, audit=audit, provenance=provenance, aggregation_notes=notes
+        )
+        console.print(
+            f"[dim]Corrida con el otro OVERLAP_PRIORITY ({other.value})...[/dim]"
+        )
+        alternative = DetectDominantImpulses(alternative_config).execute(aggregated)
+
+        comparison = break_comparison.compare(
+            baseline,
+            zoned,
+            baseline_zones=detect_zones(baseline),
+            zoned_zones=detect_zones(zoned),
+            alternative=alternative,
+        )
+        _print_break_summary(baseline, zoned, comparison)
+
+        output.mkdir(parents=True, exist_ok=True)
+        report = output / "reporte_rotura_por_zona.txt"
+        report.write_text(
+            render_break_report(
+                baseline,
+                zoned,
+                comparison,
+                regression_ok=ok,
+                regression_note=note,
+            ),
+            encoding="utf-8",
+        )
+
+        evidence = break_evidence.collect(zoned_config, aggregated)
+        (output / "evidencia_rotura_por_zona.txt").write_text(
+            render_evidence(evidence, break_evidence.TITLE), encoding="utf-8"
+        )
+        if not evidence.ok:
+            console.print(
+                "\n[bold red]La evidencia de la fase 2.1 NO pasa.[/bold red] "
+                f"Revisa {output / 'evidencia_rotura_por_zona.txt'}."
+            )
+
+        zoned.table().to_csv(output / "impulsos_regla_nueva.csv", index=False)
+        baseline.table().to_csv(output / "impulsos_linea_base.csv", index=False)
+        break_comparison.avoided_table(zoned).to_csv(
+            output / "roturas_evitadas.csv", index=False
+        )
+        break_comparison.break_table(zoned).to_csv(
+            output / "roturas_regla_nueva.csv", index=False
+        )
+        console.print(f"\nInforme: [bold]{report}[/bold]")
+        console.print(f"Evidencia: [bold]{output / 'evidencia_rotura_por_zona.txt'}[/bold]")
+        console.print(f"Roturas evitadas: [bold]{output / 'roturas_evitadas.csv'}[/bold]")
+
+        explorer = output / "explorador_rotura_por_zona.html"
+        explorer.write_text(
+            render_explorer(
+                zoned,
+                run_config.reporting.max_explorer_bars,
+                lateralization=measure(zoned),
+                zones=detect_zones(zoned),
+            ),
+            encoding="utf-8",
+        )
+        console.print(f"Explorador: [bold]{explorer}[/bold]")
+
+        if captures:
+            console.print("[dim]Capturas (Kaleido abre un navegador por imagen)...[/dim]")
+            written = write_break_captures(baseline, zoned, alternative, output)
+            console.print(f"  [dim]{len(written)} capturas en {output}[/dim]")
+            console.print(f"Índice de capturas: [bold]{output / 'LEEME.txt'}[/bold]")
+
+
+def _print_break_regression(baseline: ImpulseRun) -> tuple[bool, str]:
+    """§3: con la regla apagada tienen que salir la línea base y su hash."""
+    detected = {tf: len(a.impulses) for tf, a in baseline.analyses.items()}
+    published = {tf: len(a.published) for tf, a in baseline.analyses.items()}
+    expected_detected = {tf: PHASE1_BASELINE[tf] for tf in detected if tf in PHASE1_BASELINE}
+    expected_published = {
+        tf: break_evidence.PHASE1_BASELINE_PUBLISHED[tf]
+        for tf in published
+        if tf in break_evidence.PHASE1_BASELINE_PUBLISHED
+    }
+    ok = (
+        baseline.config_hash == BASELINE_HASH
+        and detected == expected_detected
+        and published == expected_published
+    )
+
+    table = Table(box=None, pad_edge=False)
+    table.add_column("Concepto", style="dim")
+    table.add_column("Esperado")
+    table.add_column("Obtenido")
+    table.add_column("", justify="left")
+    for label, expected, obtained in (
+        ("config_hash", BASELINE_HASH, baseline.config_hash),
+        ("detectados", _counts(expected_detected), _counts(detected)),
+        ("publicados", _counts(expected_published), _counts(published)),
+    ):
+        same = expected == obtained
+        table.add_row(
+            label,
+            expected,
+            obtained,
+            "[green]igual[/green]" if same else "[bold red]DISTINTO[/bold red]",
+        )
+    console.print("\n[bold]Regresión con BREAK_BY_ZONE = false:[/bold]")
+    console.print(table)
+
+    note = (
+        f"hash {baseline.config_hash} · detectados {_counts(detected)} · "
+        f"publicados {_counts(published)}"
+    )
+    if not ok:
+        console.print(
+            "\n[bold red]PARADA.[/bold red] Con la regla apagada no sale la línea base. "
+            "Eso es un bug de la refactorización, no un resultado: no se sigue."
+        )
+    return ok, note
+
+
+def _counts(counts: dict[str, int]) -> str:
+    return " / ".join(f"{tf} {value:,}" for tf, value in counts.items())
+
+
+def _print_break_summary(
+    baseline: ImpulseRun,
+    zoned: ImpulseRun,
+    comparison: break_comparison.BreakRuleComparison,
+) -> None:
+    table = Table(box=None, pad_edge=False)
+    table.add_column("Temporalidad", style="dim")
+    table.add_column("ID antes", justify="right")
+    table.add_column("ID después", justify="right")
+    table.add_column("Variación", justify="right")
+    table.add_column("Evitadas", justify="right")
+    table.add_column("Rotura por línea", justify="right")
+    table.add_column("Conflictos", justify="right")
+    for timeframe, analysis in zoned.analyses.items():
+        before = len(baseline.analyses[timeframe].impulses)
+        after = len(analysis.impulses)
+        diagnostics = analysis.diagnostics
+        by_line = (
+            diagnostics["roturas_a_favor_por_linea"]
+            + diagnostics["roturas_en_contra_por_linea"]
+        )
+        table.add_row(
+            timeframe,
+            f"{before:,}",
+            f"{after:,}",
+            f"{(after - before) / before:+.1%}" if before else "n/d",
+            f"{len(analysis.avoided):,}",
+            f"{by_line:,}",
+            f"{diagnostics['conflictos_de_solape']:,}",
+        )
+    console.print("\n[bold]Rotura por zona · la nueva línea base:[/bold]")
+    console.print(table)
+    console.print(
+        f"[dim]hash antes {comparison.baseline_hash} · después {comparison.zoned_hash} · "
+        f"otro orden {comparison.alternative_hash}[/dim]"
+    )
 
 
 @structure_app.command("ficha")

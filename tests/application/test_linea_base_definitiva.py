@@ -23,6 +23,11 @@ Las cifras anteriores quedan archivadas como provisionales y no se comprueban:
 00:00 UTC, con las velas fantasma del domingo dentro) y `368ad3617bd9` con
 462 / 2.038 / 7.231 (ya con A1, todavía con el corte en 00:00).
 
+El fichero del proyecto ya no ES la línea base: corre la estructura con el ID
+también en H1, las zonas encendidas y la rotura del propietario. La línea base
+se reconstruye desde él con `phase1_config` —mismo histórico y misma rejilla,
+reparto por defecto, rotura por línea y sin zonas— y es eso lo que se comprueba.
+
 El recuento exige el histórico M1 real, así que se salta si no está descargado.
 El hash no depende de ningún dato y se comprueba siempre.
 """
@@ -36,7 +41,7 @@ import pytest
 
 from chronos.application.structure.config import ImpulseConfig
 from chronos.application.structure.detect_impulses import DetectDominantImpulses
-from chronos.application.structure.evidence import BASELINE_HASH, PHASE1_BASELINE
+from chronos.application.structure.evidence import BASELINE_HASH, PHASE1_BASELINE, phase1_config
 from chronos.domain.structure.enums import AnchorMode, LegStartMode
 from chronos.infrastructure.config.loader import load_impulse_config
 
@@ -57,7 +62,7 @@ BASELINE_SESSION_START = "NY_17:00"
 def config() -> ImpulseConfig:
     if not CONFIG.exists():
         pytest.skip("no hay config/impulse.yaml")
-    return load_impulse_config(CONFIG)
+    return phase1_config(load_impulse_config(CONFIG))
 
 
 def test_el_yaml_lleva_la_configuracion_definitiva(config: ImpulseConfig) -> None:
@@ -71,7 +76,7 @@ def test_el_yaml_lleva_la_configuracion_definitiva(config: ImpulseConfig) -> Non
     assert anchor is not None and anchor.timezone == "America/New_York"
 
 
-def test_el_yaml_produce_el_hash_de_la_linea_base(config: ImpulseConfig) -> None:
+def test_la_linea_base_produce_su_hash(config: ImpulseConfig) -> None:
     """`L1_actual` se omite del hash justamente para esto (ver `fingerprint`)."""
     assert config.fingerprint() == BASELINE_HASH
 

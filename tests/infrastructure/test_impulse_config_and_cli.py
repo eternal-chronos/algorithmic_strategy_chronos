@@ -47,21 +47,34 @@ def test_el_yaml_del_proyecto_carga_y_declara_los_parametros_abiertos() -> None:
 
 
 def test_el_reparto_de_graficos_del_yaml_es_el_del_propietario() -> None:
-    """Cada uno con el suyo, y H1, M15 y M5 con el de H4.
+    """El ID vive en el Diario, en H4 y en H1; M15 y M5 llevan los de H1 y H4.
 
-    El ID vive sólo en el Diario y en H4: a H1, M15 y M5 no se les marca ID. Y
-    el Diario se dibuja SÓLO en su gráfico: en H4 no se ve nada suyo.
+    Sobre H1 se dibuja además el de H4 como contexto. El Diario se dibuja SÓLO
+    en su gráfico: en H4 no se ve nada suyo.
     """
     charts = load_impulse_config(Path("config/impulse.yaml")).charts
 
     assert charts.charts == ("D", "H4", "H1", "M15", "M5")
     assert charts.overlays("D") == ("D",)
     assert charts.overlays("H4") == ("H4",)
-    assert charts.overlays("H1") == ("H4",)
-    assert charts.overlays("M15") == ("H4",)
-    assert charts.overlays("M5") == ("H4",)
-    # H1, M15 y M5 se dibujan pero no llevan detector propio.
-    assert charts.detected == ("D", "H4")
+    assert charts.overlays("H1") == ("H1", "H4")
+    assert charts.overlays("M15") == ("H1", "H4")
+    assert charts.overlays("M5") == ("H1", "H4")
+    # M15 y M5 se dibujan pero no llevan detector propio.
+    assert charts.detected == ("D", "H4", "H1")
+
+
+def test_el_yaml_del_proyecto_corre_la_estructura_con_la_regla_del_propietario() -> None:
+    """Zonas encendidas y la rotura del propietario: el UL manda a favor y el
+    ancla en contra. Es la corrida de la estructura, no la línea base."""
+    config = load_impulse_config(Path("config/impulse.yaml"))
+
+    assert config.zones.enabled is True
+    assert config.rules.break_by_zone is True
+    assert config.rules.break_against_by_zone is False
+    # El defecto del dataclass sigue siendo la línea base de la fase 1.
+    assert ImpulseConfig().rules.break_by_zone is False
+    assert ImpulseConfig().rules.break_against_by_zone is True
 
 
 def test_un_reparto_invalido_se_rechaza_al_cargar(tmp_path: Path) -> None:
@@ -282,3 +295,36 @@ def test_el_hash_de_la_corrida_queda_en_el_csv_y_en_run_json(workspace: Path) ->
     ).fingerprint()
     assert set(tabla["config_hash"]) == {esperado}
     assert esperado in (carpeta / "run.json").read_text(encoding="utf-8")
+
+
+# --- La estructura: ID en Diario, H4 y H1 con sus zonas --------------------
+
+
+def test_detect_dibuja_la_estructura_con_la_regla_del_propietario(workspace: Path) -> None:
+    """La misma corrida del fichero del proyecto: ID propio en H1, zonas
+    encendidas y el UL mandando a favor con el ancla en contra.
+
+    El explorador la declara en su cabecera y es ahí donde se comprueba, porque
+    es lo que lee quien audita.
+    """
+    _write_run(
+        workspace,
+        make_m1_history(weeks=10),
+        charts={"D": ["D"], "H4": ["H4"], "H1": ["H1", "H4"], "M15": ["H1", "H4"], "M5": ["H1", "H4"]},
+        rules={"warmup_bars": 5, "break_by_zone": True, "break_against_by_zone": False},
+        zones={"enabled": True},
+    )
+    result = runner.invoke(
+        app, ["structure", "detect", "--config", str(workspace / "impulse.yaml")]
+    )
+
+    assert result.exit_code == 0, result.stdout
+    carpeta = next(iter((workspace / "out").iterdir()))
+    tabla = pd.read_csv(carpeta / "impulsos.csv")
+    assert set(tabla["timeframe"]) == {"D", "H4", "H1"}
+    html = (carpeta / "explorador.html").read_text(encoding="utf-8")
+    assert '"charts":["D","H4","H1","M15","M5"]' in html
+    assert '"hasZones":true' in html
+    assert '"breakAgainstByZone":false' in html
+    assert "rotura por el UL a favor y por línea del ancla en contra" in html
+    assert "rotura por ZONA" not in html

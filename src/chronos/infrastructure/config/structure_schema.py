@@ -19,8 +19,15 @@ from chronos.application.structure.config import (
     StructureDataConfig,
     StructureReportingConfig,
     TimezoneAuditConfig,
+    ZonesConfig,
 )
-from chronos.domain.structure.enums import AnchorMode, DojiBreakMode, LegStartMode, SeedMode
+from chronos.domain.structure.enums import (
+    AnchorMode,
+    DojiBreakMode,
+    LegStartMode,
+    OverlapPriority,
+    SeedMode,
+)
 
 
 class _Strict(BaseModel):
@@ -57,6 +64,12 @@ class ImpulseRulesSchema(_Strict):
     leg_start_mode: Literal[
         "L1_actual", "L2_siguiente_barra", "L3_extremo_solo_color_valido"
     ] = "L1_actual"
+    #: Fase 2.1. Apagado por defecto: el fichero tal cual reproduce la línea base.
+    break_by_zone: bool = False
+    #: Sólo cuenta con `break_by_zone: true`. `false` es la regla del
+    #: propietario: el UL manda a favor y el ancla en contra.
+    break_against_by_zone: bool = True
+    overlap_priority: Literal["a_favor_primero", "en_contra_primero"] = "a_favor_primero"
     warmup_bars: int = Field(default=50, ge=0)
     atr_period: int = Field(default=14, ge=1)
 
@@ -66,9 +79,21 @@ class ImpulseRulesSchema(_Strict):
             seed_mode=SeedMode(self.seed_mode),
             doji_break_mode=DojiBreakMode(self.doji_break_mode),
             leg_start_mode=LegStartMode(self.leg_start_mode),
+            break_by_zone=self.break_by_zone,
+            break_against_by_zone=self.break_against_by_zone,
+            overlap_priority=OverlapPriority(self.overlap_priority),
             warmup_bars=self.warmup_bars,
             atr_period=self.atr_period,
         )
+
+
+class ZonesSchema(_Strict):
+    #: Fase 2.0. Apagadas por defecto: la línea base de la fase 1 se reproduce
+    #: con este fichero tal cual, sin tocar nada.
+    enabled: bool = False
+
+    def to_domain(self) -> ZonesConfig:
+        return ZonesConfig(**self.model_dump())
 
 
 class TimezoneAuditSchema(_Strict):
@@ -104,6 +129,7 @@ class ImpulseSchema(_Strict):
     #: reparto por defecto, que es el que usa el propietario.
     charts: dict[str, list[str]] | None = None
     rules: ImpulseRulesSchema = Field(default_factory=ImpulseRulesSchema)
+    zones: ZonesSchema = Field(default_factory=ZonesSchema)
     timezone_audit: TimezoneAuditSchema = Field(default_factory=TimezoneAuditSchema)
     reporting: StructureReportingSchema = Field(default_factory=StructureReportingSchema)
 
@@ -122,6 +148,7 @@ class ImpulseSchema(_Strict):
                 )
             ),
             rules=self.rules.to_domain(),
+            zones=self.zones.to_domain(),
             timezone_audit=self.timezone_audit.to_domain(),
             reporting=self.reporting.to_domain(),
         )

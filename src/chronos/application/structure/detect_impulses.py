@@ -17,19 +17,19 @@ import numpy as np
 import pandas as pd
 
 from chronos.application.structure.causal import PriorBarAtr
-from chronos.application.structure.config import PATTERN_CHARTS, ImpulseConfig
+from chronos.application.structure.config import ImpulseConfig
 from chronos.application.structure.timezone_audit import TimezoneAudit
 from chronos.domain.errors import DomainError
 from chronos.domain.structure.body import BodyBar
 from chronos.domain.structure.detector import DominantImpulseDetector
-from chronos.domain.structure.impulse import BarState, BreakEvent, DominantImpulse
-from chronos.domain.structure.patterns import (
-    DEFAULT_RULE,
-    PATTERN_COLUMNS,
-    PatternRule,
-    patterns_inside,
+from chronos.domain.structure.impulse import (
+    AbortedConstitution,
+    BarState,
+    BreakEvent,
+    DominantImpulse,
 )
-from chronos.domain.structure.sessions import OWNER_RULE, SessionLevelsRule, session_levels
+from chronos.domain.structure.zone_break import AvoidedBreak, ZoneBreakLevels
+from chronos.domain.structure.zones import CandleSeries
 
 #: Columnas exigidas por §5.1, en su orden. Las que van detrás son material de
 #: auditoría (comparativa de anclas, arranque de la pierna) y no sustituyen a
@@ -73,6 +73,13 @@ AUDIT_COLUMNS = (
     #: reloj y cero velas.
     "indice_constitucion",
     "indice_fin",
+    #: Fase 2.1. De dónde salió el nivel que mató al ID —`linea`, `UL` o `PUL`— y
+    #: cuántas veces su extremo se estiró estando ya vigente, que en la fase 1
+    #: era imposible. Con `break_by_zone: false` la primera es siempre `linea` y
+    #: la segunda siempre cero.
+    "origen_nivel_rotura",
+    "extensiones_extremo",
+    "precio_extremo_al_constituirse",
 )
 
 
@@ -87,6 +94,12 @@ class TimeframeAnalysis:
     states: tuple[BarState, ...]
     table: pd.DataFrame
     diagnostics: dict[str, int]
+    #: Fase 2.1: velas que la regla antigua habría llamado rotura y la nueva ha
+    #: salvado. Vacío con `break_by_zone: false`.
+    avoided: tuple[AvoidedBreak, ...] = ()
+    #: Velas contrarias que no llegaron a constituir porque el ID habría nacido
+    #: ya roto. Ahí no hay rombo de constitución y sí un giro de pierna.
+    aborted: tuple[AbortedConstitution, ...] = ()
 
     @property
     def published(self) -> tuple[DominantImpulse, ...]:
@@ -108,17 +121,6 @@ class ImpulseRun:
     audit: TimezoneAudit | None = None
     provenance: str = ""
     aggregation_notes: tuple[str, ...] = ()
-    #: El alto y el bajo de Asia y de Londres, marcados cada día a las 7:58 de
-    #: Nueva York sobre el histórico base (M1). `None` cuando la corrida no
-    #: recibió ese histórico: entonces no hay marcas, no marcas vacías.
-    sessions: pd.DataFrame | None = None
-    session_rule: SessionLevelsRule = OWNER_RULE
-    #: El OB y el FVG dentro del ID (K.1), una tabla por gráfico que los marca
-    #: según `PATTERN_CHARTS`: en el Diario y en H4 los de sus propias velas
-    #: dentro de su propio ID, en H1 los de sus velas dentro del ID de H4. Un
-    #: gráfico que no está aquí no marca ninguno.
-    patterns: dict[str, pd.DataFrame] = field(default_factory=dict)
-    pattern_rule: PatternRule = DEFAULT_RULE
 
     @property
     def emits_nothing(self) -> bool:
@@ -132,16 +134,6 @@ class ImpulseRun:
             return pd.DataFrame(columns=[*TABLE_COLUMNS, *AUDIT_COLUMNS])
         combined = pd.concat(frames, ignore_index=True)
         return combined.sort_values(["timeframe", "ts_constitucion"]).reset_index(drop=True)
-
-    def patterns_table(self) -> pd.DataFrame:
-        """Los OB y FVG de todos los gráficos en una tabla, ya ordenada."""
-        frames = [frame for frame in self.patterns.values() if not frame.empty]
-        if not frames:
-            return pd.DataFrame(columns=list(PATTERN_COLUMNS))
-        combined = pd.concat(frames, ignore_index=True)
-        return combined.sort_values(["timeframe", "ts_conocido", "ts_origen"]).reset_index(
-            drop=True
-        )
 
 
 class DetectDominantImpulses:
@@ -157,16 +149,9 @@ class DetectDominantImpulses:
         audit: TimezoneAudit | None = None,
         provenance: str = "",
         aggregation_notes: Sequence[str] = (),
-        base_bars: pd.DataFrame | None = None,
-        session_rule: SessionLevelsRule = OWNER_RULE,
-        pattern_rule: PatternRule = DEFAULT_RULE,
     ) -> ImpulseRun:
         """`series` trae las velas de cada gráfico; el detector sólo corre en las
-        temporalidades que el reparto declara como impulso.
-
-        `base_bars` es el histórico M1 del que salieron las velas: sobre él se
-        marcan el alto y el bajo de Asia y de Londres, que a las 7:58 necesitan
-        ver cerrar el minuto 7:57 y ninguna vela agregada lo ve."""
+        temporalidades que el reparto declara como impulso."""
         config_hash = self._config.fingerprint()
         if not self._config.enabled:
             # Módulo apagado: no se procesa ni una barra y no se emite nada.
@@ -184,19 +169,6 @@ class DetectDominantImpulses:
             timeframe: self._analyse(timeframe, series[timeframe], config_hash)
             for timeframe in detected
         }
-        # K.1: el OB y el FVG de cada gráfico, dentro del ID que le toca. Sólo
-        # donde hay velas del gráfico y detector del ID que lo acota.
-        patterns = {
-            chart: patterns_inside(
-                series[chart],
-                timeframe=chart,
-                impulses=analyses[id_timeframe].published,
-                id_bars=analyses[id_timeframe].bars,
-                rule=pattern_rule,
-            )
-            for chart, id_timeframe in PATTERN_CHARTS.items()
-            if chart in series and id_timeframe in analyses
-        }
         return ImpulseRun(
             enabled=True,
             config=self._config,
@@ -208,12 +180,6 @@ class DetectDominantImpulses:
             audit=audit,
             provenance=provenance,
             aggregation_notes=tuple(aggregation_notes),
-            sessions=(
-                session_levels(base_bars, session_rule) if base_bars is not None else None
-            ),
-            session_rule=session_rule,
-            patterns=patterns,
-            pattern_rule=pattern_rule,
         )
 
     # --- Interno ------------------------------------------------------------
@@ -223,6 +189,13 @@ class DetectDominantImpulses:
             raise DomainError(f"No hay barras agregadas en {timeframe}")
 
         rules = self._config.rules
+        # Fase 2.1: las mechas sólo se construyen si van a mandar. Con
+        # `break_by_zone: false` el detector ni siquiera las recibe.
+        zone_levels = (
+            ZoneBreakLevels(CandleSeries.of(frame), timeframe=timeframe)
+            if rules.break_by_zone
+            else None
+        )
         detector = DominantImpulseDetector(
             timeframe=timeframe,
             anchor_mode=rules.anchor_mode,
@@ -230,6 +203,10 @@ class DetectDominantImpulses:
             doji_break_mode=rules.doji_break_mode,
             leg_start_mode=rules.leg_start_mode,
             warmup_bars=rules.warmup_bars,
+            break_by_zone=rules.break_by_zone,
+            break_against_by_zone=rules.break_against_by_zone,
+            overlap_priority=rules.overlap_priority,
+            zone_levels=zone_levels,
         )
         atr = PriorBarAtr(
             frame["high"].to_numpy(dtype=float),
@@ -274,6 +251,8 @@ class DetectDominantImpulses:
             states=detector.states,
             table=table,
             diagnostics=detector.diagnostics,
+            avoided=detector.avoided_breaks,
+            aborted=detector.aborted_constitutions,
         )
 
 
@@ -323,6 +302,13 @@ def _build_table(
                 "atr_previo": atr_value,
                 "indice_constitucion": impulse.index_constitution,
                 "indice_fin": impulse.index_end,
+                "origen_nivel_rotura": (
+                    impulse.exit_level_source.value
+                    if impulse.exit_level_source is not None
+                    else None
+                ),
+                "extensiones_extremo": impulse.extreme_extensions,
+                "precio_extremo_al_constituirse": impulse.extreme_at_constitution,
             }
         )
 

@@ -1,9 +1,12 @@
-# Módulo 1 — IMPULSO DOMINANTE (fase 1 de la estrategia CDT sobre XAUUSD).
+# Módulo 1 — IMPULSO DOMINANTE (estrategia CDT sobre XAUUSD).
 #
-# Esta fase detecta el impulso dominante y NADA MÁS: sin señales, sin entradas,
-# sin stops, sin targets y sin medición de rentabilidad.
+# Lo que se calcula y se dibuja es la ESTRUCTURA y nada más: el ID con sus tres
+# zonas —el UL a favor y el PUL o el APUL en contra— en el Diario, en H4 y en H1.
+# Sin señales de entrada, sin entradas, sin stops, sin targets y sin medición de
+# rentabilidad. M15 y M5 no llevan nada propio: se mira en ellas cómo llega el
+# precio, con los ID de H1 y H4 detrás.
 #
-# EL ID SE MARCA SÓLO EN EL DIARIO Y EN H4 (ver `charts`).
+# EL ID SE MARCA EN EL DIARIO, EN H4 Y EN H1 (ver `charts`).
 #
 # Los valores marcados como PENDIENTE los fija el propietario mirando el gráfico.
 # El motor no ha elegido ninguno por criterio propio.
@@ -86,7 +89,7 @@ data:
 #
 # Sólo H4 y el diario llevan desplazamiento: la rejilla de M5, M15 y H1 —cinco
 # minutos, cuartos de hora y horas en punto— es la misma en todas las
-# plataformas. Y son justo las dos temporalidades que llevan detector.
+# plataformas.
 aggregation:
   # Desplazamiento del inicio de las velas H4 respecto a 00:00 UTC. Se IGNORA
   # con el ancla de sesión de abajo: H4 arranca con la sesión y avanza de cuatro
@@ -111,20 +114,25 @@ aggregation:
 # Una temporalidad que no aparece como PRIMERA de ninguna lista no lleva
 # detector: no se le marca ID.
 #
-# EL ID VIVE SÓLO EN EL DIARIO Y EN H4. H1, M15 y M5 no tienen impulso propio:
-# son las temporalidades en las que se mira cómo llega el precio a la zona, y
-# sobre ellas se dibuja el ID de H4 como contexto y nada más. M5 es la más fina
-# y es donde se afinan la entrada y el stop.
+# EL ID VIVE EN EL DIARIO, EN H4 Y EN H1, cada uno con su detector y sus zonas.
+# Sobre H1 se dibuja además el de H4 como contexto. M15 y M5 no tienen impulso
+# propio: son las temporalidades en las que se mira cómo llega el precio a la
+# zona, y sobre ellas se dibujan los ID de H1 y de H4 como contexto y nada más.
+# M5 es la más fina y es donde se afinan la entrada y el stop a mano.
+#
+# Encender el detector de H1 mete su temporalidad en el `config_hash`: esta
+# corrida no es comparable con la línea base de la fase 1 (D y H4 solos), y es a
+# propósito.
 #
 # EL DIARIO SE DIBUJA SÓLO EN SU GRÁFICO. En H4 no se ve nada del Diario —ni su
-# ID ni su marco—: lo que manda ahí es el ID de H4, y la caja diaria encima
-# tapaba el precio a una escala que no es la suya.
+# ID, ni su marco, ni sus zonas—: lo que manda ahí es el ID de H4, y la caja
+# diaria encima tapaba el precio a una escala que no es la suya.
 charts:
   D: [D]
   H4: [H4]
-  H1: [H4]
-  M15: [H4]
-  M5: [H4]
+  H1: [H1, H4]
+  M15: [H1, H4]
+  M5: [H1, H4]
 
 rules:
   # DECIDIDO (§2.5, R-02). Dónde se ancla el nuevo impulso:
@@ -177,11 +185,88 @@ rules:
   # contraria sin ningún extremo de color válido, no nace ID: el limbo sigue.
   leg_start_mode: L1_actual
 
+  # FASE 2.1 — ROTURA DEL ID POR ZONA. Es el primer cambio de comportamiento del
+  # proyecto desde que se fijó la línea base: cambiar esto mueve los impulsos, el
+  # limbo y todas las estadísticas.
+  #
+  #   false -> la rotura es por LÍNEA. Comportamiento de la fase 1, línea base
+  #            f2f2a87f8efe con D 401 / H4 1.914 detectados.
+  #   true  -> manda la ZONA. La línea deja de ser el nivel de rotura cuando
+  #            existe una zona que la sustituya:
+  #              lado a favor (extremo) -> el UL, que existe siempre
+  #              lado en contra (ancla) -> el OB si está confirmado; si no, la
+  #                                        línea (le pasa al 4-5 % de los ID)
+  #            Romper una zona es CERRAR MÁS ALLÁ DE SU BORDE EXTERIOR, es decir
+  #            atravesarla entera. Perforarla con mecha y cerrar dentro no rompe;
+  #            cerrar dentro tampoco. Un UL de altura cero —la vela del extremo
+  #            cerró en su propio máximo— tiene los dos bordes en la línea y se
+  #            comporta exactamente como ella; el informe los cuenta.
+  #
+  # Un ID que sobrevive a lo que antes era una rotura sigue vivo y SIGUE
+  # EXTENDIENDO SU EXTREMO: la zona UL se recalcula sobre la vela nueva y
+  # sustituye a la anterior. El OB no se mueve nunca, porque lo fija la vela del
+  # ancla y ésa no cambia.
+  #
+  # La rotura se evalúa siempre con velas de la MISMA temporalidad del ID, igual
+  # que en la fase 1, y sólo contra zonas ya nacidas y —el OB— ya confirmadas.
+  #
+  # ENCENDIDA, con la regla del propietario de abajo: es la corrida de la
+  # estructura, no la línea base de la fase 1.
+  break_by_zone: true
+
+  # LA REGLA DEL PROPIETARIO. Sólo cuenta con `break_by_zone: true`.
+  #   true  -> las dos zonas mandan, que es la fase 2.1 tal cual.
+  #   false -> EL UL MANDA A FAVOR Y EL ANCLA EN CONTRA: el ID no cambia mientras
+  #            una vela no CIERRE más allá del UL entero —una mecha que lo
+  #            perfora y vuelve a cerrar dentro no lo rompe— y muere en contra
+  #            cuando una vela cierra más allá de la línea de la que arranca. La
+  #            zona en contra —el PUL o el APUL— se clasifica y se dibuja, pero
+  #            no mata al ID.
+  break_against_by_zone: false
+
+  # PENDIENTE (fase 2.1 §2). Con las dos zonas SOLAPADAS en precio —impulsos cuyo
+  # rango cabe dentro de la vela del ancla— una misma vela puede cumplir a la vez
+  # la condición de rotura a favor y la de en contra. Hay que elegir un orden
+  # determinista, y no lo elige el motor:
+  #   a_favor_primero    -> se evalúa antes el UL
+  #   en_contra_primero  -> se evalúa antes el OB
+  # Con break_by_zone: false no cambia nada: reproduce el orden que la máquina de
+  # estados ya tenía escrito. El informe cuenta cuántas veces decide de verdad.
+  overlap_priority: a_favor_primero
+
   # Barras iniciales que no producen ID publicables.
   warmup_bars: 50
   # ATR usado para normalizar el rango de los impulsos. Sólo mira barras
   # estrictamente anteriores; leerlo antes de tiempo lanza LookaheadError.
   atr_period: 14
+
+# FASE 2.0 — zonas UL y OB. SÓLO DETECCIÓN Y DIBUJO.
+#
+# Cada impulso lleva asociadas dos zonas de precio, calculadas sobre velas de su
+# misma temporalidad (en M15 no se calculan, que no lleva detector):
+#
+#   UL (último)  -> el extremo del ID. Va del borde del CUERPO de la vela que
+#                   fija `precio_extremo` a la punta de su mecha, así que ocupa
+#                   sólo el tramo de mecha y nunca cubre el cuerpo. Su borde
+#                   interior es exactamente la línea del extremo. Si la vela
+#                   inmediatamente posterior llega más lejos en la misma
+#                   dirección, la zona se estira hasta ella: UNA vela de margen.
+#   OB (order    -> la vela donde arranca la pierna, la que fija `precio_ancla`.
+#       block)      La vela ENTERA, de `low` a `high`, mechas y cuerpo. No existe
+#                   hasta que una vela posterior DEL COLOR DEL IMPULSO la supera
+#                   incluyendo mecha; hasta entonces el ID no tiene OB, que es un
+#                   estado legítimo y se cuenta en el informe.
+#
+# Con `false` el sistema no emite ni una zona y reproduce la línea base de la
+# fase 1 exactamente: hash f2f2a87f8efe, D 401 / H4 1.914 detectados.
+# Con `true` se calculan y se dibujan; intervienen en la detección sólo si
+# `break_by_zone` está encendido, como aquí.
+#
+# No hay más parámetros y es a propósito: las dos zonas se derivan de velas que
+# el detector ya registra, sin holguras ni umbrales que ajustar. Por eso este
+# bloque no entra en el `config_hash`.
+zones:
+  enabled: true
 
 # Verificación empírica de zona horaria (§1.1). OBLIGATORIA antes de calcular
 # nada: un offset horario equivocado no da error, da impulsos distintos a los
@@ -201,11 +286,9 @@ reporting:
   # horas del explorador y las de la plataforma de ejecución se leen iguales sin
   # traducir. Se escribe `UTC-4` en el dibujo, no el identificador.
   #
-  # No entra en el cálculo de los impulsos ni en el `config_hash`. Sí es el
-  # reloj en el que se marcan el alto y el bajo de Asia y de Londres: las 7:58
-  # de este reloj, que son las de la pantalla. Ojo, no es el reloj de
-  # TradingView ni el de FXReplay, que sí siguen el horario de verano de Nueva
-  # York y en invierno van una hora por detrás de éste.
+  # Es sólo etiqueta: no entra en el cálculo ni en el `config_hash`. Ojo, no es
+  # el reloj de TradingView ni el de FXReplay, que sí siguen el horario de verano
+  # de Nueva York y en invierno van una hora por detrás de éste.
   session_timezone: Etc/GMT+4
   text_report: true
   explorer_html: true
@@ -222,9 +305,9 @@ reporting:
   # Se conservan las más recientes.
   #
   # TODAS. Con el recorte a 60.000, M15 sólo llegaba a mediados de 2023: abrir
-  # M15 sobre cualquier operación anterior enseñaba un gráfico vacío, que es
-  # justo la temporalidad en la que se audita la afinación de la entrada. Ocho
-  # años de M15 son ~190.000 velas y engordan el fichero unos 7 MB, y los de M5
+  # M15 sobre cualquier tramo anterior enseñaba un gráfico vacío, que es justo
+  # la temporalidad en la que se audita la afinación de la entrada. Ocho años de
+  # M15 son ~190.000 velas y engordan el fichero unos 7 MB, y los de M5
   # —~570.000 velas— unos 20 MB más; el explorador sólo dibuja el tramo de la
   # ventana, así que el coste es de descarga, no de dibujo.
   max_explorer_bars: 0

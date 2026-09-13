@@ -34,7 +34,6 @@ from chronos.application.structure.detect_impulses import (
 )
 from chronos.application.structure.statistics import summarize
 from chronos.domain.structure.enums import AnchorMode, ImpulseDirection
-from chronos.domain.structure.patterns import PATTERN_COLUMNS
 from chronos.infrastructure.reporting.impulse_explorer import build_payload, render_explorer
 from chronos.infrastructure.reporting.impulse_report import render_report
 from chronos.infrastructure.reporting.impulse_writer import ImpulseReportWriter
@@ -302,15 +301,12 @@ def test_el_escritor_deja_una_carpeta_autocontenida(
         "eventos_rotura.csv",
         "estado_por_barra.csv",
         "contactos.csv",
-        "patrones.csv",
         "reporte.txt",
         "explorador.html",
         "run.json",
     }
     tabla = pd.read_csv(carpeta / "impulsos.csv")
     assert list(tabla.columns) == [*TABLE_COLUMNS, *AUDIT_COLUMNS]
-    patrones = pd.read_csv(carpeta / "patrones.csv")
-    assert list(patrones.columns) == list(PATTERN_COLUMNS)
 
 
 # --- Apoyo ------------------------------------------------------------------

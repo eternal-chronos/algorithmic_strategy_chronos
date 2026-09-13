@@ -15,13 +15,20 @@ from dataclasses import asdict, dataclass, field
 from datetime import time
 
 from chronos.domain.errors import DomainError
-from chronos.domain.structure.enums import AnchorMode, DojiBreakMode, LegStartMode, SeedMode
+from chronos.domain.structure.enums import (
+    AnchorMode,
+    DojiBreakMode,
+    LegStartMode,
+    OverlapPriority,
+    SeedMode,
+)
 
 #: Temporalidades del módulo. Un ID sólo se rompe con cierres de su propia
 #: temporalidad, así que la que lleve detector lo lleva propio (§1.2, §2.4).
-#: **El ID vive en el Diario y en H4.** H1, M15 y M5 no llevan detector: son sólo
-#: lectura, y sobre ellas se dibuja el ID de H4 como contexto. M5 es la más fina:
-#: es donde el propietario afina la entrada y el stop.
+#: **En el reparto por defecto el ID vive en el Diario y en H4**; el fichero del
+#: proyecto añade H1 declarándolo principal de su gráfico en `charts`. M15 y M5
+#: siguen siendo sólo lectura; M5 es la más fina, donde el propietario afina la
+#: entrada y el stop a mano.
 M5 = "M5"
 M15 = "M15"
 H1 = "H1"
@@ -37,34 +44,22 @@ TIMEFRAME_MINUTES: dict[str, int] = {M5: 5, M15: 15, H1: 60, H4: 240, DAILY: 144
 #: contexto de temporalidad superior.
 #:
 #: El reparto lo fija el propietario: es cómo lee él el mercado, no una decisión
-#: del motor. **Sólo el Diario y H4 tienen ID propio**, que es lo que fija la
+#: del motor. **Aquí sólo el Diario y H4 tienen ID propio**, que es lo que fija la
 #: línea base de la fase 1: H1, M15 y M5 llevan dibujado el ID de H4 como
 #: contexto.
+#: El fichero del proyecto corre con otro reparto —H1 con ID propio—, que entra
+#: en el hash de configuración por su cuenta.
 #:
-#: **El Diario se dibuja sólo en su gráfico.** En H4 no se ve nada suyo —ni el ID
-#: ni su marco—: a esa escala la caja diaria tapa el precio y lo que se está
-#: auditando es el ID de H4. Quitarlo de ahí no cambia el hash: el detector del
-#: Diario sigue encendido porque su propio gráfico lo pide.
+#: **El Diario se dibuja sólo en su gráfico.** En H4 no se ve nada suyo —ni el ID,
+#: ni el marco, ni las zonas—: a esa escala la caja diaria tapa el precio y lo que
+#: se está auditando es el ID de H4. Quitarlo de ahí no cambia el hash: el detector
+#: del Diario sigue encendido porque su propio gráfico lo pide.
 DEFAULT_CHARTS: dict[str, tuple[str, ...]] = {
     DAILY: (DAILY,),
     H4: (H4,),
     H1: (H4,),
     M15: (H4,),
     M5: (H4,),
-}
-
-#: Dónde se buscan el OB y el FVG (K.1) y qué ID los acota: el gráfico es la
-#: temporalidad de las velas en las que está el patrón y el valor, la del ID
-#: dentro del cual tiene que caer. **En el Diario y en H4, dentro de su propio
-#: ID; en H1, que no tiene ID, dentro del de H4.** M15 y M5 no marcan nada
-#: todavía: la confirmación de M15 la dictará el propietario más adelante.
-#:
-#: Es lectura del propietario, no parámetro del motor, y no entra en el hash:
-#: no cambia ni una vela ni un impulso.
-PATTERN_CHARTS: dict[str, str] = {
-    DAILY: DAILY,
-    H4: H4,
-    H1: H4,
 }
 
 
@@ -276,6 +271,25 @@ class ImpulseRulesConfig:
     #: R-36. Por defecto queda el comportamiento anterior para que la línea base
     #: siga siendo reproducible mientras el propietario compara los tres modos.
     leg_start_mode: LegStartMode = LegStartMode.L1_CURRENT
+    #: FASE 2.1. `False` = la rotura es por línea, que es la línea base de la
+    #: fase 1. `True` = manda la zona: el UL en el lado a favor y el PUL en el
+    #: lado en contra, y romper es atravesar la zona entera. Es el primer cambio
+    #: de comportamiento del proyecto, así que va apagado por defecto y su
+    #: apagado reproduce el hash y los recuentos archivados.
+    break_by_zone: bool = False
+    #: FASE 3.0. Sólo significa algo con `break_by_zone: true`. `True` = las dos
+    #: zonas mandan, que es la fase 2.1 tal cual. `False` = **el UL manda el lado
+    #: a favor y el ancla el lado en contra**, que es la regla del propietario
+    #: desde la fase 3.0: el ID no cambia mientras no se atraviese entero el UL,
+    #: y en contra sigue mandando la línea de donde arranca el ID. La zona en
+    #: contra se sigue clasificando y dibujando —de ella cuelgan el toque y la
+    #: toque—, pero no mata al ID.
+    break_against_by_zone: bool = True
+    #: FASE 2.1, **parámetro abierto**. Qué lado se evalúa primero cuando una
+    #: misma vela cumple las dos condiciones de rotura, que sólo puede pasar con
+    #: las dos zonas solapadas en precio. Con `break_by_zone: false` no cambia
+    #: nada: reproduce el orden que la máquina ya tenía escrito.
+    overlap_priority: OverlapPriority = OverlapPriority.A_FAVOR_FIRST
     warmup_bars: int = 50
     atr_period: int = 14
 
@@ -284,6 +298,26 @@ class ImpulseRulesConfig:
             raise DomainError("warmup_bars no puede ser negativo")
         if self.atr_period < 1:
             raise DomainError("atr_period debe ser >= 1")
+
+
+@dataclass(frozen=True, slots=True)
+class ZonesConfig:
+    """Zonas UL y PUL de la fase 2.0. **Sólo detección y dibujo.**
+
+    Con `enabled: False` el sistema no emite ni una zona y todo lo demás sale
+    byte a byte como en la fase 1. Con `True` se calculan y se publican, pero
+    ninguna interviene en la detección de impulsos: la regla de rotura sigue
+    siendo por línea hasta la fase 2.1.
+
+    No hay ningún otro parámetro y es a propósito. Las dos zonas se derivan de
+    velas que el detector ya registró —`ts_extreme` y `ts_anchor`— sin ninguna
+    holgura, umbral ni ventana que ajustar, así que no existe una configuración
+    que produzca zonas *distintas*: sólo zonas o ninguna zona. Por eso este
+    bloque queda fuera de `fingerprint()` y el `config_hash` sigue significando
+    exactamente lo que significaba: los parámetros que mueven un impulso.
+    """
+
+    enabled: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -311,9 +345,6 @@ class TimezoneAuditConfig:
 class StructureReportingConfig:
     output_dir: str = "reports"
     #: Zona horaria de la sesión del propietario; el explorador imprime ambas.
-    #: Es también el reloj en el que se marcan el alto y el bajo de Asia y de
-    #: Londres (las 7:58 de SU pantalla), pero no entra en el hash: no cambia
-    #: ninguna vela ni ningún impulso.
     session_timezone: str = "Etc/GMT+4"
     text_report: bool = True
     explorer_html: bool = True
@@ -336,6 +367,8 @@ class ImpulseConfig:
     aggregation: AggregationConfig = field(default_factory=AggregationConfig)
     charts: ChartsConfig = field(default_factory=ChartsConfig)
     rules: ImpulseRulesConfig = field(default_factory=ImpulseRulesConfig)
+    #: Fase 2.0. Apagadas por defecto: encenderlas no puede mover ni un impulso.
+    zones: ZonesConfig = field(default_factory=ZonesConfig)
     timezone_audit: TimezoneAuditConfig = field(default_factory=TimezoneAuditConfig)
     reporting: StructureReportingConfig = field(default_factory=StructureReportingConfig)
 
@@ -349,6 +382,11 @@ class ImpulseConfig:
         Deja fuera lo que no cambia ni una vela ni un impulso (rutas, carpeta de
         salida, opciones de informe): dos corridas con el mismo hash producen la
         misma tabla de impulsos.
+
+        Las zonas de la fase 2.0 tampoco entran, por la misma razón y con la
+        misma consecuencia buscada: encenderlas no mueve un solo impulso, así
+        que la línea base `e27d20d0fa4e` se conserva con las zonas puestas y las
+        corridas de la fase 1 siguen siendo comparables con las de ahora.
         """
         rules = asdict(self.rules)
         # R-36. `L1_actual` reproduce barra por barra lo que hacía el módulo antes
@@ -357,6 +395,22 @@ class ImpulseConfig:
         # cambian el resultado, entran en el hash y producen uno distinto.
         if self.rules.leg_start_mode is LegStartMode.L1_CURRENT:
             del rules["leg_start_mode"]
+        # Fase 2.1, mismo criterio y por la misma razón. `break_by_zone: false`
+        # reproduce barra por barra lo que hacía el módulo antes de que el
+        # parámetro existiera, así que se omite del hash y la línea base
+        # `e27d20d0fa4e` se conserva. Con `true` el resultado cambia, entra en el
+        # hash —y con él el orden de solape, que sólo decide algo ahí— y produce
+        # uno distinto: ninguna salida de la regla nueva puede confundirse con la
+        # de la vieja.
+        if not self.rules.break_by_zone:
+            del rules["break_by_zone"]
+            del rules["overlap_priority"]
+        # Lo mismo con el lado en contra: `true` es lo que hacía la fase 2.1
+        # antes de que el parámetro existiera, así que se omite del hash y los
+        # hashes archivados de esa fase se conservan. La regla de la fase 3.0
+        # —el ancla manda en contra— sí cambia el resultado y entra en el hash.
+        if self.rules.break_against_by_zone:
+            rules.pop("break_against_by_zone", None)
         payload = {
             "symbol": self.symbol,
             "structure_side": self.structure_side,
@@ -394,5 +448,16 @@ class ImpulseConfig:
             "(arranque del histórico: la especificación no lo cubre)",
             f"DOJI_BREAK_MODE = {self.rules.doji_break_mode.value} "
             "(§2.2 y §2.6 se contradicen sobre si un doji puede romper)",
+            f"BREAK_BY_ZONE = {str(self.rules.break_by_zone).lower()} "
+            "(fase 2.1: false = rotura por línea, la línea base; true = manda la zona)",
         ]
+        if self.rules.break_by_zone:
+            decisions.append(
+                f"BREAK_AGAINST_BY_ZONE = {str(self.rules.break_against_by_zone).lower()} "
+                "(fase 3.0: false = el UL manda a favor y el ANCLA en contra)"
+            )
+            decisions.append(
+                f"OVERLAP_PRIORITY = {self.rules.overlap_priority.value} "
+                "(fase 2.1 §2: qué lado se evalúa primero con las dos zonas solapadas)"
+            )
         return tuple(decisions)
