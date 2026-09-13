@@ -321,53 +321,6 @@ class ZonesConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class EntriesConfig:
-    """Las ENTRADAS (2026-09-13): lo poco que hay que elegir, todo declarado.
-
-    La estrategia la dicta el propietario y vive en `application/entries/`; aquí
-    sólo van los números que la acompañan. No entra en `fingerprint()`: una
-    entrada no mueve ni un impulso ni una zona.
-    """
-
-    #: Con `False` no se calcula ni se dibuja ninguna entrada.
-    enabled: bool = False
-    #: Reloj con el que se leen la franja y el cierre. Es el de la PLATAFORMA
-    #: —`Etc/GMT+4`, el UTC-4 fijo con el que dibuja cTrader—, no el de la
-    #: plaza: las horas que dicta el propietario las lee en su pantalla.
-    timezone: str = "Etc/GMT+4"
-    #: Sólo se buscan entradas —y sólo se llenan— entre estas dos horas, la
-    #: primera incluida y la segunda no: de las 02:00 a las 11:59.
-    window_start: str = "02:00"
-    window_end: str = "12:00"
-    #: Una posición viva se cierra a esta hora al precio de esa vela.
-    flat_at: str = "16:00"
-    #: El objetivo, en veces la distancia del stop. Siempre 1:4.
-    risk_reward: float = 4.0
-    #: Operaciones que pueden ENTRAR por día de la plaza.
-    trades_per_day: int = 1
-
-    def __post_init__(self) -> None:
-        for label in (self.window_start, self.window_end, self.flat_at):
-            _parse_clock(label)
-        if _parse_clock(self.window_start) >= _parse_clock(self.window_end):
-            raise DomainError(
-                f"La franja tiene que empezar antes de acabar: "
-                f"{self.window_start} >= {self.window_end}"
-            )
-        if self.risk_reward <= 0:
-            raise DomainError("risk_reward tiene que ser positivo")
-        if self.trades_per_day < 1:
-            raise DomainError("trades_per_day tiene que ser al menos 1")
-
-
-def _parse_clock(label: str) -> time:
-    parts = label.split(":")
-    if len(parts) != 2:
-        raise DomainError(f"Hora inválida, se esperaba HH:MM: {label!r}")
-    return _parse_time(*parts)
-
-
-@dataclass(frozen=True, slots=True)
 class TimezoneAuditConfig:
     """Verificación empírica de zona horaria (§1.1). Obligatoria antes de calcular."""
 
@@ -416,8 +369,6 @@ class ImpulseConfig:
     rules: ImpulseRulesConfig = field(default_factory=ImpulseRulesConfig)
     #: Fase 2.0. Apagadas por defecto: encenderlas no puede mover ni un impulso.
     zones: ZonesConfig = field(default_factory=ZonesConfig)
-    #: Las entradas. Apagadas por defecto: encenderlas no mueve un impulso.
-    entries: EntriesConfig = field(default_factory=EntriesConfig)
     timezone_audit: TimezoneAuditConfig = field(default_factory=TimezoneAuditConfig)
     reporting: StructureReportingConfig = field(default_factory=StructureReportingConfig)
 

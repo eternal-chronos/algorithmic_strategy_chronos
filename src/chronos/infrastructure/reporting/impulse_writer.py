@@ -16,7 +16,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from chronos.application.entries.trades import EntriesRun, detect_entries
 from chronos.application.ports import Clock
 from chronos.application.structure.anchor_comparison import AnchorComparison
 from chronos.application.structure.baseline_comparison import BaselineComparison
@@ -33,7 +32,6 @@ from chronos.infrastructure.clock import SystemClock
 from chronos.infrastructure.reporting.impulse_captures import write_captures
 from chronos.infrastructure.reporting.impulse_explorer import ModeVariant, render_explorer
 from chronos.infrastructure.reporting.impulse_report import render_report
-from chronos.infrastructure.reporting.timezones import session_label
 from chronos.infrastructure.reporting.zone_report import render_zone_report
 
 
@@ -60,9 +58,6 @@ class ImpulseReportWriter:
         #: Fase 2.0. Con las zonas apagadas viene vacío y no se escribe ni un
         #: fichero suyo: la carpeta sale exactamente como en la fase 1.
         zones: ZonesRun | None = None,
-        #: Las entradas del 2026-09-13. Apagadas en la config vienen vacías y
-        #: no se escribe ni un fichero suyo.
-        entries: EntriesRun | None = None,
         run_id: str | None = None,
     ) -> Path | None:
         """Devuelve la carpeta escrita, o `None` si el módulo está apagado."""
@@ -72,7 +67,6 @@ class ImpulseReportWriter:
         statistics = statistics or summarize(run)
         lateralization = lateralization or measure(run)
         zones = zones if zones is not None else detect_zones(run)
-        entries = entries if entries is not None else detect_entries(run, zones)
         generated_at = self._clock.now()
         stamp = run_id or generated_at.strftime("%Y%m%d_%H%M%S")
         folder = self._root / f"{stamp}_impulso_dominante"
@@ -103,9 +97,6 @@ class ImpulseReportWriter:
             (folder / "reporte_zonas.txt").write_text(
                 render_zone_report(run, zones, generated_at), encoding="utf-8"
             )
-        if entries.enabled:
-            _entries_frame(entries).to_csv(folder / "entradas.csv", index=False)
-            _seeking_frame(entries).to_csv(folder / "busqueda.csv", index=False)
         if run.config.reporting.captures:
             # Kaleido abre un navegador headless por imagen: son un par de
             # minutos, así que se puede apagar en las corridas de trabajo.
@@ -119,7 +110,6 @@ class ImpulseReportWriter:
                     lateralization,
                     variants,
                     zones,
-                    entries,
                 ),
                 encoding="utf-8",
             )
@@ -156,7 +146,6 @@ class ImpulseReportWriter:
                         for timeframe, analysis in run.analyses.items()
                     },
                     "zonas": _zones_summary(zones),
-                    "entradas": _entries_summary(entries),
                     "decisiones_cerradas": list(run.config.closed_decisions()),
                     "decisiones_abiertas": list(run.config.open_decisions()),
                     "sustituye_a": (
@@ -207,92 +196,6 @@ def _zones_summary(zones: ZonesRun) -> dict[str, object]:
             for timeframe, item in zones.per_timeframe.items()
         },
     }
-
-
-def _entries_summary(entries: EntriesRun) -> dict[str, object]:
-    """Las entradas en el `run.json`: apagadas, o los recuentos. Sin porcentajes."""
-    if not entries.enabled:
-        return {"activas": False}
-    return {
-        "activas": True,
-        "franja": entries.day.describe(session_label(entries.day.timezone)),
-        "temporalidad_fina": entries.source,
-        "risk_reward": entries.risk_reward,
-        "recuento": entries.counts(),
-    }
-
-
-_ENTRY_COLUMNS = (
-    "n", "tipo", "direccion", "ts_armado", "entrada", "stop", "objetivo", "origen_stop",
-    "id_h1", "direccion_id_h1", "zona_h1", "zona_h1_baja", "zona_h1_alta",
-    "id_m15", "zona_m15_baja", "zona_m15_alta", "estado_diario", "estado_h4", "contexto",
-    "ts_entrada", "ts_salida", "precio_salida", "resultado", "r",
-    "motivo_retirada", "ts_retirada",
-)
-
-
-def _entries_frame(entries: EntriesRun) -> pd.DataFrame:
-    """Un registro por límite: llenado o quitado, con todo lo que lo explica."""
-    rows = [
-        {
-            "n": item.seq,
-            "tipo": item.kind.value,
-            "direccion": item.direction.value,
-            "ts_armado": item.ts_armed,
-            "entrada": item.entry,
-            "stop": item.stop,
-            "objetivo": item.target,
-            "origen_stop": item.stop_source,
-            "id_h1": item.h1_id,
-            "direccion_id_h1": item.h1_direction.value,
-            "zona_h1": item.zone_kind.value,
-            "zona_h1_baja": item.zone_low,
-            "zona_h1_alta": item.zone_high,
-            "id_m15": item.m15_id,
-            "zona_m15_baja": item.m15_zone_low,
-            "zona_m15_alta": item.m15_zone_high,
-            "estado_diario": None if item.daily_state is None else item.daily_state.value,
-            "estado_h4": None if item.h4_state is None else item.h4_state.value,
-            "contexto": item.context,
-            "ts_entrada": item.ts_filled,
-            "ts_salida": item.ts_closed,
-            "precio_salida": item.exit_price,
-            "resultado": None if item.outcome is None else item.outcome.value,
-            "r": item.r_multiple,
-            "motivo_retirada": None if item.cancelled_by is None else item.cancelled_by.value,
-            "ts_retirada": item.ts_cancelled,
-        }
-        for item in entries.entries
-    ]
-    columns = list(_ENTRY_COLUMNS)
-    return pd.DataFrame(rows, columns=columns) if rows else pd.DataFrame(columns=columns)
-
-
-_SEEKING_COLUMNS = (
-    "n", "desde", "hasta", "se_busca", "id_diario", "estado_diario", "id_h4", "estado_h4",
-    "motivo",
-)
-
-
-def _seeking_frame(entries: EntriesRun) -> pd.DataFrame:
-    """Un registro por tramo de contexto: qué se buscaba en H1 y por qué."""
-    rows = [
-        {
-            "n": item.seq,
-            "desde": item.start,
-            "hasta": item.end,
-            "se_busca": " + ".join(sorted(direction.value for direction in item.allowed))
-            or "nada",
-            "id_diario": item.daily_id,
-            "estado_diario": None if item.daily_state is None else item.daily_state.value,
-            "id_h4": item.h4_id,
-            "estado_h4": None if item.h4_state is None else item.h4_state.value,
-            "motivo": item.reason,
-        }
-        for item in entries.seeking
-    ]
-    columns = list(_SEEKING_COLUMNS)
-    return pd.DataFrame(rows, columns=columns) if rows else pd.DataFrame(columns=columns)
 
 
 def _baseline_frame(baseline: BaselineComparison) -> pd.DataFrame:

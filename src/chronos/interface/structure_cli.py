@@ -18,7 +18,6 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from chronos.application.entries.trades import EntriesRun, detect_entries
 from chronos.application.structure import (
     baseline_comparison,
     break_comparison,
@@ -69,7 +68,6 @@ from chronos.infrastructure.reporting.session_audit_report import (
     SessionAuditReport,
     render_session_audit,
 )
-from chronos.infrastructure.reporting.timezones import session_label
 from chronos.infrastructure.reporting.zone_captures import write_zone_captures
 from chronos.infrastructure.reporting.zone_report import render_zone_report
 from chronos.infrastructure.structure.aggregation import (
@@ -214,9 +212,6 @@ def detect(
         # Fase 2.0. Respeta el YAML sin discutir: con `zones.enabled: false` esto
         # devuelve vacío y la corrida sale exactamente como en la fase 1.
         zones = detect_zones(run)
-        # Las entradas del 2026-09-13: con `entries.enabled: false` no hay ni una
-        # y la corrida sale como antes. Sólo se cuentan; no se mide rentabilidad.
-        entries = detect_entries(run, zones)
         # §B: el módulo entero con el otro modo de ancla. R-02 está cerrado, así
         # que por defecto no se ejecuta; queda disponible para regresión.
         anchors = (
@@ -240,7 +235,6 @@ def detect(
             _print_baseline(baseline)
             _print_leg_start_modes(variants)
             _print_zones(zones)
-            _print_entries(entries)
         if report:
             folder = ImpulseReportWriter(run_config.reporting.output_dir).write(
                 run,
@@ -250,7 +244,6 @@ def detect(
                 baseline=baseline,
                 variants=variants,
                 zones=zones,
-                entries=entries,
             )
             if folder is not None:
                 console.print(f"\nInforme: [bold]{folder / 'reporte.txt'}[/bold]")
@@ -439,19 +432,6 @@ def _print_zone_regression(run: ImpulseRun, without: ImpulseRun) -> None:
             "Eso es un defecto de la fase 2.0, no un resultado."
         )
         raise typer.Exit(code=1)
-
-
-def _print_entries(entries: EntriesRun) -> None:
-    """Cuántos límites y cuántas operaciones. Ni un porcentaje: se auditan en el dibujo."""
-    if not entries.enabled:
-        return
-    counts = entries.counts()
-    console.print(
-        f"\nEntradas ({entries.day.describe(session_label(entries.day.timezone))}, "
-        f"1:{entries.risk_reward:g}, en {entries.source}): "
-        f"{counts['LIMITES']:,} límites, {counts['ENTRADAS']:,} operaciones. "
-        "Se ven en el explorador y en entradas.csv."
-    )
 
 
 def _print_zones(zones: ZonesRun) -> None:

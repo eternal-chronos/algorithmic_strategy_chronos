@@ -14,7 +14,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from chronos.application.structure.config import (
     AggregationConfig,
     ChartsConfig,
-    EntriesConfig,
     ImpulseConfig,
     ImpulseRulesConfig,
     StructureDataConfig,
@@ -97,21 +96,6 @@ class ZonesSchema(_Strict):
         return ZonesConfig(**self.model_dump())
 
 
-class EntriesSchema(_Strict):
-    #: Las entradas del 2026-09-13. Apagadas por defecto: el fichero tal cual no
-    #: abre ninguna operación.
-    enabled: bool = False
-    timezone: str = "Etc/GMT+4"
-    window_start: str = "02:00"
-    window_end: str = "12:00"
-    flat_at: str = "16:00"
-    risk_reward: float = Field(default=4.0, gt=0)
-    trades_per_day: int = Field(default=1, ge=1)
-
-    def to_domain(self) -> EntriesConfig:
-        return EntriesConfig(**self.model_dump())
-
-
 class TimezoneAuditSchema(_Strict):
     enabled: bool = True
     expected_peak_utc: str = "13:30"
@@ -146,7 +130,6 @@ class ImpulseSchema(_Strict):
     charts: dict[str, list[str]] | None = None
     rules: ImpulseRulesSchema = Field(default_factory=ImpulseRulesSchema)
     zones: ZonesSchema = Field(default_factory=ZonesSchema)
-    entries: EntriesSchema = Field(default_factory=EntriesSchema)
     timezone_audit: TimezoneAuditSchema = Field(default_factory=TimezoneAuditSchema)
     reporting: StructureReportingSchema = Field(default_factory=StructureReportingSchema)
 
@@ -166,7 +149,6 @@ class ImpulseSchema(_Strict):
             ),
             rules=self.rules.to_domain(),
             zones=self.zones.to_domain(),
-            entries=self.entries.to_domain(),
             timezone_audit=self.timezone_audit.to_domain(),
             reporting=self.reporting.to_domain(),
         )

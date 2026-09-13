@@ -63,7 +63,6 @@ function declare(id) {
  'zone-layers', 'layer-zones',
  'signal-layers', 'layer-signals',
  'break-layers', 'avoided-layer', 'layer-avoided', 'steps-layer', 'layer-steps',
- 'entry-layers', 'layer-entries', 'seeking-layer', 'layer-seeking',
  'blind-seed', 'blind-start', 'blind-reveal', 'blind-exit',
  'sim-group', 'sim-buttons', 'sim-ratio', 'sim-clear',
  'rect-group', 'rect-buttons', 'rect-undo', 'rect-clear',
@@ -236,12 +235,6 @@ global.Plotly = {
           label: (shape.label && shape.label.text) || null,
         };
       }),
-      // Las entradas (2026-09-13): el fondo de "qué se busca", por tramo.
-      seeking: (layout.shapes || []).filter(function (shape) {
-        return String(shape.name || '').indexOf('busqueda-') === 0;
-      }).map(function (shape) {
-        return { name: shape.name, x0: shape.x0, x1: shape.x1, fillcolor: shape.fillcolor };
-      }),
       yTickFormat: layout.yaxis && layout.yaxis.tickformat,
       xRange: (layout.xaxis && layout.xaxis.range) || null,
       yRange: (layout.yaxis && layout.yaxis.range) || null,
@@ -310,7 +303,7 @@ function snapshot(label) {
     // el control se separan, el explorador miente sobre lo que se está viendo.
     boxes: ['layer-limbo', 'layer-marks', 'layer-contacts', 'layer-mid', 'layer-wrong',
       'layer-frame', 'layer-zones', 'layer-signals',
-      'layer-avoided', 'layer-steps', 'layer-entries', 'layer-seeking']
+      'layer-avoided', 'layer-steps']
       .reduce(function (state, id) {
         state[id] = elements[id].checked === true;
         return state;
@@ -509,18 +502,6 @@ steps.push(snapshot('senales-por-defecto'));
 elements['layer-signals'].fire('change', { target: { checked: false } });
 steps.push(snapshot('senales-apagadas'));
 elements['layer-signals'].fire('change', { target: { checked: true } });
-
-// Las ENTRADAS (2026-09-13): el límite, la operación y cómo acabó, y de fondo qué
-// se buscaba. Se encienden y se apagan sobre las mismas velas; sin entradas en el
-// payload los pasos salen iguales, que es lo que comprueba el test de la corrida
-// sin entradas.
-steps.push(snapshot('entradas-por-defecto'));
-elements['layer-entries'].fire('change', { target: { checked: false } });
-steps.push(snapshot('entradas-apagadas'));
-elements['layer-entries'].fire('change', { target: { checked: true } });
-elements['layer-seeking'].fire('change', { target: { checked: false } });
-steps.push(snapshot('busqueda-apagada'));
-elements['layer-seeking'].fire('change', { target: { checked: true } });
 
 // Fase 2.1 (§3.2): la escalera del extremo. Los saltos son una capa propia que se
 // apaga; los ESCALONES no, porque no son una capa sino la línea del ID dibujada

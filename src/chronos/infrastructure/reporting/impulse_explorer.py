@@ -37,8 +37,7 @@ from typing import Any
 import pandas as pd
 import plotly.offline as pyo
 
-from chronos.application.entries.trades import EntriesRun, Entry, Seeking
-from chronos.application.structure.config import DAILY, H1, H4, M15
+from chronos.application.structure.config import DAILY, H1, H4
 from chronos.application.structure.detect_impulses import ImpulseRun, TimeframeAnalysis
 from chronos.application.structure.lateralization import (
     LateralizationStudy,
@@ -73,7 +72,6 @@ TIMEFRAME_COLORS: dict[str, str] = {
     DAILY: theme.VIOLET,
     H4: theme.SERIES[1],
     H1: theme.SERIES[0],
-    M15: theme.SERIES[3],
 }
 
 #: Los recuadros que dibuja el propietario a mano (I.3) y el color de cada uno.
@@ -123,11 +121,10 @@ def render_explorer(
     lateralization: LateralizationStudy | None = None,
     variants: Sequence[ModeVariant] = (),
     zones: ZonesRun | None = None,
-    entries: EntriesRun | None = None,
 ) -> str:
     """Devuelve el HTML completo del explorador."""
     generated_at = generated_at or SystemClock().now()
-    payload = build_payload(run, max_bars, lateralization, variants, zones, entries)
+    payload = build_payload(run, max_bars, lateralization, variants, zones)
     # El JSON viaja dentro de un <script>: escapar `</` evita que un texto
     # cualquiera pueda cerrar la etiqueta antes de tiempo.
     data = json.dumps(payload, separators=(",", ":"), ensure_ascii=False, default=str).replace(
@@ -154,7 +151,6 @@ def build_payload(
     lateralization: LateralizationStudy | None = None,
     variants: Sequence[ModeVariant] = (),
     zones: ZonesRun | None = None,
-    entries: EntriesRun | None = None,
 ) -> dict[str, Any]:
     """Serializa la corrida a la estructura que consume el explorador.
 
@@ -252,19 +248,6 @@ def build_payload(
             for analysis in run.analyses.values()
             for impulse in analysis.published
         ),
-        #: Las entradas del 2026-09-13: cada límite con su operación, y de fondo
-        #: los tramos de QUÉ SE BUSCABA. Vacío con las entradas apagadas, y
-        #: entonces la casilla no se enseña.
-        "hasEntries": entries is not None and entries.enabled and not entries.empty,
-        "entries": _entries(entries),
-        "seeking": _seeking(entries),
-        "entrySource": entries.source if entries is not None and entries.enabled else None,
-        "entryDay": (
-            entries.day.describe(session_label(entries.day.timezone))
-            if entries is not None and entries.enabled
-            else None
-        ),
-        "riskReward": entries.risk_reward if entries is not None and entries.enabled else None,
         "modes": [_mode_summary(variant) for variant in variants],
         # El modo activo ya viaja en `impulses` y repetirlo aquí costaba 4,5 MB
         # de fichero. El explorador lo lee de `impulses` por identidad del modo,
@@ -519,84 +502,6 @@ def _zone_signals(signals: TimeframeSignals | None) -> list[dict[str, Any]]:
         }
         for item in signals.items
     ]
-
-
-def _entries(entries: EntriesRun | None) -> list[dict[str, Any]]:
-    """Capa "Entradas". Todo viene CALCULADO: aquí sólo se serializa.
-
-    Cada registro es un límite: `x` la vela fina en cuyo cierre se puso, `e`,
-    `s` y `t` la entrada, el stop y el objetivo; `xf` cuándo entró, `xe` cuándo
-    salió con `px` el precio y `o` el resultado; o `xc` y `why` si se quitó sin
-    entrar. `ctx` es lo que decían el Diario y H4 al armarlo, escrito.
-    """
-    if entries is None or not entries.enabled:
-        return []
-    return [_entry_record(item) for item in entries.entries]
-
-
-def _entry_record(item: Entry) -> dict[str, Any]:
-    record: dict[str, Any] = {
-        "n": item.seq,
-        "k": item.kind.value,
-        "d": item.direction.value,
-        "x": _minute(pd.Timestamp(item.ts_armed)),
-        "e": round(item.entry, DECIMALS),
-        "s": round(item.stop, DECIMALS),
-        "t": round(item.target, DECIMALS),
-        "ss": item.stop_source,
-        "h1": item.h1_id,
-        "h1d": item.h1_direction.value,
-        "m15": item.m15_id,
-        "zk": item.zone_kind.value,
-        "zlo": round(item.zone_low, DECIMALS),
-        "zhi": round(item.zone_high, DECIMALS),
-        "ds": None if item.daily_state is None else item.daily_state.value,
-        "hs": None if item.h4_state is None else item.h4_state.value,
-        "ctx": item.context,
-    }
-    if item.m15_zone_low is not None and item.m15_zone_high is not None:
-        record["mlo"] = round(item.m15_zone_low, DECIMALS)
-        record["mhi"] = round(item.m15_zone_high, DECIMALS)
-    if item.ts_filled is not None:
-        record["xf"] = _minute(pd.Timestamp(item.ts_filled))
-    if item.ts_closed is not None and item.exit_price is not None and item.outcome is not None:
-        record["xe"] = _minute(pd.Timestamp(item.ts_closed))
-        record["px"] = round(item.exit_price, DECIMALS)
-        record["o"] = item.outcome.value
-    elif item.outcome is not None:
-        record["o"] = item.outcome.value
-    if item.ts_cancelled is not None and item.cancelled_by is not None:
-        record["xc"] = _minute(pd.Timestamp(item.ts_cancelled))
-        record["why"] = item.cancelled_by.value
-    return record
-
-
-def _seeking(entries: EntriesRun | None) -> list[dict[str, Any]]:
-    """Capa de fondo "Qué se busca": un tramo por cambio de contexto.
-
-    `a` son las direcciones permitidas —las dos, una o ninguna— y `why` el motivo
-    escrito por el motor. `x1` falta cuando el tramo seguía abierto al acabarse
-    el histórico.
-    """
-    if entries is None or not entries.enabled:
-        return []
-    return [_seeking_record(item) for item in entries.seeking]
-
-
-def _seeking_record(item: Seeking) -> dict[str, Any]:
-    record: dict[str, Any] = {
-        "n": item.seq,
-        "x0": _minute(pd.Timestamp(item.start)),
-        "a": sorted(direction.value for direction in item.allowed),
-        "why": item.reason,
-        "did": item.daily_id,
-        "ds": None if item.daily_state is None else item.daily_state.value,
-        "h4": item.h4_id,
-        "hs": None if item.h4_state is None else item.h4_state.value,
-    }
-    if item.end is not None:
-        record["x1"] = _minute(pd.Timestamp(item.end))
-    return record
 
 
 def _contacts(measurement: TimeframeLateralization | None) -> list[dict[str, Any]]:

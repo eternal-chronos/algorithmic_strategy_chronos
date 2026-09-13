@@ -98,11 +98,6 @@ def test_nadie_del_motor_lee_las_senales_de_zona() -> None:
     permitido = {
         SRC / "domain" / "structure" / "zone_signals.py",
         SRC / "application" / "structure" / "zone_signals.py",
-        # Las entradas SÍ las leen —el toque del PUL y el rechazo del UL son lo
-        # que mueve el contexto del Diario y de H4—, pero se calculan DESPUÉS,
-        # sobre la corrida cerrada: `test_medir_las_entradas_no_mueve_ni_un_impulso`
-        # fija que no tocan nada de la estructura.
-        SRC / "application" / "entries" / "trades.py",
     }
     for layer in ("domain", "application"):
         for path in _modules(layer):
