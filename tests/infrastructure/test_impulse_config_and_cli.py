@@ -8,6 +8,8 @@ saltárselo exige un flag explícito.
 
 from __future__ import annotations
 
+import json
+from dataclasses import replace
 from pathlib import Path
 
 import pandas as pd
@@ -15,7 +17,7 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
-from chronos.application.structure.config import ImpulseConfig
+from chronos.application.structure.config import EntriesConfig, ImpulseConfig
 from chronos.domain.errors import DomainError
 from chronos.domain.structure.enums import AnchorMode, DojiBreakMode, SeedMode
 from chronos.infrastructure.config.loader import ConfigError, load_impulse_config
@@ -47,10 +49,11 @@ def test_el_yaml_del_proyecto_carga_y_declara_los_parametros_abiertos() -> None:
 
 
 def test_el_reparto_de_graficos_del_yaml_es_el_del_propietario() -> None:
-    """El ID vive en el Diario, en H4 y en H1; M15 y M5 llevan los de H1 y H4.
+    """El ID vive en el Diario, en H4, en H1 y en M15; M5 lleva los tres de arriba.
 
-    Sobre H1 se dibuja además el de H4 como contexto. El Diario se dibuja SÓLO
-    en su gráfico: en H4 no se ve nada suyo.
+    Sobre H1 se dibuja además el de H4 como contexto, y sobre M15 los de H1 y
+    H4. El Diario se dibuja SÓLO en su gráfico: en H4 no se ve nada suyo. M15
+    lleva ID propio desde el 2026-09-13 porque las entradas lo necesitan.
     """
     charts = load_impulse_config(Path("config/impulse.yaml")).charts
 
@@ -58,10 +61,38 @@ def test_el_reparto_de_graficos_del_yaml_es_el_del_propietario() -> None:
     assert charts.overlays("D") == ("D",)
     assert charts.overlays("H4") == ("H4",)
     assert charts.overlays("H1") == ("H1", "H4")
-    assert charts.overlays("M15") == ("H1", "H4")
-    assert charts.overlays("M5") == ("H1", "H4")
-    # M15 y M5 se dibujan pero no llevan detector propio.
-    assert charts.detected == ("D", "H4", "H1")
+    assert charts.overlays("M15") == ("M15", "H1", "H4")
+    assert charts.overlays("M5") == ("M15", "H1", "H4")
+    # M5 se dibuja pero no lleva detector propio.
+    assert charts.detected == ("D", "H4", "H1", "M15")
+
+
+def test_el_yaml_del_proyecto_lleva_las_entradas_del_propietario() -> None:
+    """Las entradas del 2026-09-13: franja de Nueva York, 1:4 y una por día."""
+    config = load_impulse_config(Path("config/impulse.yaml"))
+
+    assert config.entries.enabled is True
+    assert config.entries.timezone == "America/New_York"
+    assert config.entries.window_start == "02:00"
+    assert config.entries.window_end == "12:00"
+    assert config.entries.flat_at == "16:00"
+    assert config.entries.risk_reward == 4.0
+    assert config.entries.trades_per_day == 1
+    # El defecto del dataclass las lleva apagadas: encenderlas es una decisión.
+    assert ImpulseConfig().entries.enabled is False
+    # Y no entran en el hash: una entrada no mueve un impulso.
+    apagadas = replace(config, entries=EntriesConfig(enabled=False))
+    assert apagadas.fingerprint() == config.fingerprint()
+
+
+def test_una_franja_al_reves_se_rechaza(tmp_path: Path) -> None:
+    path = tmp_path / "impulse.yaml"
+    path.write_text(
+        yaml.safe_dump({"entries": {"window_start": "12:00", "window_end": "02:00"}}),
+        encoding="utf-8",
+    )
+    with pytest.raises(DomainError):
+        load_impulse_config(path)
 
 
 def test_el_yaml_del_proyecto_corre_la_estructura_con_la_regla_del_propietario() -> None:
@@ -185,6 +216,37 @@ def test_detect_escribe_la_carpeta_completa(workspace: Path) -> None:
     assert "reporte.txt" in ficheros
     assert "explorador.html" in ficheros
     assert "capturas" not in ficheros, "esta corrida las lleva desactivadas"
+
+
+def test_detect_escribe_las_entradas_cuando_van_encendidas(tmp_path: Path) -> None:
+    """Con M15 detectado, zonas y entradas: dos CSV más y un recuento en consola."""
+    config = _write_run(
+        tmp_path,
+        make_m1_history(weeks=10),
+        charts={"D": ["D"], "H4": ["H4"], "H1": ["H1", "H4"], "M15": ["M15", "H1", "H4"], "M5": ["M15", "H1", "H4"]},
+        rules={"warmup_bars": 5, "break_by_zone": True, "break_against_by_zone": False},
+        zones={"enabled": True},
+        entries={"enabled": True},
+    )
+    result = runner.invoke(
+        app, ["structure", "detect", "--config", str(config), "--sin-modos-r36", "--sin-antes-y-despues"]
+    )
+    assert result.exit_code == 0, result.stdout
+    assert "Entradas (" in result.stdout
+    assert "%" not in result.stdout.split("Entradas (")[1].split("\n")[0]
+
+    carpeta = next((tmp_path / "out").iterdir())
+    ficheros = {fichero.name for fichero in carpeta.iterdir()}
+    assert "entradas.csv" in ficheros
+    assert "busqueda.csv" in ficheros
+    entradas = pd.read_csv(carpeta / "entradas.csv")
+    assert {"tipo", "direccion", "entrada", "stop", "objetivo", "resultado", "contexto"} <= set(
+        entradas.columns
+    )
+    assert len(entradas) > 0
+    run = json.loads((carpeta / "run.json").read_text(encoding="utf-8"))
+    assert run["entradas"]["activas"] is True
+    assert run["entradas"]["recuento"]["LIMITES"] == len(entradas)
 
 
 def test_el_informe_de_la_cli_trae_las_secciones_del_cierre(workspace: Path) -> None:

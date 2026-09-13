@@ -196,7 +196,7 @@ venía de fuera —una señal por visita— y la marca se planta en la vela fina
 de la corrida, M5) en que
 entró, así que cae DENTRO de la vela de H4 o del Diario, en el minuto en que tocó.
 Son DIBUJO: se calculan sobre las zonas ya detectadas y no abren ni cierran ninguna
-operación. El proyecto sigue sin entradas, stops ni targets.
+operación. Las entradas del motor son la capa «Entradas», aparte.
 Obedecen el selector de ID visibles: con «ID actual» se ven las del ID vigente y su zona.">
             <input type="checkbox" id="layer-signals" checked> Señales de zona</label>
         </span>
@@ -214,6 +214,37 @@ ESCALERA: cada tramo es el nivel que estaba puesto en ese momento, no el del fin
 marca el salto —el tramo vertical punteado sobre la vela que lo estira— y pone un triángulo en
 el nivel nuevo. Apagarla deja la escalera, quita las marcas.">
               <input type="checkbox" id="layer-steps"> Extremo estirado (escalera)</label>
+          </span>
+        </span>
+        <span id="entry-layers" style="display:flex; gap:16px; flex-wrap:wrap;">
+          <label class="toggle" title="LAS ENTRADAS del propietario (2026-09-13), calculadas por el
+motor: cada LÍMITE puesto —raya punteada al precio de entrada desde la vela fina en que se
+armó hasta que se llenó o se quitó—, la OPERACIÓN viva —rectángulo rojo del riesgo y verde
+del objetivo, de la entrada a la salida— y CÓMO ACABÓ: estrella en el objetivo, aspa en el
+stop, reloj de arena en el cierre de las 16:00 de Nueva York, raya corta gris donde se
+quitó un límite sin entrar.
+Dos maneras de entrar, siempre en H1 y con M15 llevando un ID en la dirección de la
+entrada: ROTURA DEL PUL (el ID de H1 cierra más allá de su PUL sin romper el ID y se
+entra EN CONTRA del ID en el borde exterior del PUL) y TOQUE DE LA ZONA (se entra A FAVOR
+del ID de H1 en el borde interior de su PUL o APUL). El stop va al borde exterior de la
+zona de H1 o al de la zona en contra de M15 si queda más cerca; el objetivo es 1:4.
+Sólo de las 02:00 a las 11:59 de Nueva York, una operación por día, y a las 16:00 se
+cierra lo que quede vivo al precio de esa vela.
+El globo de cada operación dice el tipo, los tres precios, de dónde sale el stop, qué
+decían el Diario y H4 al armarla y cómo acabó. TODO VIENE CALCULADO: aquí sólo se dibuja.
+Sin porcentajes: se audita operación a operación.">
+            <input type="checkbox" id="layer-entries" checked> Entradas</label>
+          <span id="seeking-layer">
+            <label class="toggle" title="QUÉ SE BUSCABA en cada tramo, de fondo: verde cuando el
+Diario o H4 sólo dejaban entradas alcistas, rojo cuando sólo bajistas, gris cuando no se
+buscaba nada (el Diario en su zona en contra sin un ID de H4 en su dirección), y sin fondo
+cuando valían las dos.
+El Diario manda sobre H4 y H4 sobre H1: mientras un ID no toca su PUL o su APUL, abajo se
+acepta el ID que haya; cuando lo toca, abajo sólo se busca A FAVOR. Si una vela de H4
+llega a su UL y lo rechaza, en H1 se busca EN CONTRA de H4 hasta hacer esa entrada, y
+desde ahí H4 deja de mandar hasta que su ID muera.
+El estado de abajo dice qué se buscaba en el borde de la ventana y por qué.">
+              <input type="checkbox" id="layer-seeking" checked> Qué se busca (fondo)</label>
           </span>
         </span>
         <label class="toggle"><input type="checkbox" id="layer-wrong">
@@ -266,8 +297,8 @@ de la entrada mueve el conjunto entero, los bordes de los lados alargan el tramo
 interior lo desplaza todo. La etiqueta dice los pips de cada lado y el R:R; un pip es la
 última cifra del precio. Escape desarma sin plantar nada.
 ES DIBUJO A MANO Y NADA MÁS: no hay orden, ni ejecución, ni resultado. Nadie mira si el
-precio llegó al objetivo o al stop, no sale de la pantalla y el motor no la ve. El
-proyecto sigue sin entradas.">
+precio llegó al objetivo o al stop, no sale de la pantalla y el motor no la ve. Las
+entradas DEL MOTOR son la capa «Entradas», con su nombre en la leyenda.">
         Simular entrada
       </span>
       <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">

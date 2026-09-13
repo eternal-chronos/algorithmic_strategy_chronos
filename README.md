@@ -46,9 +46,11 @@ chronos data dukascopy -g m1 --from 2018-01-01 --to 2025-12-31
 # Verificar la zona horaria del histórico. Obligatorio antes de calcular nada.
 chronos structure verify-tz --config config/impulse.yaml
 
-# La ESTRUCTURA: el ID del Diario, de H4 y de H1 con sus zonas UL, PUL y APUL,
-# con la regla del propietario (el UL manda a favor y el ancla en contra). M15 y
-# M5 se dibujan con los ID de H1 y H4 detrás. Es lo que hay en `now/`.
+# La ESTRUCTURA —el ID del Diario, de H4, de H1 y de M15 con sus zonas UL, PUL y
+# APUL, con la regla del propietario (el UL manda a favor y el ancla en contra)—
+# y LAS ENTRADAS del propietario encima (bloque `entries` del YAML): rotura del
+# PUL y toque de la zona en H1 con M15 detrás, franja de Nueva York, una al día
+# a 1:4. M5 se dibuja con los ID de M15, H1 y H4 detrás. Es lo que hay en `now/`.
 # El explorador embebe los tres LEG_START_MODE de R-36 para poder alternarlos
 # sobre las mismas velas; `--sin-modos-r36` se ahorra las dos corridas extra.
 chronos structure detect --config config/impulse.yaml
@@ -66,17 +68,20 @@ chronos structure zonas --config config/impulse.yaml
 chronos structure rotura-por-zona --config config/impulse.yaml
 ```
 
-El módulo de estructura detecta **el impulso dominante del Diario, de H4 y de
-H1** con sus tres zonas —el UL a favor y el PUL o el APUL en contra— y **no
-emite señales de entrada**: sin entradas, sin stops, sin targets y sin medición
-de rentabilidad. M15 y M5 no llevan detector —no se les marca ID— y sobre ellas
-se dibujan los de H1 y H4 como contexto. Ver
-[`docs/MODULO_1_IMPULSO_DOMINANTE.md`](docs/MODULO_1_IMPULSO_DOMINANTE.md) y
+El módulo de estructura detecta **el impulso dominante del Diario, de H4, de H1
+y de M15** con sus tres zonas —el UL a favor y el PUL o el APUL en contra— y,
+desde el 2026-09-13, **las entradas del propietario** en su primera forma
+(`src/chronos/application/entries/trades.py`): el Diario manda sobre H4 y H4
+sobre H1, se entra en H1 por rotura del PUL o por toque de la zona con M15
+confirmando, sólo de las 02:00 a las 11:59 de Nueva York, una al día y a 1:4.
+**Sin medición de rentabilidad**: se audita operación a operación en el
+explorador. M5 no lleva detector y sobre ella se dibujan los de M15, H1 y H4.
+Ver [`docs/MODULO_1_IMPULSO_DOMINANTE.md`](docs/MODULO_1_IMPULSO_DOMINANTE.md) y
 [`docs/MODULO_2_ZONAS.md`](docs/MODULO_2_ZONAS.md).
 
 Cada corrida de estructura deja una carpeta en `reports/` con `reporte.txt`,
-`explorador.html`, los CSV de impulsos, roturas, contactos y estado, y
-`run.json`. La auditoría se hace sobre el explorador, no sobre imágenes: el
+`explorador.html`, los CSV de impulsos, roturas, contactos, estado, zonas,
+entradas y búsqueda, y `run.json`. La auditoría se hace sobre el explorador, no sobre imágenes: el
 motor no emite PNG (`reporting.captures: false`). Las del backtest llevan `report.html`
 (el panel), `trades.csv`, `equity.csv`, `metrics.json` y `run.json`.
 

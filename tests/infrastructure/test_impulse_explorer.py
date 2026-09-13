@@ -23,6 +23,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from chronos.application.entries.trades import EntriesRun, detect_entries
 from chronos.application.structure.config import (
     DAILY,
     H1,
@@ -31,6 +32,7 @@ from chronos.application.structure.config import (
     M15,
     AggregationConfig,
     ChartsConfig,
+    EntriesConfig,
     ImpulseConfig,
     ImpulseRulesConfig,
     StructureDataConfig,
@@ -345,6 +347,7 @@ def _draw(
     tmp_path: Path,
     variants: Sequence[ModeVariant] = (),
     zones: ZonesRun | None = None,
+    entries: EntriesRun | None = None,
 ) -> dict:
     node = shutil.which("node")
     if node is None:
@@ -358,6 +361,7 @@ def _draw(
                 lateralization=measure(run),
                 variants=variants,
                 zones=zones,
+                entries=entries,
             ),
             default=str,
         ),
@@ -3221,3 +3225,203 @@ def test_sin_recuadros_los_botones_de_quitar_estan_apagados(
 
     assert vacio["rectUndoDisabled"] and vacio["rectClearDisabled"]
     assert vacio["rectArmed"] is None
+
+
+# --- Las entradas (2026-09-13) ------------------------------------------------
+
+#: El reparto de las entradas: ID propio también en M15.
+ENTRY_CHARTS = ChartsConfig(
+    {DAILY: (DAILY,), H4: (H4,), H1: (H1, H4), M15: (M15, H1, H4), M5: (M15, H1, H4)}
+)
+
+
+@pytest.fixture
+def entry_run() -> ImpulseRun:
+    """La corrida del proyecto con las entradas encendidas."""
+    history = make_m1_history(weeks=16)
+    config = ImpulseConfig(
+        data=StructureDataConfig(path="no-se-lee.parquet"),
+        rules=ImpulseRulesConfig(
+            warmup_bars=5, break_by_zone=True, break_against_by_zone=False
+        ),
+        charts=ENTRY_CHARTS,
+        zones=ZonesConfig(enabled=True),
+        entries=EntriesConfig(enabled=True),
+    )
+    series = {
+        timeframe: aggregated.frame
+        for timeframe, aggregated in aggregate_all(
+            history, AggregationConfig(), config.charts.charts
+        ).items()
+    }
+    return DetectDominantImpulses(config).execute(series, provenance="fixture sintética")
+
+
+@pytest.fixture
+def entry_zones(entry_run: ImpulseRun) -> ZonesRun:
+    return detect_zones(entry_run)
+
+
+@pytest.fixture
+def entries(entry_run: ImpulseRun, entry_zones: ZonesRun) -> EntriesRun:
+    return detect_entries(entry_run, entry_zones)
+
+
+ENTRY_TRACES = (
+    "Límite puesto", "Entrada", "Entrada ejecutada", "Objetivo", "Stop",
+    "Cierre de las 16:00", "Límite quitado",
+)
+
+
+def _entradas(step: dict) -> list[str]:
+    return [
+        nombre
+        for nombre in _trace_names(step)
+        if nombre in ENTRY_TRACES or nombre.startswith("Operación · ")
+    ]
+
+
+def test_sin_entradas_el_payload_no_las_declara(run: ImpulseRun, zones: ZonesRun) -> None:
+    payload = build_payload(run, zones=zones)
+
+    assert payload["hasEntries"] is False
+    assert payload["entries"] == []
+    assert payload["seeking"] == []
+
+
+def test_cada_entrada_viaja_con_lo_que_hace_falta_para_juzgarla(
+    entry_run: ImpulseRun, entry_zones: ZonesRun, entries: EntriesRun
+) -> None:
+    """El globo tiene que poder leerse sin abrir ningún CSV."""
+    payload = build_payload(entry_run, zones=entry_zones, entries=entries)
+
+    assert payload["hasEntries"] is True
+    assert payload["entrySource"] == M5
+    assert payload["riskReward"] == 4.0
+    assert "America/New_York" in payload["entryDay"]
+    registros = payload["entries"]
+    assert len(registros) == len(entries.entries)
+    for registro in registros:
+        assert registro["k"] in ("ROTURA_PUL", "TOQUE_ZONA")
+        assert registro["d"] in ("alcista", "bajista")
+        assert registro["zk"] in ("PUL", "APUL")
+        assert registro["ss"] in ("H1", "M15")
+        assert registro["ctx"]
+        # O entró, o se quitó: nunca las dos ni ninguna.
+        assert ("xf" in registro) != ("xc" in registro)
+        if "xe" in registro:
+            assert registro["o"] in ("OBJETIVO", "STOP", "CIERRE_SESION")
+            assert registro["xe"] >= registro["xf"]
+        if "xc" in registro:
+            assert registro["why"]
+    tramos = payload["seeking"]
+    assert tramos
+    for tramo in tramos:
+        assert set(tramo["a"]) <= {"alcista", "bajista"}
+        assert tramo["why"]
+    assert "x1" not in tramos[-1]
+
+
+def test_la_capa_de_entradas_se_dibuja_y_se_apaga(
+    entry_run: ImpulseRun, entry_zones: ZonesRun, entries: EntriesRun, tmp_path: Path
+) -> None:
+    resultado = _draw(entry_run, tmp_path, zones=entry_zones, entries=entries)
+    encendida = _entradas(_step(resultado, "entradas-por-defecto"))
+    apagada = _entradas(_step(resultado, "entradas-apagadas"))
+
+    assert not resultado["unknownElements"], resultado["unknownElements"]
+    assert encendida, _trace_names(_step(resultado, "entradas-por-defecto"))
+    assert "Límite puesto" in encendida
+    assert "Entrada" in encendida
+    assert not apagada
+
+
+def test_sin_entradas_no_hay_nada_que_dibujar(
+    run: ImpulseRun, zones: ZonesRun, tmp_path: Path
+) -> None:
+    """La casilla se esconde, así que los dos pasos tienen que salir iguales."""
+    resultado = _draw(run, tmp_path, zones=zones)
+    encendida = _step(resultado, "entradas-por-defecto")
+    apagada = _step(resultado, "entradas-apagadas")
+
+    assert _trace_names(encendida) == _trace_names(apagada)
+    assert not _entradas(encendida)
+    assert not encendida["plot"]["seeking"]
+
+
+def test_el_fondo_de_que_se_busca_se_dibuja_y_se_apaga(
+    entry_run: ImpulseRun, entry_zones: ZonesRun, entries: EntriesRun, tmp_path: Path
+) -> None:
+    resultado = _draw(entry_run, tmp_path, zones=entry_zones, entries=entries)
+    con = _step(resultado, "entradas-por-defecto")["plot"]["seeking"]
+    sin = _step(resultado, "busqueda-apagada")["plot"]["seeking"]
+
+    assert con, "el histórico de prueba tiene tramos en los que sólo se busca una dirección"
+    assert all(item["name"].startswith("busqueda-") for item in con)
+    assert not sin
+
+
+def test_las_notas_dicen_cuantas_entradas_hay_y_que_se_busca(
+    entry_run: ImpulseRun, entry_zones: ZonesRun, entries: EntriesRun, tmp_path: Path
+) -> None:
+    resultado = _draw(entry_run, tmp_path, zones=entry_zones, entries=entries)
+    notas = _step(resultado, "entradas-por-defecto")["notes"]
+
+    assert "ENTRADAS:" in notas
+    assert "por rotura del PUL" in notas
+    assert "R:R 1:4,0" in notas
+    assert "QUÉ SE BUSCA en el borde de la ventana" in notas
+    apagada = _step(resultado, "entradas-apagadas")["notes"]
+    assert "capa apagada" in apagada
+
+
+def test_cada_final_de_operacion_tiene_su_propia_marca(
+    entry_run: ImpulseRun, entry_zones: ZonesRun, entries: EntriesRun, tmp_path: Path
+) -> None:
+    """Lo nuevo tiene que distinguirse: una traza por final y su entrada en la leyenda."""
+    resultado = _draw(entry_run, tmp_path, zones=entry_zones, entries=entries)
+    nombres = _entradas(_step(resultado, "entradas-por-defecto"))
+    finales = {
+        entry.outcome.value for entry in entries.filled if entry.outcome is not None
+    }
+
+    assert len(nombres) == len(set(nombres))
+    if "OBJETIVO" in finales:
+        assert "Objetivo" in nombres
+    if "STOP" in finales:
+        assert "Stop" in nombres
+    if "CIERRE_SESION" in finales:
+        assert "Cierre de las 16:00" in nombres
+
+
+def test_el_replay_no_adelanta_ninguna_entrada(
+    entry_run: ImpulseRun, entry_zones: ZonesRun, entries: EntriesRun, tmp_path: Path
+) -> None:
+    """Ni el límite, ni la operación, ni el fondo pueden caer más allá del reloj."""
+    resultado = _draw(entry_run, tmp_path, zones=entry_zones, entries=entries)
+    payload = build_payload(entry_run, zones=entry_zones, entries=entries)
+    pasos = _replay_steps(resultado)
+    assert pasos
+
+    for paso in pasos:
+        dibujado = paso["plot"]["maxEngineX"]
+        assert dibujado is not None, paso["label"]
+        assert _minute(dibujado) <= _clock(payload, paso), paso["label"]
+
+
+def test_las_entradas_no_se_dibujan_en_otro_modo_de_r36(
+    entry_run: ImpulseRun, entry_zones: ZonesRun, entries: EntriesRun, tmp_path: Path
+) -> None:
+    """Salen de las zonas del modo activo: en otro serían entradas de otros ID."""
+    series = {timeframe: analysis.bars for timeframe, analysis in entry_run.analyses.items()}
+    built = []
+    for mode in LegStartMode:
+        tuned = replace(
+            entry_run.config, rules=replace(entry_run.config.rules, leg_start_mode=mode)
+        )
+        built.append(ModeVariant(run=DetectDominantImpulses(tuned).execute(series)))
+    resultado = _draw(entry_run, tmp_path, tuple(built), zones=entry_zones, entries=entries)
+
+    paso = _step(resultado, "modo-L2_siguiente_barra")
+    assert not _entradas(paso)
+    assert not paso["plot"]["seeking"]

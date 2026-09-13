@@ -54,20 +54,40 @@ implementada, testeada y con un backtest reproducible.
 | 2.2 | — | *(aparcada: FVG)* | — | — |
 | 3.0 | Señales de entrada | La cascada H4 → H1 con el Diario de veto | **Retirada** (setup 1, borrado del árbol) | — |
 | 3.1 | Entradas | Las operaciones con límite, stop y objetivo | **Retirada** (setup 1, borrado del árbol) | — |
+| 4 | Las entradas del propietario | Diario → H4 → H1 con M15 detrás: rotura del PUL y toque de la zona, franja de Nueva York, una al día a 1:4 | **Primera forma** (2026-09-13), se ajusta mirando el dibujo; sin medición de rentabilidad | `chronos structure detect` |
 
-### Estado actual: la estructura sola, con el ID en H1 y M5 dentro
+### Estado actual: la estructura con el ID en M15 y las entradas encima
 
-El setup 1 —la cascada H4 → H1, las operaciones y su estadística— se ha
-**borrado del árbol**, no apagado. Lo que corre `chronos structure detect` con el
-fichero del proyecto es la ESTRUCTURA y nada más: el ID del Diario, de H4 y de
-H1 con sus tres zonas —el UL a favor y el PUL o el APUL en contra— y la regla del
-propietario —el UL manda a favor y el ancla en contra—. H1 lleva además el ID de
-H4 detrás como contexto, y M15 y M5 los dos. M5 no lleva nada suyo: está para
-afinar la entrada y el stop a mano. Sin señales de entrada, sin entradas, sin
-stops, sin targets y sin medición de rentabilidad.
+Lo que corre `chronos structure detect` con el fichero del proyecto es la
+ESTRUCTURA —el ID del Diario, de H4, de H1 y de M15 con sus tres zonas, el UL a
+favor y el PUL o el APUL en contra, y la regla del propietario: el UL manda a
+favor y el ancla en contra— y, desde el 2026-09-13, **las entradas tal como las
+dictó el propietario**, en su primera forma. M15 lleva ID propio porque las
+entradas lo necesitan; M5 no lleva nada suyo y es donde se afina a mano.
 
-El fichero del proyecto ya no reproduce la línea base de la fase 1 —H1 entra en
-el hash—; la línea base se reconstruye desde él con `phase1_config`.
+Las entradas, en corto (la regla entera y sus supuestos declarados están en
+`src/chronos/application/entries/trades.py`):
+
+- **el contexto**: el Diario manda sobre H4 y H4 sobre H1. Mientras un ID no
+  toca su PUL o su APUL, abajo se acepta el ID que haya; cuando lo toca, abajo
+  sólo se busca a favor. Si una vela de H4 llega a su UL y lo rechaza, en H1 se
+  busca en contra de H4 hasta hacer esa entrada, y desde ahí H4 deja de mandar
+  hasta que su ID muera;
+- **dos entradas**, siempre en H1 y con M15 llevando un ID en la dirección de la
+  entrada: **rotura del PUL** (el ID de H1 cierra más allá de su PUL —sólo el
+  PUL— sin romper el ID, y se entra en contra del ID en el borde exterior del
+  PUL) y **toque de la zona** (a favor del ID de H1, en el borde interior de su
+  PUL o APUL). El stop va al borde exterior de la zona de H1 o al de la zona en
+  contra de M15 si queda más cerca; el objetivo es 1:4;
+- **el reloj**: sólo de las 02:00 a las 11:59 de Nueva York, una operación por
+  día, y a las 16:00 se cierra lo que quede vivo al precio de esa vela.
+
+Se entrega dibujado —capa «Entradas» y fondo «Qué se busca» del explorador— y
+en `entradas.csv` y `busqueda.csv`. **No hay medición de rentabilidad** y es a
+propósito: primero se audita operación a operación.
+
+El fichero del proyecto ya no reproduce la línea base de la fase 1 —H1 y M15
+entran en el hash—; la línea base se reconstruye desde él con `phase1_config`.
 
 Lo que sigue es el registro de cómo se llegó hasta aquí.
 
