@@ -338,27 +338,30 @@ una captura señalando lo que aún no se detecta.">
     </div>
     <div class="group" id="account-group">
       <span title="Una cuenta de mentira para poner precio a lo que se dibuja. Se pone el
-CAPITAL de partida y cuánto se arriesga por operación —un % de ese capital o una cantidad
-fija—, y con una caja plantada los tres botones la apuntan: GANADA
-suma el riesgo por el R:R de esa caja, PERDIDA resta el riesgo entero y BE no mueve nada.
-«Deshacer» quita la última y devuelve su caja al gráfico, «Reiniciar» vuelve al capital de
-partida y «Copiar» se lleva el historial entero en texto.
-Cambiar el capital o el riesgo RECALCULA la curva completa: de cada operación se guarda su
-múltiplo de riesgo, no los euros.
+CAPITAL y cuánto se arriesga por operación —un % de ese capital o una cantidad fija—, y
+con una caja plantada los tres botones la apuntan: GANADA suma el riesgo por el R:R de esa
+caja, PERDIDA resta el riesgo entero y BE no mueve nada.
+«Deshacer» quita la última y devuelve su caja al gráfico, «Reiniciar» borra las
+operaciones y «Copiar» se lleva el historial entero en texto.
+Cambiar el capital o el riesgo NO toca lo ya apuntado: cada operación guarda los dólares
+que se jugó, y la casilla sólo manda sobre la SIGUIENTE. La curva arranca del capital que
+había puesto al apuntar la primera.
 NO ES DINERO NI ES UN BACKTEST DEL MOTOR: quien decide si una entrada ganó o perdió es el
 propietario mirando el gráfico. Nadie comprueba si el precio llegó al objetivo o al stop y
 el motor no ve ninguna de estas operaciones.">
         Cuenta simulada
       </span>
       <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-        <label class="toggle" title="Capital de partida, en dólares. Cambiarlo vuelve a
-contar la curva entera desde el principio.">Capital
+        <label class="toggle" title="Capital puesto, en dólares: la base del % de riesgo
+y, sin operaciones apuntadas, el arranque de la curva. Cambiarlo con operaciones apuntadas
+no mueve el saldo: sólo cambia la apuesta de la siguiente.">Capital
           <input type="number" id="account-initial" min="1" step="10" style="width:92px"
-                 aria-label="Capital de partida en dólares">
+                 aria-label="Capital puesto en dólares">
         </label>
-        <label class="toggle" title="Cuánto se arriesga en cada operación: un porcentaje del
-CAPITAL DE PARTIDA —el de la casilla de al lado, no el saldo vivo: la apuesta no crece con
-las ganancias— o una cantidad fija en dólares. Para arriesgar más, sube el capital.">Riesgo
+        <label class="toggle" title="Cuánto se arriesga en la SIGUIENTE operación: un
+porcentaje del capital de la casilla de al lado —no del saldo vivo: la apuesta no crece con
+las ganancias— o una cantidad fija en dólares. Para arriesgar más, sube el capital o el
+porcentaje; lo ya apuntado se queda con la apuesta que tenía.">Riesgo
           <select id="account-mode" aria-label="Cómo se mide el riesgo"></select>
           <input type="number" id="account-risk" min="0.01" step="0.5" style="width:82px"
                  aria-label="Riesgo por operación">
@@ -369,7 +372,7 @@ Sin caja no hay nada que cobrar y los tres están apagados."></div>
           <button type="button" id="account-undo" title="Quita la última operación apuntada y
 devuelve su caja al gráfico">Deshacer</button>
           <button type="button" id="account-reset" title="Borra las operaciones y vuelve al
-capital de partida">Reiniciar</button>
+capital de la casilla">Reiniciar</button>
           <button type="button" id="account-copy" title="Copia al portapapeles la
 configuración, el historial y las estadísticas, en texto">Copiar</button>
         </div>
@@ -506,7 +509,9 @@ configuración, el historial y las estadísticas, en texto">Copiar</button>
       verde, lo que suma si llega el objetivo; la roja, lo que resta si toca el stop, con el
       capital y el riesgo puestos en la barra. Los botones <b>Ganada · Perdida · BE</b>
       apuntan la caja y mueven el saldo, y el estado dice cuánto queda, cuántas operaciones
-      van, el acierto, la R acumulada y la caída máxima. Lo apunta el propietario a mano:
+      van, el acierto, la R acumulada y la caída máxima. Cambiar el capital o el riesgo
+      sólo cambia la apuesta de la siguiente: lo apuntado se queda con la suya. Lo apunta
+      el propietario a mano:
       no es dinero, no es un backtest del motor y nadie mira las velas por ti</span>
   </div>
 

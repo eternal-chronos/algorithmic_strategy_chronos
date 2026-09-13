@@ -953,7 +953,8 @@ steps.push(snapshot('cuenta-deshecha'));
 elements['account-copy'].fire('click');
 steps.push(snapshot('cuenta-copiada'));
 
-// Cambiar el capital de partida vuelve a contar la curva entera.
+// Cambiar el capital no toca lo apuntado: el saldo se queda y sólo cambia la
+// apuesta de la siguiente (el 2 % de 100 $ son 2,00 $).
 elements['account-initial'].fire('change', { target: { value: '100' } });
 steps.push(snapshot('cuenta-capital-100'));
 
@@ -961,6 +962,13 @@ steps.push(snapshot('cuenta-capital-100'));
 elements['account-mode'].fire('change', { target: { value: 'cash' } });
 elements['account-risk'].fire('change', { target: { value: '5' } });
 steps.push(snapshot('cuenta-riesgo-fijo'));
+
+// La siguiente ganada se cobra con los 5 $ nuevos; las dos anteriores siguen
+// valiendo 1,00 $ cada una en el historial.
+plantarCaja('long');
+apuntar('win');
+elements['account-copy'].fire('click');
+steps.push(snapshot('cuenta-riesgo-nuevo'));
 
 // Un riesgo imposible no se acepta y el control repone el que está puesto.
 elements['account-risk'].fire('change', { target: { value: '0' } });

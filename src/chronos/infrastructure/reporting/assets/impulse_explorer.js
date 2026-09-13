@@ -196,12 +196,12 @@
      * `arming === "rect:PUL"` es el botón de ese nombre esperando el clic que
      * planta el siguiente. */
     rects: [],
-    /* Cuenta simulada (I.2). El capital de partida, cómo se mide el riesgo de
-     * cada operación y las que se llevan apuntadas. De cada una se guarda su
-     * MÚLTIPLO DE RIESGO, no los euros: el dinero se recalcula entero en cada
-     * dibujo, así que cambiar el capital o el riesgo reescala la curva en vez de
-     * dejar cifras de una configuración que ya no está puesta. Lo apunta el
-     * propietario a mano: el motor no ve ninguna de estas operaciones. */
+    /* Cuenta simulada (I.2). El capital puesto, cómo se mide el riesgo de la
+     * SIGUIENTE operación y las que se llevan apuntadas. Cada una guarda los
+     * dólares que se jugó y el capital que había puesto al apuntarla: lo ya
+     * cobrado no cambia al tocar la casilla, sólo lo que venga detrás. Lo
+     * apunta el propietario a mano: el motor no ve ninguna de estas
+     * operaciones. */
     account: {
       initial: 50,
       mode: "percent",   // percent | cash
@@ -2864,16 +2864,16 @@
    * o perdió es el propietario, mirando el gráfico. El motor no ve estas
    * operaciones, no hay orden, no hay ejecución y esto no es dinero.
    *
-   * Del histórico se guarda el MÚLTIPLO DE RIESGO de cada operación (+ratio,
-   * -1, 0), no los euros: el dinero se recalcula entero desde el capital de
-   * partida cada vez que se dibuja. Así, cambiar el capital o el riesgo reescala
-   * la curva completa en vez de dejar apuntadas cifras de una configuración que
-   * ya no está puesta.
+   * Cada operación guarda los DÓLARES que se jugó y su múltiplo de riesgo
+   * (+ratio, -1, 0). Lo cobrado queda cobrado: cambiar el capital o el riesgo
+   * de la barra sólo cambia la apuesta de las operaciones que vengan detrás, no
+   * lo que ganaron o perdieron las ya apuntadas. La curva arranca del capital
+   * que había puesto al apuntar la primera; hasta entonces, del de la casilla.
    *
-   * El riesgo NO compone: el porcentaje es del capital escrito en la casilla y
-   * la apuesta es la misma en todas las operaciones. Es lo que se quiere para
-   * juzgar una racha —si el tamaño crece con el saldo, una buena seguida tapa lo
-   * que venga detrás—, y para subirla se sube el capital a mano.
+   * El riesgo NO compone: el porcentaje es del capital escrito en la casilla,
+   * no del saldo vivo. Es lo que se quiere para juzgar una racha —si el tamaño
+   * crece con el saldo, una buena seguida tapa lo que venga detrás—, y para
+   * subir la apuesta se sube el capital a mano, sin mover nada de lo anterior.
    */
   var ACCOUNT_RESULTS = [
     {
@@ -2932,32 +2932,39 @@
     return count.toLocaleString("es-ES") + " " + (count === 1 ? one : many);
   }
 
-  /* Lo que se arriesga en cada operación. El porcentaje es SIEMPRE del capital
-   * de partida —el que hay escrito en la casilla—, no del saldo vivo: el
-   * propietario pone 50 $ y el 19 % son 9,50 $ en la primera operación y en la
-   * número treinta. Para que la apuesta suba con la cuenta hay que subir el
-   * capital a mano, y entonces la curva se vuelve a contar entera con él. */
+  /* Lo que se arriesga en la SIGUIENTE operación. El porcentaje es del capital
+   * que hay escrito en la casilla, no del saldo vivo: el propietario pone 50 $ y
+   * el 19 % son 9,50 $ hasta que cambie la casilla. Para que la apuesta suba
+   * con la cuenta hay que subir el capital a mano, y eso sólo cambia lo que
+   * viene: las operaciones ya apuntadas guardan la suya. */
   function riskFor() {
     var account = state.account;
     if (account.mode === "cash") { return round2(account.risk); }
     return round2(account.initial * account.risk / 100);
   }
 
-  /* La curva, recalculada desde el capital de partida. Cada fila lleva lo que se
-   * arriesgaba en ese momento, lo que movió y el saldo con el que se quedó. */
+  /* De dónde arranca la curva: del capital que había puesto al apuntar la
+   * primera operación. Sin ninguna, de la casilla. Así tocar la casilla con
+   * operaciones apuntadas no desplaza el saldo: sólo cambia la siguiente apuesta. */
+  function accountStart() {
+    var trades = state.account.trades;
+    return trades.length ? trades[0].initial : state.account.initial;
+  }
+
+  /* La curva, sumando lo que cada operación movió con los dólares que se jugó
+   * ENTONCES. Cada fila lleva esa apuesta, lo que movió y el saldo que dejó. */
   function accountRows() {
-    var balance = state.account.initial;
+    var balance = accountStart();
     return state.account.trades.map(function (trade) {
-      var risk = riskFor();
-      var delta = round2(risk * trade.r);
+      var delta = round2(trade.risk * trade.r);
       balance = round2(balance + delta);
-      return { trade: trade, risk: risk, delta: delta, balance: balance };
+      return { trade: trade, risk: trade.risk, delta: delta, balance: balance };
     });
   }
 
   function accountStats() {
     var rows = accountRows();
-    var initial = state.account.initial;
+    var initial = accountStart();
     var balance = rows.length ? rows[rows.length - 1].balance : initial;
     var counts = { win: 0, loss: 0, be: 0 };
     var r = 0;
@@ -3001,9 +3008,12 @@
     state.account.copied = null;
     state.account.trades.push({
       result: result,
-      // El múltiplo de riesgo: es lo único que no depende del capital puesto.
       r: result === "win" ? ratio : (result === "loss" ? -1 : 0),
       ratio: ratio,
+      // Los dólares que se juega y el capital puesto AHORA: se quedan con la
+      // operación. Cambiar la barra después no toca lo ya cobrado.
+      risk: riskFor(),
+      initial: state.account.initial,
       chart: state.chart,
       at: iso(sim.from),
       box: {
@@ -3076,20 +3086,20 @@
 
   function riskLabel() {
     return state.account.mode === "percent"
-      ? pct(state.account.risk) + " del capital de partida"
+      ? pct(state.account.risk) + " de " + money(state.account.initial) + " puestos"
       : money(state.account.risk) + " fijos";
   }
 
-  /* El historial en texto plano, para pegarlo fuera del explorador. Lleva la
-   * configuración con la que está contado: la misma lista de operaciones da otra
-   * curva con otro capital o con otro riesgo. */
+  /* El historial en texto plano, para pegarlo fuera del explorador. Cada fila
+   * lleva los dólares que se jugó entonces: la configuración de arriba es la de
+   * la siguiente operación, no la de todas. */
   function accountText() {
     var stats = accountStats();
     var lines = [
       "CUENTA SIMULADA · la apunta el propietario a mano sobre cajas dibujadas: " +
         "el motor no ve estas operaciones y no hay orden ninguna",
-      "capital de partida " + money(stats.initial) + " · riesgo " + riskLabel() +
-        " · " + money(stats.risk) + " en la siguiente operación",
+      "partía de " + money(stats.initial) + " · riesgo " + riskLabel() +
+        " = " + money(stats.risk) + " en la siguiente operación",
       "capital " + money(stats.balance) + " · " + signedMoney(stats.net) +
         " (" + signedPct(stats.netPct) + ") · " + signedR(stats.r) +
         " · " + plural(stats.trades, "operación", "operaciones") +
@@ -3107,7 +3117,7 @@
     lines.push(
       pad("nº", 4) + pad("entrada (UTC)", 21) + pad("gráfico", 9) + pad("lado", 7) +
       pad("precio", 9) + pad("stop", 9) + pad("objetivo", 10) + pad("R:R", 8) +
-      pad("resultado", 12) + pad("R", 7) + pad("mueve", 12) + "capital"
+      pad("resultado", 12) + pad("R", 7) + pad("riesgo", 10) + pad("mueve", 12) + "capital"
     );
     stats.rows.forEach(function (row, index) {
       var trade = row.trade;
@@ -3117,7 +3127,7 @@
         pad(price(trade.box.entry), 9) + pad(price(trade.box.stop), 9) +
         pad(price(trade.box.target), 10) + pad("1:" + decimal(trade.ratio), 8) +
         pad(RESULT_NAMES[trade.result], 12) + pad(signedR(trade.r).replace(" R", ""), 7) +
-        pad(signedMoney(row.delta), 12) + money(row.balance)
+        pad(money(row.risk), 10) + pad(signedMoney(row.delta), 12) + money(row.balance)
       );
     });
     return lines.join("\n");
@@ -3181,7 +3191,7 @@
     var text = "CUENTA SIMULADA: capital " + money(stats.balance) +
       " (partía de " + money(stats.initial) + ") · " + signedMoney(stats.net) +
       " (" + signedPct(stats.netPct) + ") · riesgo " + riskLabel() + " = " +
-      money(stats.risk) + " por operación";
+      money(stats.risk) + " en la siguiente operación";
     if (stats.trades) {
       text += " · " + plural(stats.trades, "operación apuntada", "operaciones apuntadas") +
         " (" + stats.counts.win + " ganadas, " + stats.counts.loss + " perdidas, " +

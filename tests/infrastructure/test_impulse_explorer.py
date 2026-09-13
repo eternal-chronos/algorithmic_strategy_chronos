@@ -2809,8 +2809,9 @@ def test_la_caja_nueva_se_planta_con_el_ratio_puesto(
 # Un capital, un riesgo por operación y tres botones que apuntan la caja que hay
 # dibujada. El recorrido del stub trabaja siempre sobre la misma caja —1:2 exacto
 # sobre el encuadre 1,05 → 1,35—, así que las cifras se pueden comprobar a mano:
-# 50 $ al 2 % son 1,00 $ de riesgo y 2,00 $ de objetivo, en la primera operación
-# y en todas las demás: el porcentaje es del capital de partida y no compone.
+# 50 $ al 2 % son 1,00 $ de riesgo y 2,00 $ de objetivo hasta que se toque la
+# barra: el porcentaje es del capital puesto y no compone. Cada operación se queda
+# con los dólares que se jugó: cambiar el capital o el riesgo sólo cambia la siguiente.
 
 
 def _cuenta(step: dict) -> dict:
@@ -2867,12 +2868,12 @@ def test_el_riesgo_es_del_capital_de_partida_y_no_compone(
 ) -> None:
     """Con 52,00 $ en la cuenta se sigue arriesgando el 2 % de los 50,00 $ que se
     pusieron: la apuesta no crece con las ganancias. Para subirla, se sube el
-    capital."""
+    capital o el porcentaje."""
     paso = _step(_draw(run, tmp_path), "cuenta-perdida")
 
     assert _cuenta(paso)["summary"] == "51,00 $ · riesgo 1,00 $ · 2 operaciones · +1,0 R"
     assert "capital 51,00 $ (partía de 50,00 $) · +1,00 $ (+2,0 %)" in paso["notes"]
-    assert "riesgo 2,0 % del capital de partida = 1,00 $ por operación" in paso["notes"]
+    assert "riesgo 2,0 % de 50,00 $ puestos = 1,00 $ en la siguiente operación" in paso["notes"]
     assert "acierto 50,0 %" in paso["notes"]
     assert "caída máxima 1,00 $ (1,9 %)" in paso["notes"]
 
@@ -2906,7 +2907,7 @@ def test_copiar_se_lleva_la_configuracion_el_historial_y_las_estadisticas(
     paso = _step(_draw(run, tmp_path), "cuenta-copiada")
     texto = paso["copiado"]
 
-    assert "capital de partida 50,00 $ · riesgo 2,0 % del capital de partida" in texto
+    assert "partía de 50,00 $ · riesgo 2,0 % de 50,00 $ puestos = 1,00 $" in texto
     assert "capital 51,00 $ · +1,00 $ (+2,0 %) · +1,0 R · 2 operaciones" in texto
     lineas = [linea for linea in texto.splitlines() if linea.startswith(("1 ", "2 "))]
     assert len(lineas) == 2
@@ -2916,23 +2917,44 @@ def test_copiar_se_lleva_la_configuracion_el_historial_y_las_estadisticas(
     assert "historial copiado al portapapeles (2 operaciones)" in paso["notes"]
 
 
-def test_cambiar_el_capital_vuelve_a_contar_la_curva_entera(
+def test_cambiar_el_capital_no_toca_lo_apuntado_solo_la_siguiente_apuesta(
     run: ImpulseRun, tmp_path: Path
 ) -> None:
-    """De cada operación se guarda su múltiplo de riesgo, no los euros: con 100 $
-    la misma ganada y la misma perdida valen el doble."""
+    """Cada operación guarda los dólares que se jugó: con 100 $ en la casilla la
+    ganada y la perdida siguen valiendo lo que valieron, la curva sigue partiendo
+    de los 50 $ que había y sólo la siguiente apuesta pasa a 2,00 $."""
     paso = _step(_draw(run, tmp_path), "cuenta-capital-100")
 
     assert _cuenta(paso)["initial"] == "100"
-    assert _cuenta(paso)["summary"] == "102,00 $ · riesgo 2,00 $ · 2 operaciones · +1,0 R"
+    assert _cuenta(paso)["summary"] == "51,00 $ · riesgo 2,00 $ · 2 operaciones · +1,0 R"
+    assert "capital 51,00 $ (partía de 50,00 $) · +1,00 $ (+2,0 %)" in paso["notes"]
+    assert "riesgo 2,0 % de 100,00 $ puestos = 2,00 $ en la siguiente operación" in paso["notes"]
 
 
 def test_el_riesgo_en_dolares_fijos_no_compone(run: ImpulseRun, tmp_path: Path) -> None:
     paso = _step(_draw(run, tmp_path), "cuenta-riesgo-fijo")
 
     assert _cuenta(paso)["mode"] == "cash"
-    assert _cuenta(paso)["summary"] == "105,00 $ · riesgo 5,00 $ · 2 operaciones · +1,0 R"
-    assert "riesgo 5,00 $ fijos = 5,00 $ por operación" in paso["notes"]
+    assert _cuenta(paso)["summary"] == "51,00 $ · riesgo 5,00 $ · 2 operaciones · +1,0 R"
+    assert "riesgo 5,00 $ fijos = 5,00 $ en la siguiente operación" in paso["notes"]
+
+
+def test_la_apuesta_nueva_solo_cobra_desde_ese_momento(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    """Con el riesgo subido a 5,00 $, la ganada siguiente suma 10,00 $ (1:2) y
+    las dos anteriores siguen en el historial con su 1,00 $ de entonces."""
+    paso = _step(_draw(run, tmp_path), "cuenta-riesgo-nuevo")
+
+    assert _cuenta(paso)["summary"] == "61,00 $ · riesgo 5,00 $ · 3 operaciones · +3,0 R"
+    filas = [
+        linea for linea in paso["copiado"].splitlines()
+        if linea.startswith(("1 ", "2 ", "3 "))
+    ]
+    assert len(filas) == 3
+    assert "1,00 $" in filas[0] and "+2,00 $" in filas[0] and "52,00 $" in filas[0]
+    assert "1,00 $" in filas[1] and "-1,00 $" in filas[1] and "51,00 $" in filas[1]
+    assert "5,00 $" in filas[2] and "+10,00 $" in filas[2] and "61,00 $" in filas[2]
 
 
 def test_un_riesgo_imposible_no_se_acepta(run: ImpulseRun, tmp_path: Path) -> None:
@@ -2940,7 +2962,7 @@ def test_un_riesgo_imposible_no_se_acepta(run: ImpulseRun, tmp_path: Path) -> No
     paso = _step(_draw(run, tmp_path), "cuenta-riesgo-invalido")
 
     assert _cuenta(paso)["risk"] == "5"
-    assert _cuenta(paso)["summary"].startswith("105,00 $ · riesgo 5,00 $")
+    assert _cuenta(paso)["summary"].startswith("61,00 $ · riesgo 5,00 $")
 
 
 def test_reiniciar_borra_las_operaciones_y_vuelve_al_capital_de_partida(
