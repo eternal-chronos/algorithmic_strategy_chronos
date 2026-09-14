@@ -95,9 +95,12 @@ def test_nadie_del_motor_lee_las_senales_de_zona() -> None:
     detector: la promesa hecha al propietario es que encenderlas no mueve un
     impulso, ni una zona, ni una rotura.
     """
+    # La probabilidad de zona cuenta sobre las señales y es dibujo igual que
+    # ellas: puede leerlas, y nadie del motor puede leerla a ella (abajo).
     permitido = {
         SRC / "domain" / "structure" / "zone_signals.py",
         SRC / "application" / "structure" / "zone_signals.py",
+        SRC / "application" / "structure" / "zone_odds.py",
     }
     for layer in ("domain", "application"):
         for path in _modules(layer):
@@ -105,4 +108,20 @@ def test_nadie_del_motor_lee_las_senales_de_zona() -> None:
                 continue
             assert not any("zone_signals" in name for name in _imports(path)), (
                 f"{path.relative_to(SRC)} importa las señales de zona"
+            )
+
+
+def test_nadie_del_motor_lee_la_probabilidad_de_zona() -> None:
+    """La probabilidad de zona es dibujo: el porcentaje escrito sobre una zona no
+    puede entrar en ninguna regla, ni de detección ni de rotura."""
+    permitido = {
+        SRC / "domain" / "structure" / "zone_odds.py",
+        SRC / "application" / "structure" / "zone_odds.py",
+    }
+    for layer in ("domain", "application"):
+        for path in _modules(layer):
+            if path in permitido:
+                continue
+            assert not any("zone_odds" in name for name in _imports(path)), (
+                f"{path.relative_to(SRC)} importa la probabilidad de zona"
             )

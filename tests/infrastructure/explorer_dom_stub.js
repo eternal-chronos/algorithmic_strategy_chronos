@@ -64,6 +64,7 @@ function declare(id) {
  'signal-layers', 'layer-signals',
  'analysis-layers', 'pullback-layer', 'layer-pullback',
  'accumulation-layer', 'layer-accumulation',
+ 'odds-layer', 'layer-odds',
  'break-layers', 'avoided-layer', 'layer-avoided', 'steps-layer', 'layer-steps',
  'blind-seed', 'blind-start', 'blind-reveal', 'blind-exit',
  'sim-group', 'sim-buttons', 'sim-ratio', 'sim-clear',
@@ -207,7 +208,11 @@ global.Plotly = {
             ? trace.marker.symbol.slice()
             : null,
           captions: trace.text && trace.text.length <= 200 ? trace.text.slice() : null,
-          xs: trace.mode === 'markers' && (trace.x || []).length <= 200
+          // La probabilidad de zona ESCRIBE el texto y lleva el globo aparte.
+          hovers: trace.hovertext && trace.hovertext.length <= 200 ? trace.hovertext.slice() : null,
+          // Los marcadores y los textos escritos (la probabilidad de zona): dónde
+          // están, para comprobar que ninguno se adelanta al reloj del replay.
+          xs: (trace.mode === 'markers' || trace.mode === 'text') && (trace.x || []).length <= 200
             ? trace.x.slice()
             : null,
           // Fase 2.1 (§3.2): la línea del extremo va en ESCALERA, así que «cuántos
@@ -327,7 +332,7 @@ function snapshot(label) {
     // el control se separan, el explorador miente sobre lo que se está viendo.
     boxes: ['layer-limbo', 'layer-marks', 'layer-contacts', 'layer-mid', 'layer-wrong',
       'layer-frame', 'layer-zones', 'layer-signals',
-      'layer-pullback', 'layer-accumulation',
+      'layer-pullback', 'layer-accumulation', 'layer-odds',
       'layer-avoided', 'layer-steps']
       .reduce(function (state, id) {
         state[id] = elements[id].checked === true;
@@ -543,6 +548,14 @@ steps.push(snapshot('acumulacion-por-defecto'));
 elements['layer-accumulation'].fire('change', { target: { checked: false } });
 steps.push(snapshot('acumulacion-apagada'));
 elements['layer-accumulation'].fire('change', { target: { checked: true } });
+
+// La probabilidad de zona: el texto sobre cada zona del ID que se mira. Se
+// enciende y se apaga sobre las mismas velas; sin zonas en el payload los dos
+// pasos salen iguales.
+steps.push(snapshot('probabilidad-por-defecto'));
+elements['layer-odds'].fire('change', { target: { checked: false } });
+steps.push(snapshot('probabilidad-apagada'));
+elements['layer-odds'].fire('change', { target: { checked: true } });
 
 // Fase 2.1 (§3.2): la escalera del extremo. Los saltos son una capa propia que se
 // apaga; los ESCALONES no, porque no son una capa sino la línea del ID dibujada

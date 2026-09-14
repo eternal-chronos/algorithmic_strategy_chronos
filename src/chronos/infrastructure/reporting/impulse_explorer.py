@@ -49,6 +49,7 @@ from chronos.application.structure.pullback import (
     pullback_boxes,
     with_confluence,
 )
+from chronos.application.structure.zone_odds import TimeframeOdds, zone_odds
 from chronos.application.structure.zone_signals import (
     TimeframeSignals,
     detect_zone_signals,
@@ -56,6 +57,7 @@ from chronos.application.structure.zone_signals import (
 from chronos.application.structure.zones import ImpulseZones, TimeframeZones, ZonesRun
 from chronos.domain.indicators import rsi, rsi_zones
 from chronos.domain.structure.enums import BreakKind, ContactKind, MachineState
+from chronos.domain.structure.zone_odds import Tally
 from chronos.domain.structure.zone_signals import ZoneSignalKind
 from chronos.domain.structure.zones import Zone
 from chronos.infrastructure.clock import SystemClock
@@ -205,6 +207,13 @@ def build_payload(
     # cálculo sigue viviendo en `application`, no en el dibujo.
     signals = detect_zone_signals(run, zones).per_timeframe if zoned else {}
     pullbacks = _pullbacks(run, zoned)
+    # La probabilidad de zona cuelga de las señales: cada toque con cómo murió
+    # su ID, y las visitas del precio a la franja. Misma regla: sin zonas, nada.
+    odds = {
+        timeframe: zone_odds(run.analyses[timeframe], zoned[timeframe], signals[timeframe])
+        for timeframe in zoned
+        if timeframe in signals and timeframe in run.analyses
+    }
     bars = {
         chart: _bars_payload(frame, max_bars, with_rsi=chart in RSI_CHARTS)
         for chart, frame in run.chart_bars.items()
@@ -264,6 +273,9 @@ def build_payload(
             #: propio: no son zonas ni marcos y no pueden confundirse con ellos.
             "pullback": theme.SERIES[3],
             "accumulation": theme.VIOLET,
+            #: El porcentaje escrito sobre cada zona: tinta, ni verde ni rojo,
+            #: porque «sigue» es subir en un ID alcista y bajar en uno bajista.
+            "odds": theme.INK_SECONDARY,
         },
         "charts": list(available),
         "layout": {chart: list(charts.overlays(chart)) for chart in available},
@@ -277,9 +289,13 @@ def build_payload(
                 zoned.get(timeframe),
                 signals.get(timeframe),
                 pullbacks.get(timeframe, ()),
+                odds.get(timeframe),
             )
             for timeframe, analysis in run.analyses.items()
         },
+        #: La probabilidad de zona: sin una sola zona con números no hay nada
+        #: que escribir y la casilla no se enseña.
+        "hasOdds": any(measurement.items for measurement in odds.values()),
         #: La caja del 50 % del retroceso (ancla → PUL) y la acumulación: sin
         #: zonas no hay PUL del que sacar la caja, y sin contactos no hay firma.
         "hasPullbacks": any(pullbacks.values()),
@@ -448,6 +464,7 @@ def _impulse_payload(
     zones: TimeframeZones | None = None,
     signals: TimeframeSignals | None = None,
     pullbacks: Sequence[PullbackBox] = (),
+    odds: TimeframeOdds | None = None,
 ) -> dict[str, Any]:
     bars = analysis.bars
     last = pd.Timestamp(pd.DatetimeIndex(bars.index)[-1])
@@ -472,6 +489,11 @@ def _impulse_payload(
         #: La caja del 50 % del retroceso del mentor, con su paso y su
         #: confluencia. Vacío sin zonas: sin PUL no hay caja.
         "pullbacks": _pullback_records(pullbacks, last),
+        #: La probabilidad de zona: lo que se sabía al nacer cada zona y las
+        #: visitas del precio a su franja; y el total del histórico por ordinal.
+        #: Vacío sin zonas.
+        "odds": _odds_records(odds, last),
+        "oddsTotal": _odds_totals(odds),
         #: Desde qué vela cada ID está en ACUMULACIÓN. Vacío sin contactos.
         "accumulations": _accumulations(measurement, analysis, last),
     }
@@ -932,6 +954,70 @@ def _pullback_records(boxes: Sequence[PullbackBox], last: pd.Timestamp) -> list[
         }
         for box in boxes
     ]
+
+
+def _odds_records(odds: TimeframeOdds | None, last: pd.Timestamp) -> list[dict[str, Any]]:
+    """Capa "Probabilidad de zona". Puramente visual: no interviene en nada.
+
+    Un registro por zona, con la misma vida que ella —`x0` nace, `x1` muere—.
+    `s` es la ESTRUCTURA sabida al nacer: de los toques de zonas del mismo tipo,
+    temporalidad y dirección cuyo ID ya había muerto, cuántos acabaron con el
+    ID muriendo a favor (`k` de `n`), contando todos los toques (`all`) y sólo
+    los primeros (`first`). `p` es el PRECIO a secas: las visitas de la vela de
+    esta temporalidad a la franja `[lo, hi]` antes de nacer la zona, viniendo
+    del lado por el que este ID la busca (`in`) y del otro (`out`); `k` es
+    salir a favor de este ID. Cada celda lleva ya el porcentaje y el intervalo
+    de Wilson al 95 %: el explorador no calcula ni una división.
+    """
+    if odds is None:
+        return []
+    return [
+        {
+            "id": item.id_num,
+            "k": item.kind.value,
+            "d": item.direction.value,
+            "x0": _minute(pd.Timestamp(item.ts_birth)),
+            "x1": _minute(pd.Timestamp(item.ts_end) if item.ts_end is not None else last),
+            "lo": round(item.low, DECIMALS),
+            "hi": round(item.high, DECIMALS),
+            "s": {"all": _cell(item.known_all), "first": _cell(item.known_first)},
+            "p": {"in": _cell(item.price_approach), "out": _cell(item.price_other)},
+        }
+        for item in odds.items
+    ]
+
+
+def _odds_totals(odds: TimeframeOdds | None) -> list[dict[str, Any]]:
+    """El total del histórico por tipo de zona, dirección y ordinal del toque.
+
+    MIRA AL FUTURO respecto a cualquier zona concreta: es la cifra de todo el
+    histórico cargado, para auditar la regla, y el explorador lo dice y la
+    esconde en replay.
+    """
+    if odds is None:
+        return []
+    return [
+        {
+            "k": group.kind.value,
+            "d": group.direction.value,
+            "all": _cell(group.all_touches),
+            "ord": {bucket: _cell(tally) for bucket, tally in group.by_ordinal.items()},
+        }
+        for group in odds.totals
+    ]
+
+
+def _cell(tally: Tally) -> dict[str, Any]:
+    """`k` de `n`, el porcentaje y el intervalo, o `None` sin casos."""
+    share = tally.share
+    interval = tally.interval()
+    return {
+        "n": tally.n,
+        "k": tally.k,
+        "pct": None if share is None else round(share * 100.0, 1),
+        "lo": None if interval is None else round(interval[0] * 100.0, 1),
+        "hi": None if interval is None else round(interval[1] * 100.0, 1),
+    }
 
 
 def _accumulations(

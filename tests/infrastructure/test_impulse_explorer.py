@@ -3543,6 +3543,125 @@ def test_en_h1_la_confluencia_con_h4_viaja_y_se_dibuja_rayada(
     )
 
 
+# --- La probabilidad de zona ---------------------------------------------------
+#
+# El porcentaje escrito sobre cada zona: de los toques de zonas como ésa cuyo ID
+# ya había muerto al nacer ésta, cuántos acabaron con el ID muriendo a favor; y
+# el precio a secas, las visitas a la misma franja. Lo cuenta el motor, con n e
+# intervalo; el explorador lo escribe.
+
+
+def _probabilidades(step: dict) -> list[dict]:
+    return [
+        trace for trace in step["plot"]["traces"] if trace["name"].startswith("Probabilidad de zona")
+    ]
+
+
+def _celda_cuadra(cell: dict) -> None:
+    assert 0 <= cell["k"] <= cell["n"]
+    if cell["n"] == 0:
+        assert cell["pct"] is None and cell["lo"] is None and cell["hi"] is None
+    else:
+        assert cell["pct"] == pytest.approx(cell["k"] / cell["n"] * 100, abs=0.06)
+        assert cell["lo"] <= cell["pct"] <= cell["hi"]
+
+
+def test_sin_zonas_no_hay_probabilidad_de_zona(run: ImpulseRun) -> None:
+    payload = build_payload(run)
+    assert payload["hasOdds"] is False
+    assert payload["impulses"][H4]["odds"] == []
+    assert payload["impulses"][H4]["oddsTotal"] == []
+
+
+def test_cada_zona_lleva_su_probabilidad_ya_contada(run: ImpulseRun, zones: ZonesRun) -> None:
+    payload = build_payload(run, zones=zones)
+    assert payload["hasOdds"] is True
+    registros = payload["impulses"][H4]
+    zonas = {(zone["id"], zone["k"]) for zone in registros["zones"]}
+    assert {(item["id"], item["k"]) for item in registros["odds"]} == zonas
+    assert registros["odds"], "la fixture tiene que dar zonas"
+    for item in registros["odds"]:
+        assert item["x0"] <= item["x1"] and item["lo"] <= item["hi"]
+        for cell in (item["s"]["all"], item["s"]["first"], item["p"]["in"], item["p"]["out"]):
+            _celda_cuadra(cell)
+        assert item["s"]["first"]["n"] <= item["s"]["all"]["n"]
+    assert registros["oddsTotal"], "la fixture tiene que dar toques resueltos"
+    for group in registros["oddsTotal"]:
+        _celda_cuadra(group["all"])
+        assert set(group["ord"]) == {"1", "2", "3+"}
+        assert sum(cell["n"] for cell in group["ord"].values()) == group["all"]["n"]
+
+
+def test_la_probabilidad_se_escribe_sobre_la_zona_y_se_apaga(
+    run: ImpulseRun, zones: ZonesRun, tmp_path: Path
+) -> None:
+    resultado = _draw(run, tmp_path, zones=zones)
+    con = _step(resultado, "probabilidad-por-defecto")
+    sin = _step(resultado, "probabilidad-apagada")
+
+    assert _probabilidades(con), _trace_names(con)
+    assert all(trace["type"] == "scatter" and trace["fill"] is None for trace in _probabilidades(con))
+    assert not _probabilidades(sin)
+    assert "capa apagada" in sin["notes"]
+    assert "PROBABILIDAD DE ZONA" in con["notes"]
+    assert "sabido al nacer" in con["notes"]
+    assert "no hay entradas" in con["notes"]
+
+
+def test_cada_cifra_escrita_es_la_del_payload(
+    run: ImpulseRun, zones: ZonesRun, tmp_path: Path
+) -> None:
+    """El dibujo no calcula: el porcentaje y la n salen tal cual del registro."""
+    paso = _step(_draw(run, tmp_path, zones=zones), "probabilidad-por-defecto")
+    registros = {
+        (item["id"], item["k"]): item
+        for item in build_payload(run, zones=zones)["impulses"][H4]["odds"]
+    }
+    escritas = 0
+    for trace in _probabilidades(paso):
+        if trace["name"].endswith("(contexto)"):
+            continue
+        for text, hover in zip(trace["captions"] or [], trace["hovers"] or [], strict=True):
+            id_num = int(re.search(r"nº (\d+)", hover).group(1))
+            kind = re.match(r"(UL|PUL|APUL) ·", text).group(1)
+            item = registros[(id_num, kind)]
+            cell = item["s"]["all"]
+            if cell["n"] == 0:
+                assert "sin historia" in text
+            else:
+                assert f"{cell['pct']:.0f} %" in text
+                assert f"(n {cell['n']})" in text
+                assert f"{cell['k']}/{cell['n']}" in hover
+            assert f"{item['lo']:.4f} → {item['hi']:.4f}" in hover
+            assert "PRECIO a secas" in hover
+            assert "TODO EL HISTÓRICO" in hover and "mira al futuro" in hover
+            assert "ES DIBUJO" in hover
+            escritas += 1
+    assert escritas
+
+
+def test_sin_zonas_la_probabilidad_no_escribe_nada(run: ImpulseRun, tmp_path: Path) -> None:
+    resultado = _draw(run, tmp_path)
+    assert not _probabilidades(_step(resultado, "probabilidad-por-defecto"))
+    assert not _probabilidades(_step(resultado, "probabilidad-apagada"))
+
+
+def test_la_probabilidad_no_se_adelanta_al_reloj_ni_ensena_el_total(
+    run: ImpulseRun, zones: ZonesRun, tmp_path: Path
+) -> None:
+    """La cifra de una zona se supo al nacer: en replay no puede escribirse antes,
+    y el total del histórico —que mira al futuro— no puede verse."""
+    resultado = _draw(run, tmp_path, zones=zones)
+    payload = build_payload(run, zones=zones)
+    for step in _replay_steps(resultado):
+        reloj = _clock(payload, step)
+        for trace in _probabilidades(step):
+            for x in trace["xs"] or []:
+                assert _minute(x) <= reloj, (step["label"], x)
+            for hover in trace["hovers"] or []:
+                assert "TODO EL HISTÓRICO" not in hover
+
+
 # --- La acumulación ------------------------------------------------------------
 #
 # La firma del propietario —dos toques arriba y dos abajo sin romper— fechada

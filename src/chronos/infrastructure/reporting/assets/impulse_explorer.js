@@ -72,19 +72,19 @@
     clean: {
       visible: "current",
       limbo: false, marks: true, contacts: false, mid: false, wrong: false,
-      frame: true, zones: true, pullback: true, accumulation: true,
+      frame: true, zones: true, pullback: true, accumulation: true, odds: true,
       signals: false, avoided: false, steps: false
     },
     normal: {
       visible: "pair",
       limbo: true, marks: true, contacts: false, mid: false, wrong: true,
-      frame: true, zones: true, pullback: true, accumulation: true,
+      frame: true, zones: true, pullback: true, accumulation: true, odds: true,
       signals: true, avoided: true, steps: true
     },
     all: {
       visible: "all",
       limbo: true, marks: true, contacts: true, mid: true, wrong: true,
-      frame: true, zones: true, pullback: true, accumulation: true,
+      frame: true, zones: true, pullback: true, accumulation: true, odds: true,
       signals: true, avoided: true, steps: true
     }
   };
@@ -141,6 +141,12 @@
      * —dos toques arriba y dos abajo sin romper— hasta que muere. Encendida en
      * los tres niveles por lo mismo. */
     accumulation: true,
+    /* La PROBABILIDAD DE ZONA: el porcentaje escrito sobre cada zona con lo
+     * que pasó en el pasado al tocar zonas como ésa —el ID siguió o rompió— y
+     * con las visitas del precio a esa misma franja. Lo calcula el motor con lo
+     * que se sabía al nacer la zona; aquí sólo se escribe. Nace encendida en
+     * los tres niveles: es lo que se ha pedido ver. */
+    odds: true,
     /* Fase 2.1. Las roturas evitadas son lo primero que hay que auditar de la
      * regla nueva, así que la capa nace encendida cuando la corrida trae alguna.
      * Con `break_by_zone: false` no hay ninguna y la casilla ni se enseña. */
@@ -1390,6 +1396,133 @@
             line: { color: COLORS.surface, width: 1 } }
         });
       }
+    });
+    return traces;
+  }
+
+  /* --- La probabilidad de zona ---------------------------------------------
+   *
+   * Sobre cada zona del ID que se mira, un texto con lo que pasó EN EL PASADO
+   * al tocar zonas como ésa: de los toques de zonas del mismo tipo, la misma
+   * temporalidad y la misma dirección cuyo ID ya había muerto cuando nació
+   * ésta, cuántos acabaron con el ID muriendo A FAVOR (la zona aguantó y
+   * siguió; en el UL, lo rompió y siguió) y cuántos EN CONTRA (el precio
+   * atravesó la zona y rompió el ID; en el UL, lo frenó). Y aparte, sólo de
+   * precio: cuántas veces la vela de esta temporalidad entró antes en esa
+   * misma franja y salió a favor de este ID.
+   *
+   * Todo viene contado del motor con su `n`, su porcentaje y su intervalo de
+   * Wilson al 95 %: aquí no se divide nada. El texto corto lleva la cifra
+   * sabida al nacer la zona (no mira al futuro); el globo añade el total del
+   * histórico por ordinal del toque, que SÍ mira al futuro y se esconde en
+   * replay. Obedece el mismo filtro que las zonas: sólo las del ID que se mira.
+   */
+  function hasOdds() { return DATA.hasOdds === true; }
+
+  function oddsOf(timeframe) {
+    if (!zonesAvailable()) { return []; }
+    return impulsesOf(timeframe).odds || [];
+  }
+
+  function oddsTotalsOf(timeframe) {
+    if (!zonesAvailable()) { return []; }
+    return impulsesOf(timeframe).oddsTotal || [];
+  }
+
+  /* Las palabras de cada desenlace, por zona: «favorable» es siempre que el ID
+   * murió a favor, pero en el PUL eso es que la zona aguantó y en el UL que se
+   * rompió. */
+  var ODDS_WORDS = {
+    UL: { yes: "rompe el UL y sigue", no: "el UL frena y el ID rompe en contra" },
+    PUL: { yes: "aguanta y el ID sigue", no: "atraviesa el PUL y el ID rompe" },
+    APUL: { yes: "aguanta y el ID sigue", no: "atraviesa el APUL y el ID rompe" }
+  };
+
+  /* «61 % (130/214, 55–67)» o «sin casos». El complementario sale del mismo
+   * recuento: n − k de n. */
+  function cellWords(cell) {
+    if (!cell || cell.n === 0) { return "sin casos"; }
+    return cell.pct.toFixed(0) + " % (" + cell.k + "/" + cell.n + ", " +
+      cell.lo.toFixed(0) + "–" + cell.hi.toFixed(0) + ")";
+  }
+
+  function cellAgainst(cell) {
+    if (!cell || cell.n === 0) { return "sin casos"; }
+    return (100 - cell.pct).toFixed(0) + " % (" + (cell.n - cell.k) + "/" + cell.n + ")";
+  }
+
+  /* El texto que se escribe sobre la zona: la cifra sabida al nacer. */
+  function oddsLabel(item) {
+    var words = ODDS_WORDS[item.k];
+    var cell = item.s.all;
+    if (!cell || cell.n === 0) {
+      return item.k + " · sin historia";
+    }
+    return item.k + " · " + cell.pct.toFixed(0) + " % " + words.yes + " · " +
+      (100 - cell.pct).toFixed(0) + " % " + words.no + " (n " + cell.n + ")";
+  }
+
+  function oddsCaption(item, timeframe) {
+    var words = ODDS_WORDS[item.k];
+    var text = "PROBABILIDAD DE ZONA · " + item.k + " del ID " + timeframe + " nº " +
+      item.id + " · " + item.d +
+      "<br>franja " + price(item.lo) + " → " + price(item.hi) +
+      "<br>ESTRUCTURA, sabido al nacer esta zona (" + stamp(item.x0) +
+      "): toques de zonas " + item.k + " " + item.d + " de " + label(timeframe) +
+      " cuyo ID ya había muerto" +
+      "<br>· todos los toques: " + cellWords(item.s.all) + " " + words.yes +
+      " · " + cellAgainst(item.s.all) + " " + words.no +
+      "<br>· sólo primeros toques: " + cellWords(item.s.first) + " " + words.yes +
+      "<br>PRECIO a secas, visitas de la vela de " + label(timeframe) +
+      " a esta franja antes de nacer la zona (k = salió a favor de este ID)" +
+      "<br>· llegando por el lado por el que la busca este ID: " + cellWords(item.p["in"]) +
+      "<br>· llegando por el otro lado: " + cellWords(item.p.out);
+    if (!state.replay) {
+      var totals = oddsTotalsOf(timeframe).filter(function (group) {
+        return group.k === item.k && group.d === item.d;
+      })[0];
+      if (totals) {
+        text += "<br>TODO EL HISTÓRICO (mira al futuro de esta zona; sólo para auditar): " +
+          cellWords(totals.all) + " " + words.yes +
+          "<br>· 1.er toque " + cellWords(totals.ord["1"]) +
+          " · 2.º " + cellWords(totals.ord["2"]) +
+          " · 3.º o más " + cellWords(totals.ord["3+"]);
+      }
+    }
+    return text + "<br>entre paréntesis: k/n e intervalo de Wilson 95 %" +
+      "<br>ES DIBUJO: no decide nada, no hay entradas";
+  }
+
+  function oddsTraces(range) {
+    if (blindfolded() || !state.odds || !hasOdds() || !zonesAvailable()) { return []; }
+    var edges = window_(range);
+    var traces = [];
+    overlays().forEach(function (timeframe) {
+      if (!isVisible(timeframe)) { return; }
+      var allowed = zoneIds(timeframe, edges);
+      var marks = { x: [], y: [], text: [], hover: [] };
+      oddsOf(timeframe).forEach(function (item) {
+        if (item.x1 < edges.lo || item.x0 > edges.hi) { return; }
+        // La zona no existe hasta que cierra la vela que la hace nacer, y el
+        // número tampoco: se calculó con lo sabido en ese cierre.
+        if (pending(item.x0, timeframe, edges)) { return; }
+        if (!keeps(allowed, item.id)) { return; }
+        // Se escribe donde la zona entra en la ventana, a media altura: si
+        // nació antes del borde izquierdo, en el borde.
+        marks.x.push(iso(Math.max(item.x0, edges.lo)));
+        marks.y.push((item.lo + item.hi) / 2);
+        marks.text.push(oddsLabel(item));
+        marks.hover.push(oddsCaption(item, timeframe));
+      });
+      if (!marks.x.length) { return; }
+      var tag = " " + label(timeframe) + (timeframe === primary() ? "" : " (contexto)");
+      traces.push({
+        type: "scatter", mode: "text", name: "Probabilidad de zona" + tag,
+        x: marks.x, y: marks.y, text: marks.text, hovertext: marks.hover,
+        hoverinfo: "text", hoverlabel: { align: "left" },
+        textposition: "middle right",
+        textfont: { color: COLORS.odds, size: 11, family: COLORS.font }
+      });
     });
     return traces;
   }
@@ -3416,6 +3549,8 @@
       .concat(avoidedTraces(range))
       .concat(signalTraces(range))
       .concat(contactTraces(range))
+      // El texto de la probabilidad va encima de todo: es lo que hay que leer.
+      .concat(oddsTraces(range))
       .concat(wrongExtremeTraces(range))
       // Y en su propio panel, abajo del todo: el RSI no comparte eje con nada
       // de lo de arriba, así que da igual dónde se apile.
@@ -3449,6 +3584,7 @@
     ["zones", "zonas del ID (UL, PUL y APUL)", hasZones],
     ["pullback", "caja 50 % del retroceso", hasPullbacks],
     ["accumulation", "acumulación", hasAccumulations],
+    ["odds", "probabilidad de zona", hasOdds],
     ["signals", "señales de zona", hasSignals],
     ["avoided", "roturas evitadas", hasAvoided],
     ["steps", "escalera del extremo", hasSteps]
@@ -3642,6 +3778,24 @@
         " · sólo la llevan los ID con PUL y sólo se dibuja la del ID que se mira";
     } else if (hasPullbacks() && zonesAvailable()) {
       text += " · la caja 50 % del retroceso no se está dibujando (capa apagada)";
+    }
+    if (hasOdds() && zonesAvailable() && state.odds) {
+      var cifras = [];
+      overlays().filter(isVisible).forEach(function (timeframe) {
+        var allowedOdds = zoneIds(timeframe, edges);
+        oddsOf(timeframe).forEach(function (item) {
+          if (item.x1 < edges.lo || item.x0 > edges.hi) { return; }
+          if (pending(item.x0, timeframe, edges) || !keeps(allowedOdds, item.id)) { return; }
+          cifras.push("ID " + timeframe + " nº " + item.id + " " + oddsLabel(item));
+        });
+      });
+      text += " · PROBABILIDAD DE ZONA (lo que pasó en el pasado al tocar zonas como ésa, " +
+        "sabido al nacer cada zona; sigue = el ID murió a favor): " +
+        (cifras.length ? cifras.join("; ") : "ninguna a la vista") +
+        " · el globo añade el precio a secas y el total del histórico" +
+        " · SON DIBUJO: no hay entradas";
+    } else if (hasOdds() && zonesAvailable()) {
+      text += " · la probabilidad de zona no se está escribiendo (capa apagada)";
     }
     if (hasAccumulations() && state.accumulation) {
       var acumulando = [];
@@ -3948,6 +4102,7 @@
     if (!hasZones()) { state.zones = false; }
     if (!hasPullbacks()) { state.pullback = false; }
     if (!hasAccumulations()) { state.accumulation = false; }
+    if (!hasOdds()) { state.odds = false; }
     if (!hasSignals()) { state.signals = false; }
     if (!hasSteps()) { state.steps = false; }
     if (!hasAvoided()) { state.avoided = false; }
@@ -3966,7 +4121,8 @@
   function buildAnalysisLayers() {
     if (!hasPullbacks()) { hide("pullback-layer"); }
     if (!hasAccumulations()) { hide("accumulation-layer"); }
-    if (hasPullbacks() || hasAccumulations()) { return; }
+    if (!hasOdds()) { hide("odds-layer"); }
+    if (hasPullbacks() || hasAccumulations() || hasOdds()) { return; }
     hide("analysis-layers");
   }
 
@@ -4198,6 +4354,10 @@
     if (hasAccumulations()) {
       document.getElementById("layer-accumulation").checked = state.accumulation;
     }
+    if (hasOdds()) {
+      document.getElementById("layer-odds").disabled = !zonesAvailable();
+      document.getElementById("layer-odds").checked = state.odds;
+    }
     if (hasAvoided()) {
       document.getElementById("layer-avoided").checked = state.avoided;
     }
@@ -4269,6 +4429,7 @@
       ["layer-signals", "signals"],
       ["layer-pullback", "pullback"],
       ["layer-accumulation", "accumulation"],
+      ["layer-odds", "odds"],
       ["layer-avoided", "avoided"],
       ["layer-steps", "steps"]
     ].forEach(function (pair) {
