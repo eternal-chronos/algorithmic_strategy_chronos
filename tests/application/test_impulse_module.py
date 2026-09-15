@@ -31,9 +31,11 @@ from chronos.application.structure.detect_impulses import (
     TABLE_COLUMNS,
     DetectDominantImpulses,
     ImpulseRun,
+    session_slots,
 )
 from chronos.application.structure.statistics import summarize
 from chronos.domain.structure.enums import AnchorMode, ImpulseDirection
+from chronos.domain.structure.patterns import PATTERN_COLUMNS
 from chronos.infrastructure.reporting.impulse_explorer import build_payload, render_explorer
 from chronos.infrastructure.reporting.impulse_report import render_report
 from chronos.infrastructure.reporting.impulse_writer import ImpulseReportWriter
@@ -301,12 +303,51 @@ def test_el_escritor_deja_una_carpeta_autocontenida(
         "eventos_rotura.csv",
         "estado_por_barra.csv",
         "contactos.csv",
+        "patrones.csv",
         "reporte.txt",
         "explorador.html",
         "run.json",
     }
     tabla = pd.read_csv(carpeta / "impulsos.csv")
     assert list(tabla.columns) == [*TABLE_COLUMNS, *AUDIT_COLUMNS]
+    patrones = pd.read_csv(carpeta / "patrones.csv")
+    assert list(patrones.columns) == list(PATTERN_COLUMNS)
+    assert len(patrones) == len(run.patterns_table()) > 0
+
+
+# --- K.2 · los cortes del día en los que se marcan el OB y el FVG -------------
+
+
+def test_los_patrones_solo_se_marcan_en_h4_dentro_de_su_id(run: ImpulseRun) -> None:
+    assert list(run.patterns) == [H4]
+    tabla = run.patterns[H4]
+    assert tabla["timeframe"].eq(H4).all() and tabla["id_timeframe"].eq(H4).all()
+    publicados = {impulse.id_num for impulse in run.analyses[H4].published}
+    assert set(tabla["id_num"]) <= publicados
+
+
+def test_la_posicion_en_el_dia_de_sesion_no_se_mueve_con_el_horario_de_verano() -> None:
+    """Con el día anclado a las 17:00 de Nueva York, la 2.ª vela es la de las
+    21:00 de Nueva York todo el año: 02:00 UTC en enero y 01:00 UTC en julio."""
+    index = pd.DatetimeIndex(
+        [
+            "2024-01-07 22:00",  # domingo 17:00 NY: 1.ª vela
+            "2024-01-08 02:00",  # 21:00 NY: 2.ª
+            "2024-01-08 06:00",  # 01:00 NY: 3.ª
+            "2024-01-08 10:00",  # 05:00 NY: 4.ª
+            "2024-01-08 14:00",  # 09:00 NY: 5.ª
+            "2024-01-08 18:00",  # 13:00 NY: 6.ª
+            "2024-07-07 21:00",  # domingo 17:00 NY en verano: 1.ª
+            "2024-07-08 01:00",  # 21:00 NY: 2.ª
+            "2024-07-08 09:00",  # 05:00 NY: 4.ª
+        ],
+        tz="UTC",
+    )
+    assert session_slots(index, AggregationConfig()).tolist() == [0, 1, 2, 3, 4, 5, 0, 1, 3]
+    # Con el corte fijo en UTC, el día empieza a esa hora todo el año.
+    assert session_slots(index, AggregationConfig(d_session_start="22:00")).tolist() == [
+        0, 1, 2, 3, 4, 5, 5, 0, 2,
+    ]
 
 
 # --- Apoyo ------------------------------------------------------------------

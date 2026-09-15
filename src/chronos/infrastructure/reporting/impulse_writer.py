@@ -70,6 +70,7 @@ class ImpulseReportWriter:
         _events_frame(run).to_csv(folder / "eventos_rotura.csv", index=False)
         _states_frame(run).to_csv(folder / "estado_por_barra.csv", index=False)
         _contacts_frame(lateralization).to_csv(folder / "contactos.csv", index=False)
+        run.patterns_table().to_csv(folder / "patrones.csv", index=False)
 
         if run.config.reporting.text_report:
             (folder / "reporte.txt").write_text(

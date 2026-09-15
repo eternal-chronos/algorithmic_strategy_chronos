@@ -34,7 +34,7 @@ from typing import Any
 import pandas as pd
 import plotly.offline as pyo
 
-from chronos.application.structure.config import H1, H4, M15
+from chronos.application.structure.config import H1, H4, M15, PATTERN_TIMEFRAMES
 from chronos.application.structure.detect_impulses import ImpulseRun, TimeframeAnalysis
 from chronos.application.structure.lateralization import (
     LateralizationStudy,
@@ -75,6 +75,15 @@ HAND_LINES: dict[str, str] = {
     H4: theme.MAGENTA,
     H1: theme.CYAN,
     M15: theme.OLIVE,
+}
+
+#: El OB y el FVG que marca el MOTOR dentro del ID (K.2). Un tono por patrón,
+#: ninguno de la mano ni de otra capa: lo que se vea en ámbar o en índigo lo ha
+#: calculado el dominio, y lo que se vea en magenta, cian u oliva lo ha puesto
+#: el propietario.
+PATTERN_COLORS: dict[str, str] = {
+    "OB": theme.AMBER,
+    "FVG": theme.INDIGO,
 }
 
 #: El Fibonacci que traza el propietario a mano (I.5). Va en el gris de la tinta
@@ -200,6 +209,11 @@ def build_payload(
             #: lo dicen los dos clics.
             "fibLevels": list(FIB_LEVELS),
             "fibGold": FIB_GOLD_LEVEL,
+            #: Con qué regla se han marcado el OB y el FVG, escrita para el
+            #: estado del explorador: el dibujo dice qué está enseñando. Y en
+            #: qué temporalidades se marcan, para poder decir dónde no.
+            "patternRule": run.pattern_rule.describe(),
+            "patternTimeframes": list(PATTERN_TIMEFRAMES),
         },
         "colors": {
             "bullish": BULLISH,
@@ -224,12 +238,15 @@ def build_payload(
             "fibGold": HAND_FIB_GOLD,
             #: La acumulación lleva tono propio: no puede confundirse con el ID.
             "accumulation": theme.VIOLET,
+            #: Y un tono por patrón para el OB y el FVG del motor.
+            "patterns": dict(PATTERN_COLORS),
         },
         "charts": list(available),
         "layout": {chart: list(charts.overlays(chart)) for chart in available},
         "labels": {chart: _label(chart) for chart in {*available, *charts.detected}},
         "spans": _spans(run),
         "bars": bars,
+        "patterns": _patterns_payload(run),
         "impulses": {
             timeframe: _impulse_payload(analysis, contacts.get(timeframe))
             for timeframe, analysis in run.analyses.items()
@@ -346,6 +363,46 @@ def _minute(stamp: pd.Timestamp) -> int:
 
 def _round(series: pd.Series) -> list[float]:
     return [round(float(value), DECIMALS) for value in series.to_numpy(dtype=float)]
+
+
+# --- OB y FVG ---------------------------------------------------------------
+
+
+def _patterns_payload(run: ImpulseRun) -> dict[str, Any]:
+    """Capa "OB y FVG" (K.2): por temporalidad, los patrones que el motor marcó
+    dentro de su ID en los cortes del día.
+
+    Cada uno lleva su ID (`id`), su clase (`k`) y su dirección (`d`), la vela
+    que lo define (`x0`), la vela en cuyo CIERRE se supo (`xk`), la vela en cuyo
+    cierre se MARCÓ (`xm`, el corte del día), hasta dónde llega (`x1`: la vela
+    que lo rompió o la que mató a su ID; `None` si sigue marcado, y entonces
+    llega al presente), por qué acabó (`e`) y sus dos bordes. El explorador
+    dibuja el recuadro de `x0` a `x1` y, en replay, no lo enseña hasta que
+    cierra la vela `xm`. Una temporalidad que no marca patrones no aparece: el
+    explorador lo dice en el estado.
+    """
+    return {
+        timeframe: [
+            {
+                "id": int(row["id_num"]),
+                "k": str(row["tipo"]),
+                "d": str(row["direccion"]),
+                "x0": _minute(pd.Timestamp(row["ts_origen"])),
+                "xk": _minute(pd.Timestamp(row["ts_conocido"])),
+                "xm": _minute(pd.Timestamp(row["ts_marcado"])),
+                "x1": _optional_minute(row["ts_fin"]),
+                "e": None if pd.isna(row["motivo_fin"]) else str(row["motivo_fin"]),
+                "lo": round(float(row["precio_bajo"]), DECIMALS),
+                "hi": round(float(row["precio_alto"]), DECIMALS),
+            }
+            for row in frame.to_dict("records")
+        ]
+        for timeframe, frame in run.patterns.items()
+    }
+
+
+def _optional_minute(stamp: Any) -> int | None:
+    return None if stamp is None or pd.isna(stamp) else _minute(pd.Timestamp(stamp))
 
 
 # --- Impulsos ---------------------------------------------------------------

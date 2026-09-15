@@ -17,12 +17,24 @@ import numpy as np
 import pandas as pd
 
 from chronos.application.structure.causal import PriorBarAtr
-from chronos.application.structure.config import ImpulseConfig
+from chronos.application.structure.config import (
+    H4,
+    PATTERN_TIMEFRAMES,
+    TIMEFRAME_MINUTES,
+    AggregationConfig,
+    ImpulseConfig,
+)
 from chronos.application.structure.timezone_audit import TimezoneAudit
 from chronos.domain.errors import DomainError
 from chronos.domain.structure.body import BodyBar
 from chronos.domain.structure.detector import DominantImpulseDetector
 from chronos.domain.structure.impulse import BarState, BreakEvent, DominantImpulse
+from chronos.domain.structure.patterns import (
+    DEFAULT_RULE,
+    PATTERN_COLUMNS,
+    PatternRule,
+    patterns_inside,
+)
 
 #: Columnas exigidas por §5.1, en su orden. Las que van detrás son material de
 #: auditoría (comparativa de anclas, arranque de la pierna) y no sustituyen a
@@ -101,6 +113,11 @@ class ImpulseRun:
     audit: TimezoneAudit | None = None
     provenance: str = ""
     aggregation_notes: tuple[str, ...] = ()
+    #: El OB y el FVG dentro del ID (K.2), una tabla por temporalidad de
+    #: `PATTERN_TIMEFRAMES`, cada una dentro de su propio ID: hoy sólo H4. Una
+    #: temporalidad que no está aquí no marca ninguno.
+    patterns: dict[str, pd.DataFrame] = field(default_factory=dict)
+    pattern_rule: PatternRule = DEFAULT_RULE
 
     @property
     def emits_nothing(self) -> bool:
@@ -114,6 +131,16 @@ class ImpulseRun:
             return pd.DataFrame(columns=[*TABLE_COLUMNS, *AUDIT_COLUMNS])
         combined = pd.concat(frames, ignore_index=True)
         return combined.sort_values(["timeframe", "ts_constitucion"]).reset_index(drop=True)
+
+    def patterns_table(self) -> pd.DataFrame:
+        """Los OB y FVG de todos los gráficos en una tabla, ya ordenada."""
+        frames = [frame for frame in self.patterns.values() if not frame.empty]
+        if not frames:
+            return pd.DataFrame(columns=list(PATTERN_COLUMNS))
+        combined = pd.concat(frames, ignore_index=True)
+        return combined.sort_values(["timeframe", "ts_marcado", "ts_origen"]).reset_index(
+            drop=True
+        )
 
 
 class DetectDominantImpulses:
@@ -129,6 +156,7 @@ class DetectDominantImpulses:
         audit: TimezoneAudit | None = None,
         provenance: str = "",
         aggregation_notes: Sequence[str] = (),
+        pattern_rule: PatternRule = DEFAULT_RULE,
     ) -> ImpulseRun:
         """`series` trae las velas de cada gráfico; el detector sólo corre en las
         temporalidades que el reparto declara como impulso."""
@@ -149,6 +177,25 @@ class DetectDominantImpulses:
             timeframe: self._analyse(timeframe, series[timeframe], config_hash)
             for timeframe in detected
         }
+        # K.2: el OB y el FVG de cada temporalidad dentro de su propio ID, y
+        # sólo en los cortes del día que dictó el propietario. Sólo donde hay
+        # detector.
+        patterns = {
+            timeframe: patterns_inside(
+                analyses[timeframe].bars,
+                timeframe=timeframe,
+                impulses=analyses[timeframe].published,
+                marking=pattern_rule.marks_at(
+                    session_slots(
+                        pd.DatetimeIndex(analyses[timeframe].bars.index),
+                        self._config.aggregation,
+                    )
+                ),
+                rule=pattern_rule,
+            )
+            for timeframe in PATTERN_TIMEFRAMES
+            if timeframe in analyses
+        }
         return ImpulseRun(
             enabled=True,
             config=self._config,
@@ -160,6 +207,8 @@ class DetectDominantImpulses:
             audit=audit,
             provenance=provenance,
             aggregation_notes=tuple(aggregation_notes),
+            patterns=patterns,
+            pattern_rule=pattern_rule,
         )
 
     # --- Interno ------------------------------------------------------------
@@ -221,6 +270,28 @@ class DetectDominantImpulses:
             table=table,
             diagnostics=detector.diagnostics,
         )
+
+
+def session_slots(index: pd.DatetimeIndex, aggregation: AggregationConfig) -> np.ndarray:
+    """Posición de cada vela de H4 dentro de su día de sesión: 0 la que abre la
+    sesión, 1 la siguiente, hasta 5.
+
+    Es lo que necesita la regla de los OB y FVG (K.2) para saber en qué cierres
+    se marca: la 2.ª, la 3.ª y la 4.ª vela del día. Se lee con el reloj de la
+    plaza del ancla de sesión —igual que se agregan las velas— para que la
+    posición no se mueva con el horario de verano: la 2.ª vela es la de las
+    21:00 de Nueva York todo el año, aunque en UTC salte una hora dos veces al
+    año. Sin ancla de sesión el día empieza a la hora fija en UTC.
+    """
+    anchor = aggregation.session_anchor
+    stamps = pd.DatetimeIndex(index)
+    if stamps.tz is None:
+        raise DomainError("La posición en el día de sesión exige un índice tz-aware")
+    local = stamps.tz_convert(anchor.timezone if anchor is not None else "UTC")
+    opening = aggregation.session_start_time()
+    minute_of_day = local.hour.to_numpy() * 60 + local.minute.to_numpy()
+    since_open = (minute_of_day - (opening.hour * 60 + opening.minute)) % 1440
+    return np.asarray(since_open // TIMEFRAME_MINUTES[H4], dtype=np.int64)
 
 
 def _build_table(

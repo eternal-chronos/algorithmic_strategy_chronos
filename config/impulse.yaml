@@ -1,10 +1,13 @@
 # Módulo 1 — IMPULSO DOMINANTE (estrategia CDT sobre XAUUSD).
 #
 # Lo que se calcula y se dibuja es la ESTRUCTURA y nada más: el ID —rotura por
-# línea, ancla y extremo— en H4 y en M15. Sin zonas, sin RSI, sin señales de
-# entrada, sin entradas, sin stops, sin targets y sin medición de rentabilidad.
-# H1 no lleva nada propio: se mira en ella cómo llega el precio, con el ID de H4
-# detrás. Lo nuevo se irá marcando a mano sobre el explorador.
+# línea, ancla y extremo— en H4 y en M15, y DENTRO del ID de H4 los OB y FVG
+# que el propietario dictó el 2026-09-15 (tres cortes al día, sólo en H4; la
+# regla está en `domain/structure/patterns.py` y sale en `patrones.csv`). Sin
+# zonas, sin RSI, sin señales de entrada, sin entradas, sin stops, sin targets
+# y sin medición de rentabilidad. H1 no lleva nada propio: se mira en ella cómo
+# llega el precio, con el ID de H4 detrás. Lo siguiente se dicta sobre el
+# explorador cuando él vea que los OB y FVG se marcan bien.
 #
 # EL ID SE MARCA EN H4 Y EN M15 (ver `charts`).
 #

@@ -38,6 +38,7 @@ from chronos.application.structure.config import (
 from chronos.application.structure.detect_impulses import DetectDominantImpulses, ImpulseRun
 from chronos.application.structure.lateralization import measure
 from chronos.domain.structure.enums import LegStartMode
+from chronos.domain.structure.patterns import PATTERN_COLUMNS, PatternEnd
 from chronos.infrastructure.reporting import impulse_explorer
 from chronos.infrastructure.reporting.impulse_explorer import (
     ASSETS,
@@ -50,6 +51,7 @@ from chronos.infrastructure.reporting.impulse_explorer import (
     HAND_FIB_GOLD,
     HAND_LINES,
     HAND_RECTS,
+    PATTERN_COLORS,
     ModeVariant,
     bar_counts,
     build_payload,
@@ -1955,7 +1957,9 @@ def test_el_recuadro_se_distingue_de_lo_que_dibuja_el_motor(
 
     assert _rgb(recuadro["color"]) == _rgb(HAND_RECTS["A"])
     assert recuadro["dash"] == "dot"
-    del_motor = {_rgb(BULLISH), _rgb(BEARISH), _rgb(impulse_explorer.theme.VIOLET)}
+    del_motor = {_rgb(BULLISH), _rgb(BEARISH), _rgb(impulse_explorer.theme.VIOLET)} | {
+        _rgb(colour) for colour in PATTERN_COLORS.values()
+    }
     a_mano = {_rgb(colour) for colour in HAND_RECTS.values()}
     assert len(a_mano) == 3, "cada nombre lleva su color"
     assert not a_mano & del_motor
@@ -2697,3 +2701,267 @@ def test_la_acumulacion_no_se_adelanta_al_reloj(
                     continue
                 id_num = int(re.search(r"nº (\d+)", caption).group(1))
                 assert inicio[id_num] <= reloj, (step["label"], id_num)
+
+
+# --- K.2 · el OB y el FVG del motor dentro del ID de H4 ------------------------
+#
+# El motor marca, en tres cortes al día, los OB y FVG que caben dentro del ID
+# de H4. Es capa del motor —calculada en el dominio— y no dibujo del
+# propietario. Lo que se comprueba es que viaja calculada, que cada patrón es un
+# recuadro relleno con su tono y su nombre, que va de su vela a la que lo acabó,
+# que la casilla y la ciega lo quitan, que obedece el filtro de ID visibles, que
+# H1 y M15 dicen que no marcan nada, que el replay no lo enseña antes del corte
+# en que se marcó y que el estado dice qué se está viendo.
+
+PATTERN_TRACES = ("OB del motor", "FVG del motor")
+
+
+def _patrones(step: dict) -> dict[str, dict]:
+    return {
+        trace["name"]: trace
+        for trace in step["plot"]["traces"]
+        if trace["name"] in PATTERN_TRACES
+    }
+
+
+def _rectangulos(segments: list[list]) -> list[tuple[str, str, float, float]]:
+    """Los recuadros de una traza, como (x0, x1, mínimo, máximo).
+
+    Cada uno viaja como cinco puntos y un nulo, en el orden que cierra el
+    polígono: (x0, alto) (x1, alto) (x1, bajo) (x0, bajo) (x0, alto).
+    """
+    cajas = []
+    for start in range(0, len(segments), 6):
+        esquinas = segments[start : start + 5]
+        if len(esquinas) < 5 or any(punto[0] is None for punto in esquinas):
+            continue
+        alturas = [punto[1] for punto in esquinas]
+        cajas.append((esquinas[0][0], esquinas[1][0], min(alturas), max(alturas)))
+    return cajas
+
+
+def _cajas(step: dict) -> dict[str, list[tuple[str, str, float, float]]]:
+    """Los recuadros de cada patrón, como (x0, x1, bajo, alto)."""
+    return {name: _rectangulos(trace["segments"]) for name, trace in _patrones(step).items()}
+
+
+def test_los_patrones_viajan_calculados_desde_el_dominio(run: ImpulseRun) -> None:
+    """El explorador dibuja lo que le llega: ni un OB se busca en JavaScript."""
+    payload = build_payload(run)
+
+    assert list(payload["patterns"]) == [H4]
+    assert payload["meta"]["patternTimeframes"] == [H4]
+    assert payload["meta"]["patternRule"] == run.pattern_rule.describe()
+    assert "2.ª, 3.ª, 4.ª vela" in payload["meta"]["patternRule"]
+
+    tabla = run.patterns[H4]
+    assert list(tabla.columns) == list(PATTERN_COLUMNS)
+    assert len(tabla) > 0, "la fixture tiene que producir patrones en H4"
+    assert tabla["timeframe"].eq(H4).all() and tabla["id_timeframe"].eq(H4).all()
+    lista = payload["patterns"][H4]
+    assert len(lista) == len(tabla)
+    primero, fila = lista[0], tabla.iloc[0]
+    assert primero["id"] == int(fila["id_num"])
+    assert primero["k"] == fila["tipo"] and primero["d"] == fila["direccion"]
+    assert primero["x0"] == _minute(str(fila["ts_origen"]))
+    assert primero["xk"] == _minute(str(fila["ts_conocido"]))
+    assert primero["xm"] == _minute(str(fila["ts_marcado"]))
+    assert primero["x1"] == (None if pd.isna(fila["ts_fin"]) else _minute(str(fila["ts_fin"])))
+    assert primero["e"] == (None if pd.isna(fila["motivo_fin"]) else fila["motivo_fin"])
+    assert primero["lo"] == round(float(fila["precio_bajo"]), DECIMALS)
+    assert primero["hi"] == round(float(fila["precio_alto"]), DECIMALS)
+    # Cada patrón cuelga de un ID de H4 publicado, se marca con el ID vivo y en
+    # un corte del día, y cabe entero entre su ancla y su extremo.
+    ids = {impulse.id_num: impulse for impulse in run.analyses[H4].published}
+    for item in lista:
+        dueno = ids[item["id"]]
+        assert item["x0"] <= item["xk"] <= item["xm"]
+        assert item["lo"] <= item["hi"]
+        assert _minute(str(dueno.ts_constitution)) <= item["xm"]
+        if dueno.ts_end is not None:
+            assert item["xm"] < _minute(str(dueno.ts_end))
+            assert item["x1"] is not None and item["x1"] <= _minute(str(dueno.ts_end))
+        bajo, alto = sorted((dueno.anchor, dueno.extreme))
+        assert round(bajo, DECIMALS) <= item["lo"] and item["hi"] <= round(alto, DECIMALS)
+        assert (item["x1"] is None) == (item["e"] is None)
+        assert item["e"] in (None, PatternEnd.ROTURA.value, PatternEnd.MUERTE_DEL_ID.value)
+
+
+def test_los_cortes_son_la_segunda_tercera_y_cuarta_vela_del_dia(run: ImpulseRun) -> None:
+    """El día arranca a las 17:00 de Nueva York: la 2.ª, 3.ª y 4.ª vela son las
+    de las 21:00, 01:00 y 05:00 de Nueva York todo el año —02:00, 06:00 y 10:00
+    UTC en invierno, una hora antes en verano—, y ningún patrón se marca al
+    cerrar otra. La fixture cruza el cambio de hora de marzo."""
+    marcados = pd.DatetimeIndex(run.patterns[H4]["ts_marcado"])
+    en_nueva_york = marcados.tz_convert("America/New_York")
+    assert set(en_nueva_york.hour) <= {21, 1, 5}
+    assert len(set(en_nueva_york.hour)) > 1, "la fixture tiene que marcar en más de un corte"
+    assert {2, 6, 10} & set(marcados.hour), "en invierno los cortes caen a las 02/06/10 UTC"
+    assert {1, 5, 9} & set(marcados.hour), "en verano una hora antes"
+
+
+def test_cada_patron_es_un_recuadro_relleno_con_su_tono_y_su_nombre(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    con = _step(_draw(run, tmp_path), "con-patrones")
+    trazas = _patrones(con)
+
+    assert trazas, "la fixture tiene que dibujar algún patrón en H4"
+    for name, trace in trazas.items():
+        kind = name.split(" ")[0]
+        assert trace["fill"] == "toself", "un patrón es una zona, no una línea"
+        assert _rgb(trace["color"]) == _rgb(PATTERN_COLORS[kind])
+        assert _rgb(trace["fillcolor"]) == _rgb(PATTERN_COLORS[kind])
+        assert trace["dash"] is None
+        assert trace["textposition"] == "bottom right"
+        assert trace["labels"], "el nombre va escrito dentro del recuadro"
+        assert all(
+            re.match(r"^(OB|FVG) (alcista|bajista) · ID H4 nº \d+", texto)
+            for texto in trace["labels"]
+        )
+        assert all(
+            re.match(r"^(OB|FVG) DEL MOTOR · H4 · dentro del ID H4 nº \d+", globo)
+            for globo in trace["hovers"]
+        )
+        assert all("MARCADO al cerrar la de " in globo for globo in trace["hovers"])
+        assert all("se supo al cerrar la de " in globo for globo in trace["hovers"])
+
+
+def test_el_recuadro_va_de_la_vela_del_patron_a_la_que_lo_acabo(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    """Con el periodo entero y todos los ID, se dibujan todos: cada recuadro va
+    de su vela a `x1`, y el que sigue marcado llega al borde de la ventana."""
+    con = _step(_draw(run, tmp_path), "con-patrones")
+    payload = build_payload(run)["patterns"][H4]
+    borde = _minute(con["to"] + " 23:59")
+    esperado = {
+        (item["k"], item["x0"], borde if item["x1"] is None else item["x1"], item["lo"], item["hi"])
+        for item in payload
+    }
+    dibujado = {
+        (name.split(" ")[0], _minute(x0), _minute(x1), lo, hi)
+        for name, cajas in _cajas(con).items()
+        for x0, x1, lo, hi in cajas
+    }
+
+    assert dibujado == esperado
+    assert any(item["e"] == PatternEnd.ROTURA.value for item in payload), (
+        "la fixture tiene que tener algún patrón roto"
+    )
+    assert any(item["e"] == PatternEnd.MUERTE_DEL_ID.value for item in payload), (
+        "la fixture tiene que tener algún patrón muerto con su ID"
+    )
+    etiquetas = [texto for trace in _patrones(con).values() for texto in trace["labels"]]
+    assert any(texto.endswith(" · roto") for texto in etiquetas)
+    assert any(texto.endswith(" · ID muerto") for texto in etiquetas)
+
+
+def test_la_casilla_quita_los_patrones_y_el_estado_lo_dice(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    resultado = _draw(run, tmp_path)
+    sin = _step(resultado, "sin-patrones")
+
+    assert not _patrones(sin)
+    assert sin["boxes"]["layer-patterns"] is False
+    assert "capas apagadas: " in sin["notes"] and "OB y FVG del motor" in sin["notes"]
+    assert "OB y FVG del motor:" not in sin["notes"]
+    # Encendidos en los tres niveles de ruido: es lo que se está auditando.
+    for label in ("ruido-limpio", "ruido-normal", "ruido-todo", "ruido-de-salida"):
+        assert _step(resultado, label)["boxes"]["layer-patterns"] is True, label
+
+
+def test_con_id_actual_solo_se_dibujan_los_del_id_actual(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    resultado = _draw(run, tmp_path)
+    actual = _step(resultado, "patrones-id-actual")
+    todos = _step(resultado, "con-patrones")
+    payload = build_payload(run)
+    borde = _minute(actual["to"] + " 23:59")
+    vigente = [
+        impulse["id"] for impulse in payload["impulses"][H4]["list"] if impulse["x0"] <= borde
+    ][-1]
+    etiquetas = [texto for trace in _patrones(actual).values() for texto in trace["labels"]]
+    ids = {int(re.search(r"nº (\d+)", texto).group(1)) for texto in etiquetas}  # type: ignore[union-attr]
+
+    assert actual["visibleMode"] == "current"
+    assert ids <= {vigente}
+    assert sum(len(c) for c in _cajas(actual).values()) < sum(
+        len(c) for c in _cajas(todos).values()
+    )
+
+
+def test_en_h1_y_m15_no_se_marcan_y_el_estado_lo_dice(run: ImpulseRun, tmp_path: Path) -> None:
+    resultado = _draw(run, tmp_path)
+    for label, chart in (("patrones-h1", "H1"), ("patrones-m15", "M15")):
+        paso = _step(resultado, label)
+        assert not _patrones(paso), label
+        assert (
+            f"OB y FVG del motor: en {chart} no se marcan (por ahora sólo en H4)" in paso["notes"]
+        ), label
+    h4 = _step(resultado, "con-patrones")
+    assert "a la vista en H4, dentro del ID de H4" in h4["notes"]
+    assert "ámbar el OB, índigo el FVG" in h4["notes"]
+
+
+def test_un_tono_por_patron_que_no_usa_nadie_mas(run: ImpulseRun, tmp_path: Path) -> None:
+    """Ámbar el OB, índigo el FVG; ni la mano ni ninguna otra capa del motor."""
+    assert set(PATTERN_COLORS) == {"OB", "FVG"}
+    assert _rgb(PATTERN_COLORS["OB"]) != _rgb(PATTERN_COLORS["FVG"])
+    otros = {_rgb(BULLISH), _rgb(BEARISH), _rgb(HAND_FIB), _rgb(HAND_FIB_GOLD)}
+    otros |= {_rgb(impulse_explorer.theme.VIOLET)}
+    otros |= {_rgb(colour) for colour in HAND_RECTS.values()}
+    otros |= {_rgb(colour) for colour in HAND_LINES.values()}
+    assert not {_rgb(colour) for colour in PATTERN_COLORS.values()} & otros
+    # Y los recuadros a mano siguen distinguiéndose: punteados, en su tono.
+    plantado = _recuadros(_step(_draw(run, tmp_path), "rect-plantado"))[0]
+    assert plantado["dash"] == "dot"
+    assert _rgb(plantado["color"]) not in {_rgb(c) for c in PATTERN_COLORS.values()}
+
+
+def test_la_auditoria_ciega_tampoco_ensena_los_patrones(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    assert not _patrones(_step(_draw(run, tmp_path), "ciega"))
+
+
+def test_el_replay_no_ensena_un_patron_antes_del_corte_en_que_se_marco(
+    run: ImpulseRun, tmp_path: Path
+) -> None:
+    """A cada paso, cada recuadro dibujado ya estaba marcado —cerró la vela del
+    corte— y ninguno llega más allá del reloj."""
+    resultado = _draw(run, tmp_path)
+    payload = build_payload(run)
+    por_origen = {(item["k"], item["x0"], item["id"]): item for item in payload["patterns"][H4]}
+    span = payload["spans"][H4]
+    comprobados = 0
+
+    for paso in _replay_steps(resultado):
+        if paso["chart"] != H4:
+            assert not _patrones(paso), paso["label"]
+            continue
+        reloj = _clock(payload, paso)
+        for name, trace in _patrones(paso).items():
+            cajas = _rectangulos(trace["segments"])
+            assert len(cajas) == len(trace["labels"])
+            for (x0, x1, _lo, _hi), texto in zip(cajas, trace["labels"], strict=True):
+                id_num = int(re.search(r"nº (\d+)", texto).group(1))  # type: ignore[union-attr]
+                item = por_origen[(name.split(" ")[0], _minute(x0), id_num)]
+                assert item["xm"] + span <= reloj, paso["label"]
+                assert _minute(x1) <= reloj, paso["label"]
+                comprobados += 1
+
+    assert comprobados, "ningún paso del replay llegó a dibujar un patrón"
+
+
+def test_las_notas_dicen_cuantos_hay_y_con_que_regla(run: ImpulseRun, tmp_path: Path) -> None:
+    con = _step(_draw(run, tmp_path), "con-patrones")
+    cajas = _cajas(con)
+    ob = len(cajas.get("OB del motor", []))
+    fvg = len(cajas.get("FVG del motor", []))
+
+    assert f"OB y FVG del motor: {ob} OB y {fvg} FVG a la vista en H4" in con["notes"]
+    assert build_payload(run)["meta"]["patternRule"] in con["notes"]
+    assert "obedecen el filtro de ID visibles" in con["notes"]

@@ -52,9 +52,10 @@
    * pasan cosas, no CUÁLES. Estos tres niveles son un preset de las casillas que
    * ya existen —ni una capa nueva, ni un cálculo nuevo— y se aplican de golpe:
    *
-   *   · Limpio  — el ID actual en la temporalidad que se está mirando, y nada
-   *               más. Fuera se quedan las capas que no deciden nada sobre el
-   *               ID vigente: limbo, contactos, 50 % y extremo contrario.
+   *   · Limpio  — el ID actual y sus OB y FVG en la temporalidad que se está
+   *               mirando, y nada más. Fuera se quedan las capas que no deciden
+   *               nada sobre el ID vigente: limbo, contactos, 50 % y extremo
+   *               contrario.
    *   · Normal  — lo que el explorador enseñaba hasta ahora.
    *   · Todo    — todo, incluidos los contactos.
    *
@@ -71,17 +72,17 @@
     clean: {
       visible: "current",
       limbo: false, marks: true, contacts: false, mid: false, wrong: false,
-      accumulation: true
+      accumulation: true, patterns: true
     },
     normal: {
       visible: "pair",
       limbo: true, marks: true, contacts: false, mid: false, wrong: true,
-      accumulation: true
+      accumulation: true, patterns: true
     },
     all: {
       visible: "all",
       limbo: true, marks: true, contacts: true, mid: true, wrong: true,
-      accumulation: true
+      accumulation: true, patterns: true
     }
   };
 
@@ -119,6 +120,10 @@
      * los tres niveles; la capa está APARCADA y el payload no trae ninguna
      * hasta que el propietario la vuelva a pedir. */
     accumulation: true,
+    /* El OB y el FVG que marca el motor dentro del ID (K.2). Encendidos en los
+     * tres niveles de ruido: son lo que se está auditando ahora y cuelgan del
+     * ID, así que obedecen el mismo filtro de ID visibles que él. */
+    patterns: true,
     blind: false,      // auditoría ciega en curso (F.1)
     revealed: false,
     seed: null,
@@ -762,6 +767,144 @@
       });
     });
     return traces;
+  }
+
+  // --- OB y FVG del motor (K.2) ------------------------------------------------
+  //
+  // Los patrones que el dominio marcó DENTRO del ID de esta temporalidad, en los
+  // cortes del día que dictó el propietario. Vienen calculados —la vela que los
+  // define, cuándo se supieron, en qué corte se marcaron, hasta dónde llegan y
+  // por qué acabaron— y aquí sólo se elige cuáles se pintan: los de los ID que
+  // el filtro de ID visibles deja, dentro de la ventana y, en replay, sólo
+  // desde el corte en que se marcaron. Cada patrón es un recuadro relleno con
+  // el tono de su clase y el nombre escrito dentro.
+
+  var PATTERN_KINDS = [
+    { id: "OB", label: "OB" },
+    { id: "FVG", label: "FVG" }
+  ];
+
+  var PATTERN_ENDS = {
+    ROTURA: "ROTO: un cierre lo atravesó en la vela de ",
+    MUERTE_DEL_ID: "murió con su ID en la vela de "
+  };
+
+  function patternColor(kind) { return COLORS.patterns[kind]; }
+
+  /* Los patrones de esta temporalidad, o null si no se marcan en ella. */
+  function patternsOf() {
+    var source = (DATA.patterns || {})[state.chart];
+    return source === undefined ? null : source;
+  }
+
+  function patternTimeframes() { return DATA.meta.patternTimeframes || []; }
+
+  /* Sólo se dibujan sobre la corrida base: las variantes de R-36 no traen
+   * patrones y sus ID no son los mismos. */
+  function patternsOn() {
+    return state.patterns && !blindfolded() && state.mode === DATA.meta.legStartMode;
+  }
+
+  /* Los patrones que se pintan con esta ventana, ya filtrados. Es lo que
+   * comparten la traza y el estado, para que cuenten lo mismo. */
+  function drawnPatterns(edges) {
+    var source = patternsOf();
+    if (!patternsOn() || !source || !isVisible(state.chart)) { return []; }
+    var allowed = visibleIds(state.chart, edges);
+    return source.filter(function (pattern) {
+      if (pattern.x0 > edges.hi || (pattern.x1 !== null && pattern.x1 < edges.lo)) { return false; }
+      // No existe hasta que cierra la vela del corte en que se marcó: antes el
+      // propietario no lo tenía en el gráfico, aunque la geometría ya estuviera.
+      if (pending(pattern.xm, state.chart, edges)) { return false; }
+      return keeps(allowed, pattern.id);
+    });
+  }
+
+  function patternEnd(pattern, edges) {
+    return pattern.x1 === null ? edges.hi : clip(pattern.x1, edges);
+  }
+
+  /* Si el patrón sigue marcado a la hora del borde derecho: en replay, la vela
+   * que lo acabó todavía no ha cerrado. */
+  function patternOpen(pattern, edges) {
+    return pattern.x1 === null || pending(pattern.x1, state.chart, edges);
+  }
+
+  function patternCaption(pattern, end, edges) {
+    return pattern.k + " DEL MOTOR · " + label(state.chart) +
+      " · dentro del ID " + label(state.chart) + " nº " + pattern.id +
+      " · " + pattern.d +
+      "<br>vela de " + stamp(pattern.x0) + " · se supo al cerrar la de " + stamp(pattern.xk) +
+      "<br>MARCADO al cerrar la de " + stamp(pattern.xm) + " (corte del día)" +
+      "<br>de " + price(pattern.lo) + " a " + price(pattern.hi) +
+      "<br>" + (patternOpen(pattern, edges)
+        ? "SIGUE MARCADO: llega hasta " + stamp(end)
+        : PATTERN_ENDS[pattern.e] + stamp(pattern.x1));
+  }
+
+  function patternTraces(range) {
+    var edges = window_(range);
+    var drawn = drawnPatterns(edges);
+    if (!drawn.length) { return []; }
+    var buckets = {};
+    PATTERN_KINDS.forEach(function (kind) { buckets[kind.id] = { x: [], y: [], text: [], labels: [] }; });
+    drawn.forEach(function (pattern) {
+      var bucket = buckets[pattern.k];
+      if (!bucket) { return; }
+      var end = patternEnd(pattern, edges);
+      var a = iso(pattern.x0), b = iso(end);
+      var caption = patternCaption(pattern, end, edges);
+      // El primer punto es la esquina superior izquierda: ahí va el nombre.
+      bucket.x.push(a, b, b, a, a, null);
+      bucket.y.push(pattern.hi, pattern.hi, pattern.lo, pattern.lo, pattern.hi, null);
+      bucket.text.push(caption, caption, caption, caption, caption, "");
+      bucket.labels.push(
+        pattern.k + " " + pattern.d + " · ID " + label(state.chart) + " nº " + pattern.id +
+          (patternOpen(pattern, edges) ? "" : pattern.e === "ROTURA" ? " · roto" : " · ID muerto"),
+        "", "", "", "", ""
+      );
+    });
+    return PATTERN_KINDS.filter(function (kind) { return buckets[kind.id].x.length; })
+      .map(function (kind) {
+        var bucket = buckets[kind.id];
+        var colour = patternColor(kind.id);
+        return {
+          type: "scatter", mode: "lines+text", name: kind.label + " del motor",
+          x: bucket.x, y: bucket.y, text: bucket.labels, hovertext: bucket.text,
+          hoverinfo: "text", hoverlabel: { align: "left" }, connectgaps: false,
+          textposition: "bottom right", textfont: { size: 10, color: colour },
+          fill: "toself", fillcolor: rgba(colour, 0.16),
+          line: { color: colour, width: 1.2 }
+        };
+      });
+  }
+
+  /* Qué se está viendo de los OB y FVG, y qué no. */
+  function patternNote(edges) {
+    if (!state.patterns || blindfolded()) { return null; }
+    if (state.mode !== DATA.meta.legStartMode) {
+      return "OB y FVG del motor: sólo están calculados para el modo base (" +
+        DATA.meta.legStartMode + "), en este modo no se dibujan";
+    }
+    if (!patternsOf()) {
+      return "OB y FVG del motor: en " + label(state.chart) +
+        " no se marcan (por ahora sólo en " + patternTimeframes().map(label).join(", ") + ")";
+    }
+    if (!isVisible(state.chart)) {
+      return "OB y FVG del motor: apagados con el ID de " + label(state.chart) +
+        ", que es el que los acota";
+    }
+    var drawn = drawnPatterns(edges);
+    var counts = PATTERN_KINDS.map(function (kind) {
+      var n = drawn.filter(function (pattern) { return pattern.k === kind.id; }).length;
+      return n.toLocaleString("es-ES") + " " + kind.label;
+    });
+    var ended = drawn.filter(function (pattern) { return !patternOpen(pattern, edges); }).length;
+    return "OB y FVG del motor: " + counts.join(" y ") + " a la vista en " +
+      label(state.chart) + ", dentro del ID de " + label(state.chart) +
+      " (" + DATA.meta.patternRule + ")" +
+      (ended ? " · " + ended.toLocaleString("es-ES") + " ya desmarcados, dibujados hasta la vela que los acabó" : "") +
+      " · obedecen el filtro de ID visibles · ámbar el OB, índigo el FVG";
   }
 
   function shape() { return { x: [], y: [], text: [] }; }
@@ -2999,8 +3142,10 @@
     var range = bounds();
     var cut = slice(range);
     var traces = priceTraces(cut)
-      // La acumulación es un relleno: va detrás de todo lo que es línea o marca.
+      // La acumulación y los patrones son rellenos: van detrás de todo lo que
+      // es línea o marca.
       .concat(accumulationTraces(range))
+      .concat(patternTraces(range))
       .concat(impulseTraces(range))
       .concat(midTraces(range))
       .concat(markerTraces(range))
@@ -3031,7 +3176,8 @@
     ["contacts", "contactos", function () { return true; }],
     ["mid", "nivel 50 %", function () { return true; }],
     ["wrong", "extremo de color contrario", function () { return true; }],
-    ["accumulation", "acumulación", hasAccumulations]
+    ["accumulation", "acumulación", hasAccumulations],
+    ["patterns", "OB y FVG del motor", function () { return true; }]
   ];
 
   /* Qué nivel de ruido está puesto y qué se está dejando fuera por él. Un
@@ -3069,6 +3215,9 @@
     // Y el Fibonacci, por lo mismo: es una medida, y una medida sin dueño se lee
     // como que la ha hecho el motor.
     var fibonacci = fibCaption();
+    // Y los OB y FVG del motor: cuántos hay a la vista, con qué regla, y en qué
+    // temporalidades no se marcan todavía.
+    var patrones = patternNote(edges);
     if (blindfolded()) {
       return "AUDITORÍA CIEGA · semilla " + state.seed + " · " + label(state.chart) + " · " +
         range.from + " → " + range.to + " · " + visible.toLocaleString("es-ES") +
@@ -3160,6 +3309,7 @@
     if (state.blind && state.revealed) {
       text += " · revelado de la ventana ciega con semilla " + state.seed;
     }
+    if (patrones) { text += " · " + patrones; }
     if (simulada) { text += " · " + simulada; }
     if (recuadros) { text += " · " + recuadros; }
     if (lineas) { text += " · " + lineas; }
@@ -3560,7 +3710,8 @@
       ["layer-marks", "marks"],
       ["layer-contacts", "contacts"],
       ["layer-mid", "mid"],
-      ["layer-wrong", "wrong"]
+      ["layer-wrong", "wrong"],
+      ["layer-patterns", "patterns"]
     ].forEach(function (pair) {
       document.getElementById(pair[0]).checked = state[pair[1]];
     });
@@ -3691,7 +3842,8 @@
       ["layer-contacts", "contacts"],
       ["layer-mid", "mid"],
       ["layer-wrong", "wrong"],
-      ["layer-accumulation", "accumulation"]
+      ["layer-accumulation", "accumulation"],
+      ["layer-patterns", "patterns"]
     ].forEach(function (pair) {
       document.getElementById(pair[0]).addEventListener("change", function (event) {
         state[pair[1]] = event.target.checked;

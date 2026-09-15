@@ -115,8 +115,8 @@ encuadre automático. También con doble clic sobre el gráfico.">Ajustar</butto
       </div>
     </div>
     <div class="group">
-      <span title="Preset de capas. Limpio deja el ID actual en esta temporalidad,
-y nada más: fuera quedan limbo, contactos, 50 % y extremo contrario.
+      <span title="Preset de capas. Limpio deja el ID actual y sus OB y FVG en esta
+temporalidad, y nada más: fuera quedan limbo, contactos, 50 % y extremo contrario.
 Normal es lo que el explorador enseñaba hasta ahora. Todo lo enciende entero.
 No cambia la detección ni los informes: sólo cuántas cosas se dibujan a la vez.">
         Ruido
@@ -130,6 +130,25 @@ No cambia la detección ni los informes: sólo cuántas cosas se dibujan a la ve
         <label class="toggle"><input type="checkbox" id="layer-limbo"> Limbo</label>
         <label class="toggle" title="Rombos de constitución y marcadores de rotura.">
           <input type="checkbox" id="layer-marks" checked> Constituciones y roturas</label>
+        <label class="toggle" title="El OB y el FVG que marca el MOTOR DENTRO DEL ID, por
+ahora sólo en H4 y dentro del ID de H4. Se marca en TRES CORTES AL DÍA, al cerrar la 2.ª,
+la 3.ª y la 4.ª vela de H4 del día de la plataforma: las 02:00, 06:00 y 10:00 de cTrader
+(UTC-4) en invierno y la 01:00, 05:00 y 09:00 en verano. Lo que se forma entre dos cortes
+espera al siguiente; lo que se forma y se rompe entre dos cortes no se marca nunca.
+DENTRO DEL ID quiere decir: cabe entero entre el ancla y el extremo, en cualquiera de las
+dos direcciones, y formado desde la vela del ancla —de ahí sale el OB «donde arranca el
+ID»—. OB: el CUERPO (no las mechas) de la última vela contraria antes de que un CIERRE
+rompa su mecha; que la mecha de otra vela la pase no cuenta. FVG: hueco de tres velas
+entre mechas, y sólo si deja recorrido: de su borde de entrada al extremo del ID tiene que
+quedar al menos la mitad del rango; el hueco muy grande y muy encima del precio no se
+marca. SE DESMARCA en el momento en que un cierre de H4 lo atraviesa por el lado contrario
+(cuerpo cerrando por debajo de un OB alcista, por encima de uno bajista), en cualquier
+vela, o cuando muere su ID.
+Recuadro relleno con el nombre dentro: ÁMBAR el OB, ÍNDIGO el FVG. Ninguno es de la mano
+(magenta, cian y oliva). En replay no aparece hasta que cierra la vela del corte en que se
+marcó. Obedece el filtro de ID visibles: con «ID actual» sólo los del ID actual.
+Todo viene calculado del motor: el explorador no busca ningún patrón.">
+          <input type="checkbox" id="layer-patterns" checked> OB y FVG</label>
         <label class="toggle"><input type="checkbox" id="layer-contacts"> Contactos</label>
         <label class="toggle"><input type="checkbox" id="layer-mid"> Nivel 50 %</label>
         <label class="toggle"><input type="checkbox" id="layer-wrong">
@@ -378,6 +397,22 @@ configuración, el historial y las estadísticas, en texto">Copiar</button>
     <span>cada gráfico lleva su ID y el de la temporalidad que le toca: <b>H4</b> el suyo,
       <b>M15</b> el suyo con el de H4 detrás, y <b>H1</b> sólo el de H4, porque H1 no
       lleva ID propio</span>
+    <span><i class="box" style="background:#cf8a00; opacity:.5"></i><b>OB del motor</b>
+      <i class="box" style="background:#3d47b5; opacity:.5"></i><b>FVG del motor</b>: los
+      patrones que el MOTOR marca <b>DENTRO DEL ID</b> (capa «OB y FVG»), por ahora sólo en
+      H4 y dentro del ID de H4. Se marcan en <b>tres cortes al día</b>: al cerrar la 2.ª,
+      la 3.ª y la 4.ª vela de H4 del día de la plataforma —las 02:00, 06:00 y 10:00 de
+      cTrader en invierno, la 01:00, 05:00 y 09:00 en verano—; lo que se forma entre dos
+      cortes espera al siguiente. Dentro del ID quiere decir que cabe entero entre el ancla
+      y el extremo, en cualquiera de las dos direcciones, formado desde la vela del ancla.
+      OB = el CUERPO de la última vela contraria antes de que un CIERRE rompa su mecha (la
+      mecha sola no confirma); FVG = hueco de tres velas entre mechas, y sólo si deja al
+      menos la mitad del ID de recorrido hasta el extremo: el hueco grande y muy encima
+      del precio no se marca. Recuadro RELLENO con el nombre y el ID dentro. SE DESMARCA
+      cuando un cierre de H4 lo atraviesa por el lado contrario o cuando muere su ID: se
+      dibuja hasta esa vela y lo dice. Obedecen el filtro de ID visibles y en replay no
+      aparecen hasta que cierra la vela del corte en que se marcaron. Vienen calculados:
+      el explorador no busca ningún patrón</span>
     <span><i class="box" style="background:#6f4bd8; opacity:.3"></i><b>ACUMULACIÓN</b> (violeta
       con trama, borde a rayas largas) — <b>DESACTIVADA de momento</b>, no se dibuja hasta que
       se revise cómo se cuentan los toques. Cuando vuelva: desde la vela en que el ID cumple la firma del
@@ -387,7 +422,7 @@ configuración, el historial y las estadísticas, en texto">Copiar</button>
     <span>✕ grueso = extremo fijado por una vela del color contrario al impulso (R-36),
       sobre la vela que lo fijó</span>
     <span>«Ruido» es un preset de las casillas de Capas: <b>Limpio</b> —el de salida—
-      deja el ID actual en esta temporalidad, y nada más; <b>Normal</b> es lo
+      deja el ID actual y sus OB y FVG en esta temporalidad, y nada más; <b>Normal</b> es lo
       de siempre; <b>Todo</b> lo enciende entero. Tocar una casilla a mano deja el nivel
       «a mano» y ningún botón pulsado. El estado dice qué capas quedan apagadas</span>
     <span>vela hueca a la derecha = vela en formación durante el replay: el motor
@@ -419,8 +454,9 @@ configuración, el historial y las estadísticas, en texto">Copiar</button>
       marcados A MANO («Rectángulo»): cada nombre con su color, punteados y numerados por
       nombre en el orden en que se plantan. El botón arma, el clic lo planta y después se
       arrastra: bordes de arriba y abajo = techo y suelo, bordes de los lados = el tramo,
-      por dentro = moverlo entero. Escape desarma. NO SON ZONAS DEL MOTOR: no las ha
-      detectado nada, no hay regla detrás y no salen de la pantalla. Los nombres son letras
+      por dentro = moverlo entero. Escape desarma. NO SON ZONAS DEL MOTOR: los del motor
+      van en ámbar y en índigo (capa «OB y FVG»); éstos no los ha detectado nada, no hay
+      regla detrás y no salen de la pantalla. Los nombres son letras
       porque lo que significan lo dicta el propietario sobre el dibujo. Son, con la caja
       simulada, lo único del gráfico que dibuja el propietario</span>
     <span><i style="background:#c0359a"></i><b>H4</b>

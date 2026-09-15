@@ -55,6 +55,14 @@ DEFAULT_CHARTS: dict[str, tuple[str, ...]] = {
     M5: (H4,),
 }
 
+#: En qué temporalidades se marcan el OB y el FVG (K.2), cada una dentro de su
+#: PROPIO ID. **Por ahora sólo H4**: el propietario quiere ver que se marca bien
+#: ahí antes de pasar a lo siguiente. H1, M15 y M5 no marcan nada.
+#:
+#: Es lectura del propietario, no parámetro del motor, y no entra en el hash:
+#: no cambia ni una vela ni un impulso.
+PATTERN_TIMEFRAMES: tuple[str, ...] = (H4,)
+
 
 def by_size(timeframes: Iterable[str], *, descending: bool = True) -> tuple[str, ...]:
     """Ordena temporalidades por duración, de mayor a menor por defecto."""

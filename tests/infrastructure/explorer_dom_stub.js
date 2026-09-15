@@ -59,6 +59,7 @@ function declare(id) {
  'mode-group', 'impulse-layers', 'chart', 'zoom-reset', 'noise-buttons',
  'prev', 'next',
  'from', 'to', 'layer-limbo', 'layer-marks', 'layer-contacts', 'layer-mid', 'layer-wrong',
+ 'layer-patterns',
  'analysis-layers', 'accumulation-layer', 'layer-accumulation',
  'blind-seed', 'blind-start', 'blind-reveal', 'blind-exit',
  'sim-group', 'sim-buttons', 'sim-ratio', 'sim-clear',
@@ -208,12 +209,21 @@ global.Plotly = {
           // La acumulación va con TRAMA: es lo que la separa de un relleno liso.
           fillpattern: (trace.fillpattern && trace.fillpattern.shape) || null,
           captions: trace.text && trace.text.length <= 200 ? trace.text.slice() : null,
+          // K.2 — los recuadros del motor escriben el nombre en la esquina y el
+          // resto lo dejan vacío: sólo los nombres, para que quepan aunque
+          // haya cientos de patrones a la vista. Y el globo, para comprobar
+          // que dice cuándo se marcó y por qué acabó.
+          labels: trace.text ? trace.text.filter(Boolean).slice(0, 200) : null,
+          hovers: trace.hovertext ? trace.hovertext.filter(Boolean).slice(0, 200) : null,
+          textposition: trace.textposition || null,
           xs: trace.mode === 'markers' && (trace.x || []).length <= 200
             ? trace.x.slice()
             : null,
           // El trazo entero, para comprobar QUÉ nivel se dibuja en CADA tramo:
           // cada segmento es (x0, x1, precio).
-          segments: trace.mode === 'lines' && (trace.x || []).length <= 3000
+          // También las trazas «lines+text»: los recuadros del motor llevan
+          // el nombre escrito en la esquina.
+          segments: /^lines/.test(trace.mode || '') && (trace.x || []).length <= 3000
             ? (trace.x || []).map(function (x, index) { return [x, trace.y[index]]; })
             : null,
         };
@@ -356,7 +366,7 @@ function snapshot(label) {
     // Las casillas que el preset mueve sin que nadie las toque: si el estado y
     // el control se separan, el explorador miente sobre lo que se está viendo.
     boxes: ['layer-limbo', 'layer-marks', 'layer-contacts', 'layer-mid', 'layer-wrong',
-      'layer-accumulation']
+      'layer-accumulation', 'layer-patterns']
       .reduce(function (state, id) {
         state[id] = elements[id].checked === true;
         return state;
@@ -530,6 +540,32 @@ steps.push(snapshot('acumulacion-por-defecto'));
 elements['layer-accumulation'].fire('change', { target: { checked: false } });
 steps.push(snapshot('acumulacion-apagada'));
 elements['layer-accumulation'].fire('change', { target: { checked: true } });
+
+// K.2 — el OB y el FVG que marca el motor dentro del ID de H4. Se retratan en
+// H4 con el periodo entero y todos los ID a la vista, apagados sobre las mismas
+// velas para comprobar que la casilla los quita, con «ID actual» para el
+// filtro, y en H1 y M15, donde no se marcan y el estado tiene que decirlo.
+const h4Patterns = tabs.filter(function (tab) { return tab.dataset.tf === 'H4'; })[0] || tabs[0];
+h4Patterns.fire('click');
+presets[0].fire('click');
+setNoise('all');
+steps.push(snapshot('con-patrones'));
+elements['layer-patterns'].fire('change', { target: { checked: false } });
+steps.push(snapshot('sin-patrones'));
+elements['layer-patterns'].fire('change', { target: { checked: true } });
+setNoise('clean');
+steps.push(snapshot('patrones-id-actual'));
+setNoise('all');
+tabs.filter(function (tab) { return tab.dataset.tf === 'H1'; }).forEach(function (tab) {
+  tab.fire('click');
+  steps.push(snapshot('patrones-h1'));
+});
+tabs.filter(function (tab) { return tab.dataset.tf === 'M15'; }).forEach(function (tab) {
+  tab.fire('click');
+  steps.push(snapshot('patrones-m15'));
+});
+setNoise('normal');
+tabs[0].fire('click');
 
 capaPrincipal.fire('change', { target: { checked: false } });
 visiblesCompleto.filter(function (button) { return button.dataset.visible === 'pair'; })

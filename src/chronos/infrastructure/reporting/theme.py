@@ -29,6 +29,15 @@ SERIES = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100")
 # acumulación del módulo de estructura.
 VIOLET = "#6f4bd8"
 
+# Dos del MOTOR para el OB y el FVG que marca dentro del ID (K.2). Rellenos con
+# transparencia, así que van saturados y oscuros: el ámbar (40°) queda lejos
+# del naranja vivo de la serie y el índigo (234°) es más oscuro y más azul que
+# el azul de la serie. Ninguno lo usa la mano —sus recuadros son magenta, cian
+# y oliva— para que un OB del motor no se confunda nunca con uno que ha marcado
+# el propietario.
+AMBER = "#cf8a00"
+INDIGO = "#3d47b5"
+
 # Los tonos de lo que dibuja el PROPIETARIO a mano encima del gráfico y no ha
 # pintado el motor: sus recuadros y sus líneas. Quedan fuera de la serie
 # categórica y del violeta a propósito, para que no se confundan con ninguna
