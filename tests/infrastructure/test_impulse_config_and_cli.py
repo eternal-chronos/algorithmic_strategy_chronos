@@ -47,20 +47,35 @@ def test_el_yaml_del_proyecto_carga_y_declara_los_parametros_abiertos() -> None:
 
 
 def test_el_reparto_de_graficos_del_yaml_es_el_del_propietario() -> None:
-    """Cada uno con el suyo, y H1 y M15 con el de H4.
+    """El ID vive en H4 y en M15; H1 lleva el de H4 detrás y ninguno propio.
 
-    El ID vive sólo en el Diario y en H4: a H1 y a M15 no se les marca ID. Y el
-    Diario se dibuja SÓLO en su gráfico: en H4 no se ve nada suyo.
+    Sobre M15 se dibuja además el de H4 como contexto. El Diario y M5 no se
+    dibujan.
     """
     charts = load_impulse_config(Path("config/impulse.yaml")).charts
 
-    assert charts.charts == ("D", "H4", "H1", "M15")
-    assert charts.overlays("D") == ("D",)
+    assert charts.charts == ("H4", "H1", "M15")
     assert charts.overlays("H4") == ("H4",)
     assert charts.overlays("H1") == ("H4",)
-    assert charts.overlays("M15") == ("H4",)
-    # H1 y M15 se dibujan pero no llevan detector propio.
-    assert charts.detected == ("D", "H4")
+    assert charts.overlays("M15") == ("M15", "H4")
+    # H1 se dibuja pero no lleva detector propio.
+    assert charts.detected == ("H4", "M15")
+
+
+def test_el_yaml_del_proyecto_no_lleva_zonas(tmp_path: Path) -> None:
+    """Las zonas se borraron del árbol: el fichero no las nombra, y pedirlas es
+    una clave desconocida, no un interruptor apagado."""
+    texto = Path("config/impulse.yaml").read_text(encoding="utf-8")
+    assert "break_by_zone" not in texto
+    assert "\nzones:" not in texto
+
+    ruta = tmp_path / "zonas.yaml"
+    ruta.write_text(yaml.safe_dump({"zones": {"enabled": True}}), encoding="utf-8")
+    with pytest.raises(ConfigError, match="zones"):
+        load_impulse_config(ruta)
+    ruta.write_text(yaml.safe_dump({"rules": {"break_by_zone": True}}), encoding="utf-8")
+    with pytest.raises(ConfigError, match="break_by_zone"):
+        load_impulse_config(ruta)
 
 
 def test_un_reparto_invalido_se_rechaza_al_cargar(tmp_path: Path) -> None:
@@ -211,11 +226,11 @@ def test_detect_con_el_modulo_apagado_no_escribe_nada(tmp_path: Path) -> None:
 def test_detect_omite_el_grafico_que_el_historico_no_da_para_construir(
     tmp_path: Path,
 ) -> None:
-    """Con un histórico H1 hay diario, H4 y H1, pero no M15.
+    """Con un histórico H1 hay diario, H4 y H1, pero no M15 ni M5.
 
-    Fabricar velas M15 a partir de velas de una hora sería inventarse datos; y
-    abortar la fase entera por un gráfico que no lleva impulso propio sería peor
-    que trabajar con lo que hay. Se omite y se dice.
+    Fabricar velas M15 o M5 a partir de velas de una hora sería inventarse datos;
+    y abortar la fase entera por un gráfico que no lleva impulso propio sería
+    peor que trabajar con lo que hay. Se omite y se dice.
     """
     hourly = (
         make_m1_history(weeks=10)
@@ -228,11 +243,14 @@ def test_detect_omite_el_grafico_que_el_historico_no_da_para_construir(
 
     assert result.exit_code == 0
     assert "se omite el gráfico M15" in result.stdout
+    assert "se omite el gráfico M5" in result.stdout
     carpeta = next(iter((tmp_path / "out").iterdir()))
     tabla = pd.read_csv(carpeta / "impulsos.csv")
     # H1 se dibuja, pero el ID sólo se marca en el diario y en H4.
     assert set(tabla["timeframe"]) == {"D", "H4"}
-    assert "M15" in (carpeta / "reporte.txt").read_text(encoding="utf-8")
+    reporte = (carpeta / "reporte.txt").read_text(encoding="utf-8")
+    assert "M15" in reporte
+    assert "M5" in reporte
 
 
 def test_detect_no_omite_una_temporalidad_que_lleva_impulso(tmp_path: Path) -> None:
@@ -278,3 +296,34 @@ def test_el_hash_de_la_corrida_queda_en_el_csv_y_en_run_json(workspace: Path) ->
     ).fingerprint()
     assert set(tabla["config_hash"]) == {esperado}
     assert esperado in (carpeta / "run.json").read_text(encoding="utf-8")
+
+
+# --- La estructura: ID en H4 y en M15, H1 con el de H4 detrás ---------------
+
+
+def test_detect_dibuja_la_estructura_del_proyecto(workspace: Path) -> None:
+    """La misma corrida del fichero del proyecto: ID propio en H4 y en M15, H1
+    sólo con el de H4 de contexto, y la rotura por línea.
+
+    El explorador la declara en su cabecera y es ahí donde se comprueba, porque
+    es lo que lee quien audita.
+    """
+    _write_run(
+        workspace,
+        make_m1_history(weeks=10),
+        charts={"H4": ["H4"], "H1": ["H4"], "M15": ["M15", "H4"]},
+    )
+    result = runner.invoke(
+        app, ["structure", "detect", "--config", str(workspace / "impulse.yaml")]
+    )
+
+    assert result.exit_code == 0, result.stdout
+    carpeta = next(iter((workspace / "out").iterdir()))
+    tabla = pd.read_csv(carpeta / "impulsos.csv")
+    assert set(tabla["timeframe"]) == {"H4", "M15"}
+    html = (carpeta / "explorador.html").read_text(encoding="utf-8")
+    assert '"charts":["H4","H1","M15"]' in html
+    assert '"layout":{"H4":["H4"],"H1":["H4"],"M15":["M15","H4"]}' in html
+    assert "rotura por línea" in html
+    assert "hasZones" not in html
+    assert "rsiPeriod" not in html

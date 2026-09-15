@@ -19,34 +19,40 @@ from chronos.domain.structure.enums import AnchorMode, DojiBreakMode, LegStartMo
 
 #: Temporalidades del módulo. Un ID sólo se rompe con cierres de su propia
 #: temporalidad, así que la que lleve detector lo lleva propio (§1.2, §2.4).
-#: **El ID vive en el Diario y en H4.** H1 y M15 no llevan detector: son sólo
-#: lectura, y sobre ellas se dibuja el ID de H4 como contexto.
+#: **En el reparto por defecto el ID vive en el Diario y en H4**, que es la
+#: línea base de la fase 1; el fichero del proyecto corre con otro reparto —el
+#: ID en H4 y en M15, H1 con el de H4 de contexto— que entra en el hash de
+#: configuración por su cuenta. M5 se agrega pero no se dibuja.
+M5 = "M5"
 M15 = "M15"
 H1 = "H1"
 H4 = "H4"
 DAILY = "D"
 
-SUPPORTED_TIMEFRAMES = (M15, H1, H4, DAILY)
+SUPPORTED_TIMEFRAMES = (M5, M15, H1, H4, DAILY)
 
-TIMEFRAME_MINUTES: dict[str, int] = {M15: 15, H1: 60, H4: 240, DAILY: 1440}
+TIMEFRAME_MINUTES: dict[str, int] = {M5: 5, M15: 15, H1: 60, H4: 240, DAILY: 1440}
 
 #: Qué se dibuja en cada gráfico. La primera de la lista es la **principal** —de
 #: ella salen el sombreado del limbo y los marcadores— y las siguientes son
 #: contexto de temporalidad superior.
 #:
 #: El reparto lo fija el propietario: es cómo lee él el mercado, no una decisión
-#: del motor. **Sólo el Diario y H4 tienen ID propio**, que es lo que fija la
-#: línea base de la fase 1: H1 y M15 llevan dibujado el ID de H4 como contexto.
+#: del motor. **Aquí sólo el Diario y H4 tienen ID propio**, que es lo que fija
+#: la línea base de la fase 1: H1, M15 y M5 llevan dibujado el ID de H4 como
+#: contexto. El fichero del proyecto corre con otro reparto —el ID en H4 y en
+#: M15— que entra en el hash de configuración por su cuenta.
 #:
-#: **El Diario se dibuja sólo en su gráfico.** En H4 no se ve nada suyo —ni el ID
-#: ni su marco—: a esa escala la caja diaria tapa el precio y lo que se está
-#: auditando es el ID de H4. Quitarlo de ahí no cambia el hash: el detector del
-#: Diario sigue encendido porque su propio gráfico lo pide.
+#: **El Diario se dibuja sólo en su gráfico.** En H4 no se ve nada suyo: a esa
+#: escala la caja diaria tapa el precio y lo que se está auditando es el ID de
+#: H4. Quitarlo de ahí no cambia el hash: el detector del Diario sigue encendido
+#: porque su propio gráfico lo pide.
 DEFAULT_CHARTS: dict[str, tuple[str, ...]] = {
     DAILY: (DAILY,),
     H4: (H4,),
     H1: (H4,),
     M15: (H4,),
+    M5: (H4,),
 }
 
 
@@ -98,7 +104,7 @@ class ChartsConfig:
         """Temporalidades sobre las que hay que detectar impulsos.
 
         Es la unión de todo lo que se dibuja: una temporalidad que sólo aparece
-        como gráfico —M15 en el reparto por defecto— no necesita detector.
+        como gráfico —M15 o M5 en el reparto por defecto— no necesita detector.
         """
         return by_size({tf for overlays in self.layout.values() for tf in overlays})
 
@@ -176,8 +182,8 @@ class AggregationConfig:
     su TradingView.
 
     Sólo H4 y el diario admiten desplazamiento, que es donde las plataformas
-    discrepan. La rejilla de M15 y H1 no es ambigua —cuartos de hora y horas en
-    punto— así que no lleva parámetro que ajustar.
+    discrepan. La rejilla de M5, M15 y H1 no es ambigua —cinco minutos, cuartos
+    de hora y horas en punto— así que no lleva parámetro que ajustar.
     """
 
     #: Desplazamiento del inicio de las velas H4 respecto a 00:00 UTC. **Se ignora

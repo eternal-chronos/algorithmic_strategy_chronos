@@ -45,26 +45,40 @@ implementada, testeada y con un backtest reproducible.
 
 ## Estado
 
-> **Retirada de las zonas (2026-09-11).** Las fases 2.0, 2.1, 3.0, 3.1 y los
-> setups 1 y 2 se borraron enteros del código: el UL, el PUL y el APUL, la rotura
-> por zona, el ID de H1, la cascada, las operaciones y sus exploradores. Lo que
-> queda es la fase 1 tal cual: el ID en el Diario y en H4, rotura por línea,
-> línea base `e27d20d0fa4e` con D 401 / H4 2.027. Con ellas se fue también la
-> regla «nadie nace roto» de la fase 3.0, que movía esa línea base. Las
-> secciones de abajo quedan como registro histórico de lo que se midió; sus
-> comandos ya no existen. Las entradas se rehacen desde cero.
-
 | Fase | Nombre | Descripción | Estado | Informe |
 |---|---|---|---|---|
 | 0 | `ema_cross` | Baseline de referencia para validar el motor | Hecha | — |
-| 1 | Impulso dominante | Detección del ID en Diario y H4 (H1 y M15 se dibujan con el de H4): rotura → limbo → constitución | Implementada y corrida sobre 2018–2025 de Dukascopy; **pendiente de auditoría visual del propietario** | `chronos structure detect` |
-| 2.0 | Zonas UL, PUL y APUL | Detección y dibujo de las dos zonas de cada ID —en contra, el PUL si el ID anterior iba igual, y si no el APUL: la zona heredada de aquél, su UL cuando su extremo quedó por detrás del ancla, o la del retroceso tras una constitución abortada—; la rotura sigue siendo por línea | **Retirada** (registro histórico) | — |
-| 2.1 | Rotura por zona | La zona sustituye a la línea como nivel de rotura del ID: el UL a favor, el PUL —o el APUL— en contra | **Retirada** (registro histórico) | — |
+| 1 | Impulso dominante | Detección del ID: rotura → limbo → constitución. **Hoy en H4 y en M15**; H1 se dibuja con el de H4 detrás | Implementada y corrida sobre 2018–2025 de Dukascopy; **pendiente de auditoría visual del propietario** | `chronos structure detect` |
+| 2.0 | Zonas UL, PUL y APUL | Detección y dibujo de las dos zonas de cada ID | **Retirada** (borrada del árbol el 2026-09-14) | — |
+| 2.1 | Rotura por zona | La zona sustituye a la línea como nivel de rotura del ID | **Retirada** (borrada del árbol el 2026-09-14) | — |
 | 2.2 | — | *(aparcada: FVG)* | — | — |
-| 3.0 | Señales de entrada | La cascada H4 → H1 rehecha desde cero, con la rotura del propietario —**el UL manda a favor y el ancla en contra**— y **sólo señales**: toque de la zona en contra de H4 → se espera a que el **ID de H1** —que en esta fase lleva detector propio— se ponga en la dirección del de H4 y se marca su PUL → **el precio toca ese PUL de H1 y ahí salta la señal**, en el instante del toque y no al cierre de la vela. Con el PUL diario de **veto** direccional. Sin entradas, sin stops, sin targets, sin métricas | **Retirada** (registro histórico) | — |
-| 3.1 | Entradas | Las operaciones: **H4 dice hacia dónde se busca** —hacia su zona en contra o hacia su UL, según dónde esté el precio—, **H1 arma el setup** —su zona en contra si va en la dirección buscada, su UL si va al revés y lo rechaza— y **M15 afina** con un OB o un FVG. Límite en el borde cercano del patrón, stop en el borde exterior de la zona de H1 —el **interior** en el rechazo del UL afinado con un OB— y objetivo siempre a 1:3. Una por ID de H1, nunca dos vivas. **El viernes al cerrar el mercado se cierra todo.** El Diario queda fuera | **Retirada** (registro histórico) | — |
+| 3.0 | Señales de entrada | La cascada H4 → H1 con el Diario de veto | **Retirada** (setup 1, borrado del árbol) | — |
+| 3.1 | Entradas | Las operaciones con límite, stop y objetivo | **Retirada** (setup 1, borrado del árbol) | — |
 
-### Fase 3.1 — entradas
+### Estado actual (2026-09-14): el ID solo, en H4 y en M15
+
+Las zonas —el UL, el PUL y el APUL, la rotura por zona, la caja del 50 % del
+retroceso, la tendencia rápida o lenta y la confluencia— se han **borrado del
+árbol**, igual que el setup 1 antes; y con ellas el RSI 21. Lo que corre
+`chronos structure detect` con el fichero del proyecto es la ESTRUCTURA y nada
+más: el ID de H4 y el de M15, con la rotura por línea de la fase 1 —cierre más
+allá del extremo a favor, del ancla en contra—. M15 lleva además el ID de H4
+detrás como contexto y H1 sólo ése: no tiene detector. El Diario y M5 no se
+dibujan. Sin señales de entrada, sin entradas, sin stops, sin targets y sin
+medición de rentabilidad.
+
+Encima del dibujo el propietario marca a mano lo nuevo, que se irá dictando
+sobre el HTML: la caja simulada con la cuenta, tres recuadros (A, B y C), tres
+líneas (H4, H1 y M15) y un Fibonacci de dos clics con los niveles 0, 50, 70,5,
+72, 79 y 100, con el **70,5 en amarillo como gold zone**. La acumulación sigue
+aparcada.
+
+El fichero del proyecto ya no reproduce la línea base de la fase 1 —H4 y M15
+entran en el hash—; la línea base se reconstruye desde él con `phase1_config`.
+
+Lo que sigue es el registro de cómo se llegó hasta aquí.
+
+### Fase 3.1 — entradas (retirada)
 
 Es lo primero del proyecto que **abre y cierra posiciones**. No publica ni una
 métrica y es a propósito: lo pidió el propietario. Hasta que el dibujo esté
@@ -161,7 +175,7 @@ simulada** abre en esta fase con **50 $ y el 17 %** —8,50 $ por operación, 25
 de objetivo—, que es con lo que el propietario quiere mirarlas; el dinero escrito
 en cada operación sale de ahí y cambiarlo no cambia ni una operación.
 
-### Fase 3.0 — señales de entrada
+### Fase 3.0 — señales de entrada (retirada)
 
 No emite operaciones y es a propósito: lo que se entrega es la capa «Cascada de
 entrada» del explorador, para que el propietario mire si la máquina está viendo

@@ -17,6 +17,7 @@ from chronos.application.structure.config import (
     DAILY,
     H1,
     H4,
+    M5,
     M15,
     AggregationConfig,
 )
@@ -207,9 +208,9 @@ def test_el_ultimo_trozo_de_la_sesion_larga_no_llega_a_cuatro_horas() -> None:
 # --- El ancla no toca lo que no le corresponde ------------------------------
 
 
-@pytest.mark.parametrize("timeframe", [H1, M15])
+@pytest.mark.parametrize("timeframe", [H1, M15, M5])
 def test_las_temporalidades_menores_no_se_anclan_a_la_sesion(timeframe: str) -> None:
-    """M15 y H1 tienen la misma rejilla en todas las plataformas."""
+    """M5, M15 y H1 tienen la misma rejilla en todas las plataformas."""
     frame = m1("2025-01-10", "2025-01-14")
     fija = aggregate(frame, timeframe, AggregationConfig()).frame
     anclada = aggregate(frame, timeframe, AggregationConfig(d_session_start="NY_18:00")).frame

@@ -46,7 +46,8 @@ chronos data dukascopy -g m1 --from 2018-01-01 --to 2025-12-31
 # Verificar la zona horaria del histórico. Obligatorio antes de calcular nada.
 chronos structure verify-tz --config config/impulse.yaml
 
-# Detectar los impulsos dominantes (Diario y H4; H1 y M15 se dibujan con el de H4)
+# La ESTRUCTURA: el ID —rotura por línea— en H4 y en M15; H1 se dibuja con el
+# ID de H4 detrás. Es lo que hay en `now/`.
 # El explorador embebe los tres LEG_START_MODE de R-36 para poder alternarlos
 # sobre las mismas velas; `--sin-modos-r36` se ahorra las dos corridas extra.
 chronos structure detect --config config/impulse.yaml
@@ -55,14 +56,13 @@ chronos structure detect --config config/impulse.yaml
 chronos structure evidencia --config config/impulse.yaml
 ```
 
-El módulo de estructura detecta **el impulso dominante del Diario y de H4** y
-**no emite señales**: sin zonas, sin entradas, sin stops, sin targets y sin
-medición de rentabilidad. H1 y M15 no llevan detector —no se les marca ID— y
-sobre ellas se dibuja el de H4 como contexto. Ver
-[`docs/MODULO_1_IMPULSO_DOMINANTE.md`](docs/MODULO_1_IMPULSO_DOMINANTE.md). Las
-zonas UL/PUL/APUL, la rotura por zona y los setups 1 y 2 que hubo encima se
-retiraron enteros; su historia queda en [`docs/FASES.md`](docs/FASES.md) y las
-entradas se rehacen desde cero.
+El módulo de estructura detecta **el impulso dominante de H4 y de M15** —rotura
+por línea: ancla y extremo— y **no emite señales de entrada**: sin zonas, sin
+RSI, sin entradas, sin stops, sin targets y sin medición de rentabilidad. H1 no
+lleva detector —no se le marca ID— y sobre ella se dibuja el de H4 como
+contexto. Encima, el propietario marca a mano lo que va dictando: recuadros,
+líneas y un Fibonacci con los niveles 0 / 50 / 70,5 (gold zone) / 72 / 79 / 100.
+Ver [`docs/MODULO_1_IMPULSO_DOMINANTE.md`](docs/MODULO_1_IMPULSO_DOMINANTE.md).
 
 Cada corrida de estructura deja una carpeta en `reports/` con `reporte.txt`,
 `explorador.html`, los CSV de impulsos, roturas, contactos y estado, y

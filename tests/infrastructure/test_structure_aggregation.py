@@ -14,6 +14,7 @@ from chronos.application.structure.config import (
     DAILY,
     H1,
     H4,
+    M5,
     M15,
     AggregationConfig,
     StructureDataConfig,
@@ -171,34 +172,56 @@ def test_la_barra_final_no_se_descarta_por_asumir_paso_de_un_minuto() -> None:
     assert len(resultado.frame) == 1
 
 
-def test_las_cuatro_temporalidades_del_modulo(history: pd.DataFrame) -> None:
-    series = aggregate_all(history, AggregationConfig(d_session_start=REJILLA_UTC), (M15, H1, H4, DAILY))
-    assert list(series) == [DAILY, H4, H1, M15]  # de mayor a menor
-    tamaños = [len(series[timeframe].frame) for timeframe in (DAILY, H4, H1, M15)]
+def test_las_cinco_temporalidades_del_modulo(history: pd.DataFrame) -> None:
+    series = aggregate_all(
+        history, AggregationConfig(d_session_start=REJILLA_UTC), (M5, M15, H1, H4, DAILY)
+    )
+    assert list(series) == [DAILY, H4, H1, M15, M5]  # de mayor a menor
+    tamaños = [len(series[timeframe].frame) for timeframe in (DAILY, H4, H1, M15, M5)]
     assert tamaños == sorted(tamaños)
 
 
-def test_m15_y_h1_no_llevan_desplazamiento(history: pd.DataFrame) -> None:
-    """Su rejilla no es ambigua: cuartos de hora y horas en punto."""
+def test_m5_m15_y_h1_no_llevan_desplazamiento(history: pd.DataFrame) -> None:
+    """Su rejilla no es ambigua: cinco minutos, cuartos de hora y horas en punto."""
     config = AggregationConfig(h4_offset_hours=3, d_session_start="22:00")
+    m5 = aggregate(history, M5, config).frame
     m15 = aggregate(history, M15, config).frame
     h1 = aggregate(history, H1, config).frame
 
     assert set(pd.DatetimeIndex(h1.index).minute) == {0}
     assert set(pd.DatetimeIndex(m15.index).minute) <= {0, 15, 30, 45}
+    assert set(pd.DatetimeIndex(m5.index).minute) <= set(range(0, 60, 5))
+
+
+def test_m5_es_la_vela_de_cinco_minutos_del_m1(history: pd.DataFrame) -> None:
+    """Cada vela M5 es exactamente el resumen de sus cinco minutos: abre con el
+    primero, cierra con el último y cubre el máximo y el mínimo de los cinco."""
+    m5 = aggregate(history, M5, AggregationConfig(d_session_start=REJILLA_UTC)).frame
+    label = pd.Timestamp(m5.index[10])
+    minutos = history.loc[label : label + pd.Timedelta(minutes=4)]
+
+    assert 1 <= len(minutos) <= 5
+    assert m5.loc[label, "open"] == minutos["open"].iloc[0]
+    assert m5.loc[label, "close"] == minutos["close"].iloc[-1]
+    assert m5.loc[label, "high"] == minutos["high"].max()
+    assert m5.loc[label, "low"] == minutos["low"].min()
 
 
 def test_temporalidad_no_soportada() -> None:
     frame = make_m1_history(weeks=1)
     with pytest.raises(DomainError, match="no soportada"):
-        aggregate(frame, "M5", AggregationConfig(d_session_start=REJILLA_UTC))
+        aggregate(frame, "M3", AggregationConfig(d_session_start=REJILLA_UTC))
 
 
 def test_no_se_puede_bajar_de_temporalidad(history: pd.DataFrame) -> None:
-    """Pedir M15 a un histórico H1 daría velas falsas sin avisar de nada."""
-    hourly = aggregate(history, H1, AggregationConfig(d_session_start=REJILLA_UTC)).frame
+    """Pedir M15 a un histórico H1 —o M5 a uno M15— daría velas falsas sin avisar."""
+    config = AggregationConfig(d_session_start=REJILLA_UTC)
+    hourly = aggregate(history, H1, config).frame
     with pytest.raises(DomainError, match="hace falta un histórico más fino"):
-        aggregate(hourly, M15, AggregationConfig(d_session_start=REJILLA_UTC))
+        aggregate(hourly, M15, config)
+    quarter = aggregate(history, M15, config).frame
+    with pytest.raises(DomainError, match="hace falta un histórico más fino"):
+        aggregate(quarter, M5, config)
 
 
 # --- Carga de bid y ask -----------------------------------------------------

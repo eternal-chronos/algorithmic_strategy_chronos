@@ -25,6 +25,7 @@ from chronos.application.structure.config import (
     DAILY,
     H1,
     H4,
+    M5,
     M15,
     AggregationConfig,
     SessionAnchor,
@@ -151,10 +152,11 @@ def aggregate(
 def _anchor_for(timeframe: str, config: AggregationConfig) -> SessionAnchor | None:
     """Ancla de sesión aplicable a esta temporalidad.
 
-    Sólo el diario y H4 se anclan a la sesión: la rejilla de M15 y H1 —cuartos de
-    hora y horas en punto— es la misma en todas las plataformas y no depende de
-    dónde empiece el día. Cuando hay ancla, `h4_offset_hours` no pinta nada: H4
-    arranca con la sesión, que es lo que hace la plataforma del propietario.
+    Sólo el diario y H4 se anclan a la sesión: la rejilla de M5, M15 y H1 —cinco
+    minutos, cuartos de hora y horas en punto— es la misma en todas las
+    plataformas y no depende de dónde empiece el día. Cuando hay ancla,
+    `h4_offset_hours` no pinta nada: H4 arranca con la sesión, que es lo que
+    hace la plataforma del propietario.
     """
     if timeframe not in (DAILY, H4):
         return None
@@ -261,10 +263,12 @@ def _humanize(step: pd.Timedelta) -> str:
 def _bins(timeframe: str, config: AggregationConfig) -> tuple[str, pd.Timedelta, pd.Timedelta]:
     """Frecuencia, desplazamiento y duración del intervalo de una temporalidad.
 
-    M15 y H1 no llevan desplazamiento: su rejilla —cuartos de hora y horas en
-    punto— es la misma en todas las plataformas. Sólo H4 y el diario admiten
-    ajuste, que es donde discrepan.
+    M5, M15 y H1 no llevan desplazamiento: su rejilla —cinco minutos, cuartos de
+    hora y horas en punto— es la misma en todas las plataformas. Sólo H4 y el
+    diario admiten ajuste, que es donde discrepan.
     """
+    if timeframe == M5:
+        return "5min", pd.Timedelta(0), pd.Timedelta(minutes=5)
     if timeframe == M15:
         return "15min", pd.Timedelta(0), pd.Timedelta(minutes=15)
     if timeframe == H1:

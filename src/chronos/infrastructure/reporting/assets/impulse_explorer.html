@@ -47,14 +47,6 @@ input[type="date"], input[type="number"], select {
   background: var(--page); border: 1px solid var(--grid); border-radius: 6px;
 }
 .buttons button[disabled] { opacity: .45; cursor: default; }
-#sim-rr {
-  font-size: 13px; padding: 6px 10px; white-space: nowrap;
-  background: var(--page); color: var(--muted);
-  border: 1px solid var(--grid); border-radius: 6px;
-}
-#sim-rr[data-source="auto"] {
-  color: var(--ink); border-color: var(--ink); font-weight: 600;
-}
 input[disabled], select[disabled] { opacity: .45; }
 #replay-group.on > span { color: var(--ink); font-weight: 600; }
 #chart { background: var(--surface); border: 1px solid var(--grid); border-radius: 10px; }
@@ -77,7 +69,7 @@ footer code { background: var(--surface); border: 1px solid var(--grid); border-
 
   <div class="controls">
     <div class="group">
-      <span title="Atajos de teclado: d = Diario, 4 = H4, 1 = H1, m = M15.
+      <span title="Atajos de teclado: 4 = H4, 1 = H1, m = M15.
 Se ignoran mientras el foco está en un campo de texto.">Temporalidad</span>
       <div class="buttons" id="tf-buttons"></div>
     </div>
@@ -123,8 +115,8 @@ encuadre automático. También con doble clic sobre el gráfico.">Ajustar</butto
       </div>
     </div>
     <div class="group">
-      <span title="Preset de capas. Limpio deja el ID actual y su marco en esta
-temporalidad, y nada más: fuera quedan limbo, contactos, 50 % y extremo contrario.
+      <span title="Preset de capas. Limpio deja el ID actual en esta temporalidad,
+y nada más: fuera quedan limbo, contactos, 50 % y extremo contrario.
 Normal es lo que el explorador enseñaba hasta ahora. Todo lo enciende entero.
 No cambia la detección ni los informes: sólo cuántas cosas se dibujan a la vez.">
         Ruido
@@ -140,17 +132,24 @@ No cambia la detección ni los informes: sólo cuántas cosas se dibujan a la ve
           <input type="checkbox" id="layer-marks" checked> Constituciones y roturas</label>
         <label class="toggle"><input type="checkbox" id="layer-contacts"> Contactos</label>
         <label class="toggle"><input type="checkbox" id="layer-mid"> Nivel 50 %</label>
-        <label class="toggle" title="El MARCO de cada ID: un recuadro con la vela que lo
-CONSTITUYE y la que lo MATA en las dos verticales, y su ANCLA y su EXTREMO en las dos
-horizontales. Lo lleva CADA ID dibujado.
-El COLOR lo pone la TEMPORALIDAD —violeta el Diario, naranja H4—, no la dirección: en el
-mismo gráfico puede haber marcos de dos (el de H4 sobre H1 y M15) y lo primero es saber
-de quién es cada uno. La dirección sigue en la línea del ID.
-SE REMARCA mientras el ID vive: el lado derecho llega al presente.
-Obedece el selector de ID visibles.">
-          <input type="checkbox" id="layer-frame" checked> Marco del ID</label>
         <label class="toggle"><input type="checkbox" id="layer-wrong">
           Extremo de color contrario (R-36)</label>
+        <span id="analysis-layers" style="display:flex; gap:16px; flex-wrap:wrap;">
+          <span id="accumulation-layer">
+            <label class="toggle" title="APARCADA: la acumulación está desactivada de momento y
+no se dibuja; la casilla sólo se enseña si el motor la vuelve a traer.
+La ACUMULACIÓN, con la firma del propietario: el precio
+toca la parte alta del ID, toca la baja, y repite —dos toques en cada límite sin romper
+ninguno—. Desde la vela del toque que completa la firma hasta que el ID muere, el rango del
+ancla al extremo va sombreado en violeta con trama: ahí el precio está acumulando y, como
+dice el mentor, dentro de una acumulación las estructuras de dentro «las puede pasar por la
+piedra»; lo que vale es el rango de extremo a extremo.
+El sombreado empieza en ese toque, no en la constitución: antes no se sabía. Lo fecha el
+motor con la medición de contactos; aquí sólo se pinta. Obedece el selector de ID visibles.
+ES DIBUJO: no decide nada.">
+              <input type="checkbox" id="layer-accumulation" disabled> Acumulación (desactivada)</label>
+          </span>
+        </span>
       </div>
     </div>
     <div class="group" id="replay-group">
@@ -198,9 +197,6 @@ Después se arrastra: el borde de fuera de cada caja mueve el objetivo o el stop
 de la entrada mueve el conjunto entero, los bordes de los lados alargan el tramo y el
 interior lo desplaza todo. La etiqueta dice los pips de cada lado y el R:R; un pip es la
 última cifra del precio. Escape desarma sin plantar nada.
-El R:R NO SE PONE A MANO: sale de medir la caja —del stop al objetivo— y se vuelve a medir
-en cuanto arrastras cualquiera de los dos, así que dice 1:3, 1:4 o 1:2,44 según lo que haya
-dibujado. La caja nace con el objetivo a dos riesgos sólo para tener de dónde arrastrar.
 ES DIBUJO A MANO Y NADA MÁS: no hay orden, ni ejecución, ni resultado. Nadie mira si el
 precio llegó al objetivo o al stop, no sale de la pantalla y el motor no la ve. El
 proyecto sigue sin entradas.">
@@ -208,24 +204,28 @@ proyecto sigue sin entradas.">
       </span>
       <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
         <div class="buttons" id="sim-buttons"></div>
-        <span id="sim-rr" title="Sin caja dibujada no hay distancias que medir.">R:R —</span>
+        <div class="buttons" id="sim-ratio" title="R:R fijo: el objetivo se pone a tantas veces
+el riesgo. Con uno puesto, mover el stop mueve el objetivo con él y el ratio no cambia.
+Arrastrar el objetivo suelta el candado y deja el ratio a mano: ningún botón queda pulsado
+y el estado lo dice."></div>
         <div class="buttons">
           <button type="button" id="sim-clear" title="Quita la caja simulada">Quitar</button>
         </div>
       </div>
     </div>
     <div class="group" id="rect-group">
-      <span title="Tres RECUADROS que dibujas TÚ para marcar dónde ves un PUL, un UL o un
-APUL. Cada botón ARMA el suyo y el clic siguiente sobre el gráfico lo PLANTA ahí; después se
-arrastra: los bordes de arriba y abajo mueven el techo y el suelo, los de los lados alargan
-el tramo y por dentro se desplaza entero. Escape desarma sin plantar nada.
-Se pueden marcar VARIOS de cada nombre —el de H4 y el de H1 en el mismo gráfico— y se
+      <span title="Tres RECUADROS —A, B y C— que dibujas TÚ para marcar lo que ves y todavía
+no tiene regla. Cada botón ARMA el suyo y el clic siguiente sobre el gráfico lo PLANTA ahí;
+después se arrastra: los bordes de arriba y abajo mueven el techo y el suelo, los de los
+lados alargan el tramo y por dentro se desplaza entero. Escape desarma sin plantar nada.
+Se pueden marcar VARIOS de cada nombre —el de H4 y el de M15 en el mismo gráfico— y se
 numeran por nombre en el orden en que se plantan.
 Cada nombre lleva SU COLOR y todos van punteados a propósito: ninguna capa del motor usa
-esos colores, así que lo que se vea así lo has puesto tú.
-NO SON ZONAS DEL MOTOR: no las ha detectado nadie, no hay regla de PUL, UL ni APUL en el
-proyecto, no salen de la pantalla y el motor no se entera de que existen. Sirven para mandar
-una captura señalando lo que aún no se detecta.">
+esos colores, así que lo que se vea así lo has puesto tú. Los nombres son letras porque lo
+que significan lo irás dictando tú sobre el dibujo.
+NO SON ZONAS DEL MOTOR: no las ha detectado nadie, no hay regla detrás, no salen de la
+pantalla y el motor no se entera de que existen. Sirven para mandar una captura señalando lo
+que aún no se detecta.">
         Rectángulo
       </span>
       <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
@@ -240,16 +240,16 @@ una captura señalando lo que aún no se detecta.">
     </div>
     <div class="group" id="line-group">
       <span title="Tres LÍNEAS que trazas TÚ para marcar cosas sobre el gráfico —un nivel, un
-tramo, de dónde a dónde miras— y poder explicarlas. Una por TEMPORALIDAD —Diario, H4 y H1—:
+tramo, de dónde a dónde miras— y poder explicarlas. Una por TEMPORALIDAD —H4, H1 y M15—:
 el nombre dice de dónde es el nivel que estás marcando. Cada botón ARMA la suya y el clic
 siguiente sobre el gráfico la PLANTA ahí, HORIZONTAL al precio pulsado; después se arrastra:
 los extremos la mueven y la inclinan, y por dentro se desplaza entera. Escape desarma sin
 plantar nada.
 Se trazan VARIAS de cada temporalidad y se numeran por temporalidad en el orden en que se
 plantan.
-Llevan los mismos tres tonos de la mano que los recuadros —y no los que el motor usa por
-temporalidad, para que una línea de H4 no se confunda con el marco de H4 que sí ha
-calculado alguien— y van CONTINUAS: punteado es recuadro, continuo es línea.
+Llevan los mismos tres tonos de la mano que los recuadros —para que una línea no se
+confunda con nada que haya calculado el motor— y van CONTINUAS: punteado es recuadro,
+continuo es línea.
 NO SON CAPA DEL MOTOR: no las ha calculado nadie, no salen de la pantalla y el motor no se
 entera de que existen. Sirven para mandar una captura señalando lo que se quiere explicar.">
         Línea
@@ -270,13 +270,14 @@ Se traza con DOS CLICS: el botón ARMA, el primer clic sobre el gráfico clava e
 segundo el 100, así que la DIRECCIÓN la eliges tú —el 0 arriba si el retroceso es bajista,
 abajo si es alcista— y no hay que darle la vuelta a nada después. Escape suelta el botón, y
 también el 0 que esté esperando su segundo clic.
-Se dibujan sólo los niveles 0, 70, 80, 90 y 100, contados SIEMPRE desde el 0 hacia el 100:
-por eso el 90 cae pegado al 100. Los dos extremos van con línea entera y los tres retrocesos
-punteados. El tramo se estira un poco más allá del 100: un retroceso se mira hacia adelante.
+Se dibujan sólo los niveles 0, 50, 70,5, 72, 79 y 100, contados SIEMPRE desde el 0 hacia el
+100: por eso el 79 cae pegado al 100. Los dos extremos van con línea entera y los retrocesos
+punteados. El 70,5 es la GOLD ZONE: va en AMARILLO y con su nombre escrito, para verla de un
+vistazo. El tramo se estira un poco más allá del 100: un retroceso se mira hacia adelante.
 Después se arrastra: cada ancla se mueve sola y por dentro se desplaza el conjunto entero.
 Se trazan VARIOS y se numeran en el orden en que se plantan.
-Va en GRIS y no en un color porque no marca nada: no es un PUL ni un nivel, es una REGLA con
-la que medir, y lo que la identifica son sus porcentajes escritos al lado.
+Va en GRIS y no en un color porque no marca nada: es una REGLA con la que medir, y lo que la
+identifica son sus porcentajes escritos al lado.
 NO ES CAPA DEL MOTOR: nadie ha medido ese retroceso, no hay ninguna regla detrás, no sale de
 la pantalla y el motor no se entera de que existe.">
         Fibonacci
@@ -294,27 +295,30 @@ suelta el 0 que esté esperando su segundo clic">
     </div>
     <div class="group" id="account-group">
       <span title="Una cuenta de mentira para poner precio a lo que se dibuja. Se pone el
-CAPITAL de partida y cuánto se arriesga por operación —un % de ese capital o una cantidad
-fija—, y con una caja plantada los tres botones la apuntan: GANADA
-suma el riesgo por el R:R de esa caja, PERDIDA resta el riesgo entero y BE no mueve nada.
-«Deshacer» quita la última y devuelve su caja al gráfico, «Reiniciar» vuelve al capital de
-partida y «Copiar» se lleva el historial entero en texto.
-Cambiar el capital o el riesgo RECALCULA la curva completa: de cada operación se guarda su
-múltiplo de riesgo, no los euros.
+CAPITAL y cuánto se arriesga por operación —un % de ese capital o una cantidad fija—, y
+con una caja plantada los tres botones la apuntan: GANADA suma el riesgo por el R:R de esa
+caja, PERDIDA resta el riesgo entero y BE no mueve nada.
+«Deshacer» quita la última y devuelve su caja al gráfico, «Reiniciar» borra las
+operaciones y «Copiar» se lleva el historial entero en texto.
+Cambiar el capital o el riesgo NO toca lo ya apuntado: cada operación guarda los dólares
+que se jugó, y la casilla sólo manda sobre la SIGUIENTE. La curva arranca del capital que
+había puesto al apuntar la primera.
 NO ES DINERO NI ES UN BACKTEST DEL MOTOR: quien decide si una entrada ganó o perdió es el
 propietario mirando el gráfico. Nadie comprueba si el precio llegó al objetivo o al stop y
 el motor no ve ninguna de estas operaciones.">
         Cuenta simulada
       </span>
       <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-        <label class="toggle" title="Capital de partida, en dólares. Cambiarlo vuelve a
-contar la curva entera desde el principio.">Capital
+        <label class="toggle" title="Capital puesto, en dólares: la base del % de riesgo
+y, sin operaciones apuntadas, el arranque de la curva. Cambiarlo con operaciones apuntadas
+no mueve el saldo: sólo cambia la apuesta de la siguiente.">Capital
           <input type="number" id="account-initial" min="1" step="10" style="width:92px"
-                 aria-label="Capital de partida en dólares">
+                 aria-label="Capital puesto en dólares">
         </label>
-        <label class="toggle" title="Cuánto se arriesga en cada operación: un porcentaje del
-CAPITAL DE PARTIDA —el de la casilla de al lado, no el saldo vivo: la apuesta no crece con
-las ganancias— o una cantidad fija en dólares. Para arriesgar más, sube el capital.">Riesgo
+        <label class="toggle" title="Cuánto se arriesga en la SIGUIENTE operación: un
+porcentaje del capital de la casilla de al lado —no del saldo vivo: la apuesta no crece con
+las ganancias— o una cantidad fija en dólares. Para arriesgar más, sube el capital o el
+porcentaje; lo ya apuntado se queda con la apuesta que tenía.">Riesgo
           <select id="account-mode" aria-label="Cómo se mide el riesgo"></select>
           <input type="number" id="account-risk" min="0.01" step="0.5" style="width:82px"
                  aria-label="Riesgo por operación">
@@ -325,7 +329,7 @@ Sin caja no hay nada que cobrar y los tres están apagados."></div>
           <button type="button" id="account-undo" title="Quita la última operación apuntada y
 devuelve su caja al gráfico">Deshacer</button>
           <button type="button" id="account-reset" title="Borra las operaciones y vuelve al
-capital de partida">Reiniciar</button>
+capital de la casilla">Reiniciar</button>
           <button type="button" id="account-copy" title="Copia al portapapeles la
 configuración, el historial y las estadísticas, en texto">Copiar</button>
         </div>
@@ -350,21 +354,15 @@ configuración, el historial y las estadísticas, en texto">Copiar</button>
   <div id="chart"></div>
 
   <div class="legend">
-    <span><i style="background:#52514e"></i><b>FIBONACCI</b> marcado A MANO
-      («Fibonacci»): la regla con la que el propietario mide un retroceso. Dos
-      clics —el primero clava el 0 y el segundo el 100—, y se dibujan los niveles
-      <b>0, 70, 80, 90 y 100</b> contados del 0 al 100: los extremos con línea
-      entera y los tres retrocesos punteados. El tramo se estira un poco más allá
-      del 100. Va en gris porque no marca nada: es una REGLA, no un nivel. NO ES
-      CAPA DEL MOTOR: nadie ha medido ese retroceso y no hay ninguna regla
-      detrás</span>
-    <span><i style="background:#2a78d6"></i><b>RSI</b>, en el panel de abajo y
-      SIEMPRE puesto: el del periodo que dice su título, calculado por el motor
-      sobre las velas cerradas de la temporalidad que se está mirando. Las tres
-      rayas grises son las referencias —la del medio entera y las otras dos
-      punteadas— y el eje las nombra. Las primeras velas del histórico no tienen
-      lectura y ahí la línea va cortada, que es un HUECO y no un cero. ES DIBUJO:
-      no entra en la detección, no mueve un ID y no abre ni cierra nada</span>
+    <span><i style="background:#52514e"></i><i style="background:#eda100"></i><b>FIBONACCI</b>
+      marcado A MANO («Fibonacci»): la regla con la que el propietario mide un
+      retroceso. Dos clics —el primero clava el 0 y el segundo el 100—, y se dibujan
+      los niveles <b>0, 50, 70,5, 72, 79 y 100</b> contados del 0 al 100: los extremos
+      con línea entera y los retrocesos punteados. El <b>70,5</b> es la <b>GOLD
+      ZONE</b>: va en AMARILLO y con su nombre al lado. El tramo se estira un poco más
+      allá del 100. Los demás van en gris porque no marcan nada: es una REGLA, no un
+      nivel. NO ES CAPA DEL MOTOR: nadie ha medido ese retroceso y no hay ninguna
+      regla detrás</span>
     <span><i style="background:#1baf7a"></i>ID alcista (ancla y extremo)</span>
     <span><i style="background:#d03b3b"></i>ID bajista (ancla y extremo)</span>
     <span>línea continua = impulso de esta temporalidad · punteada = temporalidad superior</span>
@@ -377,21 +375,19 @@ configuración, el historial y las estadísticas, en texto">Copiar</button>
     <span>○ TOQUE_MECHA</span>
     <span>□ ROTURA_FALLIDA</span>
     <span>línea punteada fina = nivel del 50 % del ID</span>
-    <span><i style="background:#6f4bd8"></i>
-      <i style="background:#eb6834"></i>
-      <i style="background:#2a78d6"></i>MARCO del ID: el recuadro que va de la vela que
-      lo constituye a la que lo mata, y de su ancla a su extremo. El COLOR es el de la
-      TEMPORALIDAD —violeta el Diario, naranja H4—, no el de la dirección: la
-      dirección se lee en la línea del ID y en el globo. Continuo el del gráfico,
-      punteado el de la temporalidad de encima</span>
-    <span>cada gráfico lleva su marco y el de la temporalidad que le toca: el de
-      <b>H4</b> sobre H1 y sobre M15, que no llevan ID propio. El <b>Diario</b> se dibuja
-      SÓLO en su gráfico: en H4 no se ve nada suyo</span>
-    <span>el marco SE REMARCA mientras el ID vive: el lado derecho llega al presente</span>
+    <span>cada gráfico lleva su ID y el de la temporalidad que le toca: <b>H4</b> el suyo,
+      <b>M15</b> el suyo con el de H4 detrás, y <b>H1</b> sólo el de H4, porque H1 no
+      lleva ID propio</span>
+    <span><i class="box" style="background:#6f4bd8; opacity:.3"></i><b>ACUMULACIÓN</b> (violeta
+      con trama, borde a rayas largas) — <b>DESACTIVADA de momento</b>, no se dibuja hasta que
+      se revise cómo se cuentan los toques. Cuando vuelva: desde la vela en que el ID cumple la firma del
+      propietario —dos toques arriba y dos abajo sin romper— hasta que muere, el rango del ancla
+      al extremo. Dentro vale el rango de extremo a extremo, no la estructura de dentro. Empieza
+      en el toque que completa la firma, no en la constitución</span>
     <span>✕ grueso = extremo fijado por una vela del color contrario al impulso (R-36),
       sobre la vela que lo fijó</span>
     <span>«Ruido» es un preset de las casillas de Capas: <b>Limpio</b> —el de salida—
-      deja el ID actual y su marco en esta temporalidad, y nada más; <b>Normal</b> es lo
+      deja el ID actual en esta temporalidad, y nada más; <b>Normal</b> es lo
       de siempre; <b>Todo</b> lo enciende entero. Tocar una casilla a mano deja el nivel
       «a mano» y ningún botón pulsado. El estado dice qué capas quedan apagadas</span>
     <span>vela hueca a la derecha = vela en formación durante el replay: el motor
@@ -402,48 +398,49 @@ configuración, el historial y las estadísticas, en texto">Copiar</button>
     <span>el zoom hecho a mano (rueda o arrastre) se conserva paso a paso durante el
       replay: la ventana sólo se desplaza para seguir a la última vela. «Ajustar»
       o doble clic devuelven el encuadre automático</span>
-    <span>teclas <b>d</b> (Diario), <b>4</b> (H4), <b>1</b> (H1) y <b>m</b> (M15) cambian
-      la temporalidad; se ignoran con el foco en un campo de texto</span>
+    <span>teclas <b>4</b> (H4), <b>1</b> (H1) y <b>m</b> (M15) cambian la temporalidad;
+      se ignoran con el foco en un campo de texto</span>
     <span><i class="box" style="background:#1baf7a; opacity:.22"></i>
       <i class="box" style="background:#d03b3b; opacity:.22"></i>Entrada SIMULADA a mano
       («Simular entrada»): la caja verde es el objetivo y la roja el riesgo, colgando de la
       línea de la entrada —al revés en corto—. El botón arma, el clic planta y después se
       arrastra: bordes de fuera = stop y objetivo, línea de la entrada = mover la caja
       entera, bordes de los lados = alargar el tramo. Escape desarma</span>
-    <span>el <b>R:R es automático</b>: no se elige, se mide. El panel y la caja dicen la
-      distancia que hay del stop al objetivo —1:3, 1:4 o 1:2,44— y la vuelven a medir en
-      cuanto se arrastra el stop o el objetivo. La caja nace con el objetivo a dos riesgos
-      sólo para tener de dónde arrastrar</span>
+    <span>los botones <b>1:1 · 1:2 · 1:3 · 1:4</b> fijan el R:R: el objetivo se planta a
+      esa distancia y mover el stop lo arrastra con él. Arrastrar el objetivo suelta el
+      candado —ningún botón queda pulsado— y el ratio pasa a ser el que se vea</span>
     <span>la caja simulada dice los pips de cada lado y el R:R; un pip es la última cifra
       del precio. NO ES UNA OPERACIÓN: no hay orden, ni ejecución, ni resultado, y nadie
       comprueba si el precio llegó al objetivo o al stop. Es lo único del gráfico que
       dibuja el propietario y no el motor</span>
-    <span><i class="box" style="background:#c0359a; opacity:.5"></i><b>PUL</b>
-      <i class="box" style="background:#0b8fa8; opacity:.5"></i><b>UL</b>
-      <i class="box" style="background:#7c8b12; opacity:.5"></i><b>APUL</b>: RECUADROS
+    <span><i class="box" style="background:#c0359a; opacity:.5"></i><b>A</b>
+      <i class="box" style="background:#0b8fa8; opacity:.5"></i><b>B</b>
+      <i class="box" style="background:#7c8b12; opacity:.5"></i><b>C</b>: RECUADROS
       marcados A MANO («Rectángulo»): cada nombre con su color, punteados y numerados por
       nombre en el orden en que se plantan. El botón arma, el clic lo planta y después se
       arrastra: bordes de arriba y abajo = techo y suelo, bordes de los lados = el tramo,
       por dentro = moverlo entero. Escape desarma. NO SON ZONAS DEL MOTOR: no las ha
-      detectado nada, no hay regla de PUL, UL ni APUL en el proyecto y no salen de la
-      pantalla. Son, con la caja simulada, lo único del gráfico que dibuja el
-      propietario</span>
-    <span><i style="background:#c0359a"></i><b>Diario</b>
-      <i style="background:#0b8fa8"></i><b>H4</b>
-      <i style="background:#7c8b12"></i><b>H1</b>: LÍNEAS marcadas A MANO («Línea»): un
+      detectado nada, no hay regla detrás y no salen de la pantalla. Los nombres son letras
+      porque lo que significan lo dicta el propietario sobre el dibujo. Son, con la caja
+      simulada, lo único del gráfico que dibuja el propietario</span>
+    <span><i style="background:#c0359a"></i><b>H4</b>
+      <i style="background:#0b8fa8"></i><b>H1</b>
+      <i style="background:#7c8b12"></i><b>M15</b>: LÍNEAS marcadas A MANO («Línea»): un
       trazo por temporalidad que planta el propietario para señalar el nivel que quiere
       explicar; el nombre dice de dónde es y el color sólo sirve para distinguirlas. El
       botón arma, el clic la planta HORIZONTAL al precio pulsado y después se arrastra: los
       extremos la mueven y la inclinan, por dentro se desplaza entera. Escape desarma. Van
       CONTINUAS —los recuadros a mano van punteados— y se numeran por temporalidad. Llevan
-      tonos de la mano y no los del motor: una línea de H4 no es el marco de H4. NO SON
+      tonos de la mano y no los del motor. NO SON
       CAPA DEL MOTOR: no las ha calculado nada, no hay ninguna regla detrás y no salen de
       la pantalla</span>
     <span>con «Cuenta simulada» cada caja lleva además <b>el dinero que se juega</b>: la
       verde, lo que suma si llega el objetivo; la roja, lo que resta si toca el stop, con el
       capital y el riesgo puestos en la barra. Los botones <b>Ganada · Perdida · BE</b>
       apuntan la caja y mueven el saldo, y el estado dice cuánto queda, cuántas operaciones
-      van, el acierto, la R acumulada y la caída máxima. Lo apunta el propietario a mano:
+      van, el acierto, la R acumulada y la caída máxima. Cambiar el capital o el riesgo
+      sólo cambia la apuesta de la siguiente: lo apuntado se queda con la suya. Lo apunta
+      el propietario a mano:
       no es dinero, no es un backtest del motor y nadie mira las velas por ti</span>
   </div>
 

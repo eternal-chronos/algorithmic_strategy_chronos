@@ -52,6 +52,18 @@ PHASE1_BASELINE: dict[str, int] = {"D": 401, "H4": 2027}
 #: anclada a las 18:00 de Nueva York.
 BASELINE_HASH = "e27d20d0fa4e"
 
+
+def phase1_config(config: ImpulseConfig) -> ImpulseConfig:
+    """La configuración de la LÍNEA BASE de la fase 1 a partir de la del fichero.
+
+    El fichero del proyecto ya no es la línea base: corre la estructura con el
+    ID en H4 y en M15. La línea base sigue siendo el mismo histórico y la misma
+    rejilla con el reparto por defecto —el ID sólo en el Diario y en H4—. Es lo
+    que reproduce `BASELINE_HASH`.
+    """
+    return replace(config, charts=ChartsConfig())
+
+
 #: Línea base anterior, con el ancla A2 y el corte diario en 00:00 UTC. Queda
 #: escrita para que quien lea un informe archivado sepa a qué corrida pertenece;
 #: no se comprueba contra nada. (Traía además H1 7.416.)
@@ -436,4 +448,5 @@ __all__ = [
     "Evidence",
     "collect",
     "format_counts",
+    "phase1_config",
 ]

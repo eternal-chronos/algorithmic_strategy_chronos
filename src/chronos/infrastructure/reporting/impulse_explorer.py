@@ -6,14 +6,14 @@ el gráfico del motor al lado de las capturas de TradingView del propietario y
 comparar impulso a impulso.
 
 Cada gráfico dibuja **su** impulso y el de la temporalidad superior que le
-corresponda, según el reparto de `ChartsConfig`: el Diario sólo en su gráfico,
-sobre H4 el de H4, y sobre H1 y M15 el de H4 como contexto. El impulso
-principal de cada gráfico lleva línea continua, sombreado de limbo y marcadores;
-el de contexto va en trazo discontinuo y sin marcadores, para que no compitan.
+corresponda, según el reparto de `ChartsConfig`: con el fichero del proyecto,
+sobre H4 el de H4, sobre M15 el de M15 con el de H4 detrás, y sobre H1 sólo el
+de H4 como contexto. El impulso principal de cada gráfico lleva línea continua,
+sombreado de limbo y marcadores; el de contexto va en trazo discontinuo y sin
+marcadores, para que no compitan.
 
-Cada ID lleva su **marco** —las dos verticales son la vela que lo constituye y
-la que lo mata, las dos horizontales su ancla y su extremo—, con el color de su
-temporalidad.
+Encima el propietario dibuja a mano —la caja simulada, los recuadros, las líneas
+y el Fibonacci— y nada de eso lo ve el motor.
 
 Del payload sale todo lo que se puede derivar en el navegador: las etiquetas de
 los puntos se componen en JavaScript y las marcas de tiempo viajan como minutos
@@ -31,17 +31,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import pandas as pd
 import plotly.offline as pyo
 
-from chronos.application.structure.config import DAILY, H1, H4
+from chronos.application.structure.config import H1, H4, M15
 from chronos.application.structure.detect_impulses import ImpulseRun, TimeframeAnalysis
 from chronos.application.structure.lateralization import (
     LateralizationStudy,
     TimeframeLateralization,
 )
-from chronos.domain.indicators import rsi
 from chronos.domain.structure.enums import BreakKind, ContactKind, MachineState
 from chronos.infrastructure.clock import SystemClock
 from chronos.infrastructure.reporting import theme
@@ -56,39 +54,27 @@ BULLISH = theme.SERIES[2]
 BEARISH = theme.NEGATIVE
 LIMBO_FILL = theme.INK_MUTED
 
-#: El MARCO de cada ID va por TEMPORALIDAD y no por dirección: en el mismo
-#: gráfico hay marcos de dos —el de H4 sobre el gráfico de H1, el de H1 sobre
-#: M15— y el color es lo que dice de quién es cada uno. La dirección sigue
-#: leyéndose en la línea del ID y en el globo.
-TIMEFRAME_COLORS: dict[str, str] = {
-    DAILY: theme.VIOLET,
-    H4: theme.SERIES[1],
-    H1: theme.SERIES[0],
-}
-
 #: Los recuadros que dibuja el propietario a mano (I.3) y el color de cada uno.
 #: No son zonas del motor —el motor no calcula ninguna—: son marcas a mano con
-#: las que el propietario señala dónde ve un PUL, un UL o un APUL, y por eso
+#: las que el propietario señala lo que ve y todavía no tiene regla, y por eso
 #: llevan colores que no usa ninguna capa calculada. El nombre es lo que se
-#: dibuja al lado del rectángulo.
+#: dibuja al lado del rectángulo; son letras a propósito, porque lo que
+#: significan lo irá dictando el propietario sobre el dibujo.
 HAND_RECTS: dict[str, str] = {
-    "PUL": theme.MAGENTA,
-    "UL": theme.CYAN,
-    "APUL": theme.OLIVE,
+    "A": theme.MAGENTA,
+    "B": theme.CYAN,
+    "C": theme.OLIVE,
 }
 
 #: Las líneas que traza el propietario a mano (I.4) y el color de cada una. Cada
 #: una lleva el nombre de la TEMPORALIDAD que se está marcando con ella —el
-#: nivel que se ve en el Diario, en H4 o en H1—, que es lo que se quiere decir
-#: al señalarla; el color sólo sirve para distinguirlas en el gráfico.
-#:
-#: Los tonos son los de la mano —y NO los de `TIMEFRAME_COLORS`, que son los
-#: del motor— justamente para que una línea de H4 no se pueda confundir con el
-#: marco de H4 que dibuja el motor.
+#: nivel que se ve en H4, en H1 o en M15—, que es lo que se quiere decir al
+#: señalarla; el color sólo sirve para distinguirlas. Son los tonos de la mano,
+#: los mismos que los recuadros: ninguna capa del motor los usa.
 HAND_LINES: dict[str, str] = {
-    DAILY: theme.MAGENTA,
-    H4: theme.CYAN,
-    H1: theme.OLIVE,
+    H4: theme.MAGENTA,
+    H1: theme.CYAN,
+    M15: theme.OLIVE,
 }
 
 #: El Fibonacci que traza el propietario a mano (I.5). Va en el gris de la tinta
@@ -101,19 +87,20 @@ HAND_FIB = theme.INK_SECONDARY
 #: Los porcentajes que se dibujan, en el orden en que van del 0 al 100. Los pone
 #: el propietario y viajan en el payload en vez de estar escritos en el
 #: JavaScript: son SU lectura del retroceso, no una constante del explorador.
-FIB_LEVELS: tuple[int, ...] = (0, 70, 80, 90, 100)
+FIB_LEVELS: tuple[float, ...] = (0, 50, 70.5, 72, 79, 100)
 
-#: El RSI que se dibuja SIEMPRE bajo el precio, con el periodo y las tres
-#: referencias que mira el propietario: 55 arriba, 50 en medio y 45 abajo. Es
-#: DIBUJO —no decide nada, no entra en la detección y no abre ni cierra nada—,
-#: pero lo calcula el motor sobre las velas de cada temporalidad y viaja ya
-#: hecho: el explorador no calcula indicadores.
-RSI_PERIOD = 21
-RSI_BANDS: tuple[int, ...] = (55, 50, 45)
+#: La GOLD ZONE: el nivel del Fibonacci que el propietario quiere ver de un
+#: vistazo. Va en amarillo y con su nombre escrito; tiene que ser uno de
+#: `FIB_LEVELS`.
+FIB_GOLD_LEVEL = 70.5
+HAND_FIB_GOLD = theme.SERIES[3]
 
-#: Dos decimales bastan para un índice de 0 a 100 y ahorran megabytes frente a
-#: los cuatro del precio.
-RSI_DECIMALS = 2
+#: La capa de ACUMULACIÓN está APARCADA: el propietario la ha dejado apagada
+#: hasta que se revise cómo se cuentan los toques (hoy cuatro velas seguidas
+#: rozando el ancla son cuatro toques, sin separación mínima ni tope de
+#: barras). Con esto en `False` el payload no lleva ni una y el explorador
+#: esconde la casilla; la medición de contactos sigue calculándose igual.
+ACCUMULATIONS_ENABLED = False
 
 DECIMALS = 4
 
@@ -189,11 +176,9 @@ def build_payload(
     """
     charts = run.config.charts
     contacts = lateralization.per_timeframe if lateralization is not None else {}
-    bars = {
-        chart: _bars_payload(frame, max_bars) for chart, frame in run.chart_bars.items()
-    }
+    bars = {chart: _bars_payload(frame, max_bars) for chart, frame in run.chart_bars.items()}
     # Sólo se ofrecen los gráficos que tienen velas: si el histórico no daba
-    # para construir M15, su pestaña no puede quedarse ahí esperando a que
+    # para construir M15 o M5, su pestaña no puede quedarse ahí esperando a que
     # alguien la pulse.
     available = tuple(chart for chart in charts.charts if chart in bars)
     return {
@@ -210,14 +195,11 @@ def build_payload(
             "h4OffsetHours": run.config.aggregation.h4_offset_hours,
             "dSessionStart": run.config.aggregation.d_session_start,
             "decimals": DECIMALS,
-            #: Los porcentajes del Fibonacci a mano (I.5). El explorador los
-            #: dibuja; quién es el 0 y quién el 100 lo dicen los dos clics.
+            #: Los porcentajes del Fibonacci a mano (I.5) y cuál de ellos es la
+            #: gold zone. El explorador los dibuja; quién es el 0 y quién el 100
+            #: lo dicen los dos clics.
             "fibLevels": list(FIB_LEVELS),
-            #: El RSI del panel de abajo: con qué periodo está calculado y qué
-            #: tres niveles se marcan. Sin esto el explorador tendría que
-            #: escribir un 21 y un 55 que no ha decidido él.
-            "rsiPeriod": RSI_PERIOD,
-            "rsiBands": list(RSI_BANDS),
+            "fibGold": FIB_GOLD_LEVEL,
         },
         "colors": {
             "bullish": BULLISH,
@@ -228,9 +210,6 @@ def build_payload(
             "grid": theme.GRIDLINE,
             "surface": theme.SURFACE,
             "font": theme.FONT_FAMILY,
-            #: Un tono por temporalidad para el marco del ID: el de H4 sobre H1
-            #: y el de H1 sobre M15 tienen que distinguirse de un vistazo.
-            "timeframes": dict(TIMEFRAME_COLORS),
             #: Los recuadros que el propietario planta a mano. Ninguna capa del
             #: motor usa estos tonos: con ellos sólo se dibuja lo que ha puesto
             #: una mano.
@@ -239,11 +218,12 @@ def build_payload(
             #: quiere explicar, una por temporalidad. Tonos de la mano, no los
             #: del motor.
             "lines": dict(HAND_LINES),
-            #: El Fibonacci a mano: gris de medir, no color de marcar.
+            #: El Fibonacci a mano: gris de medir, no color de marcar; y el
+            #: amarillo de la gold zone, que es el único nivel con color.
             "fib": HAND_FIB,
-            #: Y el RSI, que sí es del motor pero vive en su propio panel: no
-            #: compite con ninguna capa del precio.
-            "rsi": theme.SERIES[0],
+            "fibGold": HAND_FIB_GOLD,
+            #: La acumulación lleva tono propio: no puede confundirse con el ID.
+            "accumulation": theme.VIOLET,
         },
         "charts": list(available),
         "layout": {chart: list(charts.overlays(chart)) for chart in available},
@@ -254,6 +234,14 @@ def build_payload(
             timeframe: _impulse_payload(analysis, contacts.get(timeframe))
             for timeframe, analysis in run.analyses.items()
         },
+        #: La acumulación: sin contactos no hay firma, y con la capa aparcada
+        #: no viaja ninguna.
+        "hasAccumulations": ACCUMULATIONS_ENABLED
+        and any(
+            item.signature_index is not None
+            for measurement in contacts.values()
+            for item in measurement.impulses
+        ),
         "modes": [_mode_summary(variant) for variant in variants],
         # El modo activo ya viaja en `impulses` y repetirlo aquí costaba 4,5 MB
         # de fichero. El explorador lo lee de `impulses` por identidad del modo,
@@ -332,14 +320,8 @@ def _spans(run: ImpulseRun) -> dict[str, int]:
 def _bars_payload(frame: pd.DataFrame, max_bars: int) -> dict[str, Any]:
     total = len(frame)
     truncated = 0 < max_bars < total
-    # El RSI se calcula sobre el histórico ENTERO y se recorta después. Al revés
-    # —calcularlo sobre el tramo ya cortado— las primeras velas que se ven
-    # saldrían con un indicador arrancado de cero en ese punto, que es un número
-    # distinto del que tiene esa vela de verdad.
-    momentum = rsi(frame["close"].to_numpy(dtype=float), RSI_PERIOD)
     if truncated:
         frame = frame.iloc[-max_bars:]
-        momentum = momentum[-max_bars:]
     index = pd.DatetimeIndex(frame.index)
     return {
         "truncated": truncated,
@@ -349,19 +331,7 @@ def _bars_payload(frame: pd.DataFrame, max_bars: int) -> dict[str, Any]:
         "h": _round(frame["high"]),
         "l": _round(frame["low"]),
         "c": _round(frame["close"]),
-        #: Una lectura por vela, alineada con `t`. `None` en las velas del
-        #: arranque, que no tienen variaciones suficientes: es un HUECO y se
-        #: dibuja como tal, no como un cero.
-        "rsi": _rsi_payload(momentum),
     }
-
-
-def _rsi_payload(values: np.ndarray) -> list[float | None]:
-    """El RSI listo para JSON: `NaN` no lo es, y `JSON.parse` se atraganta con él."""
-    return [
-        None if np.isnan(value) else round(float(value), RSI_DECIMALS)
-        for value in values
-    ]
 
 
 def _epoch_minutes(index: pd.DatetimeIndex) -> list[int]:
@@ -395,6 +365,17 @@ def _impulse_payload(
         "breaks": _breaks(analysis),
         "limbo": _limbo_regions(analysis),
         "contacts": _contacts(measurement),
+        #: Desde qué vela cada ID está en ACUMULACIÓN. Vacío sin contactos.
+        "accumulations": _accumulations(measurement, analysis, last),
+    }
+
+
+def _impulse_ends(analysis: TimeframeAnalysis, last: pd.Timestamp) -> dict[int, pd.Timestamp]:
+    return {
+        impulse.id_num: (
+            pd.Timestamp(impulse.ts_end) if impulse.ts_end is not None else last
+        )
+        for impulse in analysis.impulses
     }
 
 
@@ -460,9 +441,8 @@ def _impulse_list(impulses: list[Any], last: pd.Timestamp) -> list[dict[str, Any
             "ec": impulse.extreme_bar_direction.value,
             "w": impulse.extreme_on_counter_bar,
             #: Si el ID sigue VIVO al final del histórico. `x1` es entonces la
-            #: última vela y no la de su muerte: el marco llega al presente y
-            #: tiene que poder decir por qué en vez de fechar una muerte que no
-            #: ha ocurrido.
+            #: última vela y no la de su muerte, y el dibujo tiene que poder
+            #: decirlo en vez de fechar una muerte que no ha ocurrido.
             "v": impulse.ts_end is None,
         }
         for impulse in impulses
@@ -563,3 +543,45 @@ def bar_counts(payload: dict[str, Any]) -> dict[str, int]:
     return {chart: len(bars["t"]) for chart, bars in payload["bars"].items()}
 
 
+# --- La acumulación -------------------------------------------------------------
+
+
+def _accumulations(
+    measurement: TimeframeLateralization | None,
+    analysis: TimeframeAnalysis,
+    last: pd.Timestamp,
+) -> list[dict[str, Any]]:
+    """Capa "Acumulación". Puramente visual: no interviene en nada.
+
+    Es la firma del propietario —dos toques arriba y dos abajo sin romper
+    ninguno— leída en el momento en que se cumple: desde esa vela (`x`) hasta
+    que el ID muere (`x1`), el precio está acumulando entre el ancla y el
+    extremo. La cuenta la hace la medición de lateralización; aquí sólo se
+    fecha el toque que la completa.
+
+    Con `ACCUMULATIONS_ENABLED` en `False` no sale ni una: la capa está
+    aparcada y el payload no puede llevar lo que el explorador no debe pintar.
+    """
+    if measurement is None or not ACCUMULATIONS_ENABLED:
+        return []
+    stamps = pd.DatetimeIndex(analysis.bars.index)
+    ends = _impulse_ends(analysis, last)
+    published = {impulse.id_num for impulse in analysis.published}
+    records: list[dict[str, Any]] = []
+    for item in measurement.impulses:
+        onset = item.signature_index
+        if onset is None or item.id_num not in published:
+            continue
+        records.append(
+            {
+                "id": item.id_num,
+                "d": item.direction,
+                "x": _minute(pd.Timestamp(stamps[onset])),
+                "x1": _minute(ends[item.id_num]),
+                "lo": round(item.lower, DECIMALS),
+                "hi": round(item.upper, DECIMALS),
+                "up": item.touches_upper,
+                "dn": item.touches_lower,
+            }
+        )
+    return records

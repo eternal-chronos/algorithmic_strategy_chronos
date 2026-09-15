@@ -128,6 +128,35 @@ def test_la_firma_exige_los_dos_limites(run: ImpulseRun) -> None:
         )
 
 
+def test_la_acumulacion_empieza_en_el_toque_que_completa_la_firma(run: ImpulseRun) -> None:
+    """`signature_index` es la barra del contacto que deja dos toques en cada
+    límite: sólo lo tienen los ID que cumplen la firma, y es causal —a esa barra
+    ya se han visto los cuatro toques y ninguno posterior lo mueve—."""
+    medicion = measure(run).per_timeframe[H4]
+    assert any(item.meets_signature for item in medicion.impulses), (
+        "la fixture tiene que traer al menos un ID con la firma"
+    )
+    for item in medicion.impulses:
+        onset = item.signature_index
+        assert (onset is not None) == item.meets_signature
+        if onset is None:
+            continue
+        before = [
+            contact
+            for contact in item.series.contacts
+            if contact.index <= onset and contact.kind is not ContactKind.ROTURA_REAL
+        ]
+        arriba = sum(1 for contact in before if contact.side is ContactSide.SUPERIOR)
+        abajo = sum(1 for contact in before if contact.side is ContactSide.INFERIOR)
+        assert arriba >= SIGNATURE_MIN_TOUCHES and abajo >= SIGNATURE_MIN_TOUCHES
+        # Y una barra antes todavía no se cumplía: es el PRIMER momento.
+        earlier = [contact for contact in before if contact.index < onset]
+        assert (
+            sum(1 for c in earlier if c.side is ContactSide.SUPERIOR) < SIGNATURE_MIN_TOUCHES
+            or sum(1 for c in earlier if c.side is ContactSide.INFERIOR) < SIGNATURE_MIN_TOUCHES
+        )
+
+
 def test_el_punto_medio_esta_entre_los_dos_limites(run: ImpulseRun) -> None:
     for item in measure(run).per_timeframe[H4].impulses:
         assert item.lower <= item.midpoint <= item.upper

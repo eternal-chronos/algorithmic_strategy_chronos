@@ -5,13 +5,17 @@ Detecta el impulso dominante y **nada más**: sin último/penúltimo, sin RSI, s
 Fibonacci, sin patrones, sin zonas, sin señales, sin entradas, sin stops, sin
 targets y sin medición de rentabilidad.
 
-> **El ID vive sólo en el Diario y en H4.** H1 y M15 no llevan detector: no se
-> les marca ID, y sobre las dos se dibuja el de H4 como contexto. Las cifras de
-> H1 que aparecen más abajo son de cuando H1 llevaba detector aquí y quedan como
+> **En la línea base de este módulo el ID vive sólo en el Diario y en H4.** Es
+> el reparto por defecto del código y el que fija el `config_hash` de la línea
+> base. **El fichero del proyecto corre hoy otro reparto: el ID en H4 y en M15**,
+> con H1 dibujada sólo con el de H4 detrás y sin Diario ni M5 en el explorador
+> (decidido el 2026-09-14). Es el mismo detector con las mismas reglas —rotura
+> por línea— y por eso corre con otro `config_hash`; la línea base se
+> reconstruye desde ese fichero con `phase1_config`. Las cifras de H1 que
+> aparecen más abajo son de cuando H1 llevaba detector aquí y quedan como
 > registro histórico: ya no se comprueban. Los recuentos del Diario y de H4 no
 > se han movido —cada temporalidad se detecta por su cuenta, y hay una
-> comprobación que lo fija— pero el `config_hash` sí, porque las temporalidades
-> detectadas entran en él.
+> comprobación que lo fija—.
 
 ## Cómo se usa
 
@@ -116,8 +120,9 @@ gratis la inmunidad al lookahead: el extremo no se conoce hasta que cierra la
 vela contraria, así que no hay nada que desplazar.
 
 > **«Uno de los dos límites» son las dos líneas del ID, el extremo y el ancla.**
-> La rotura por zona de la fase 2.1 se retiró con las zonas; su historia está
-> en [`FASES.md`](FASES.md#fase-21--la-zona-decide-la-rotura).
+> La rotura por zona de la fase 2.1 —el UL y el PUL sustituyendo a la línea— se
+> borró del árbol el 2026-09-14 junto con las zonas: hoy sólo existe la rotura
+> por línea, y no hay interruptor que diga lo contrario.
 
 ### Sin umbral de tamaño
 
@@ -398,18 +403,22 @@ y, por tanto, impulsos distintos a los que ves en tu pantalla.
 
 ## Las temporalidades y qué se ve en cada una
 
+Con el fichero del proyecto (`config/impulse.yaml`, desde el 2026-09-14):
+
 | Gráfico | Impulsos que dibuja | Detector propio |
 |---|---|---|
-| **Diario** | Diario | sí |
-| **H4** | H4 (principal) + Diario (contexto) | sí |
+| **H4** | H4 | sí |
 | **H1** | H4 (contexto) | **no** |
-| **M15** | H4 (contexto) | **no** |
+| **M15** | M15 (principal) + H4 (contexto) | sí |
+
+Con el reparto por defecto del código —la línea base de la fase 1— el ID vive
+en el Diario y en H4, y H1, M15 y M5 llevan el de H4 de contexto.
 
 El reparto lo fija el propietario en `config/impulse.yaml`; no es una decisión
-del motor. **El ID sólo se marca en el Diario y en H4.** H1 y M15 no aportan
-estructura propia: son las temporalidades en las que se mira cómo llega el
-precio a la zona, así que llevan velas con el impulso de H4 encima y nada más.
-M5 y M1 quedan fuera del módulo.
+del motor. **El ID se marca en H4 y en M15.** H1 no aporta estructura propia:
+es la temporalidad en la que se mira cómo llega el precio, así que lleva velas
+con el impulso de H4 encima y nada más. El Diario y M5 no se dibujan; M1 queda
+fuera del módulo.
 
 El **principal** de cada gráfico —el primero de su lista— es el que manda: de él
 salen el sombreado del limbo y los marcadores de constitución y rotura, y va en

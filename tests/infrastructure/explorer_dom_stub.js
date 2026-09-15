@@ -59,9 +59,9 @@ function declare(id) {
  'mode-group', 'impulse-layers', 'chart', 'zoom-reset', 'noise-buttons',
  'prev', 'next',
  'from', 'to', 'layer-limbo', 'layer-marks', 'layer-contacts', 'layer-mid', 'layer-wrong',
- 'layer-frame',
+ 'analysis-layers', 'accumulation-layer', 'layer-accumulation',
  'blind-seed', 'blind-start', 'blind-reveal', 'blind-exit',
- 'sim-group', 'sim-buttons', 'sim-rr', 'sim-clear',
+ 'sim-group', 'sim-buttons', 'sim-ratio', 'sim-clear',
  'rect-group', 'rect-buttons', 'rect-undo', 'rect-clear',
  'line-group', 'line-buttons', 'line-undo', 'line-clear',
  'fib-group', 'fib-buttons', 'fib-undo', 'fib-clear',
@@ -113,6 +113,7 @@ global.document = {
     if (selector === '#mode-buttons button') { return elements['mode-buttons'].children; }
     if (selector === '#noise-buttons button') { return elements['noise-buttons'].children; }
     if (selector === '#sim-buttons button') { return elements['sim-buttons'].children; }
+    if (selector === '#sim-ratio button') { return elements['sim-ratio'].children; }
     if (selector === '#rect-buttons button') { return elements['rect-buttons'].children; }
     if (selector === '#line-buttons button') { return elements['line-buttons'].children; }
     if (selector === '#fib-buttons button') { return elements['fib-buttons'].children; }
@@ -201,11 +202,11 @@ global.Plotly = {
           type: trace.type,
           points: (trace.x && trace.x.length) || 0,
           dash: (trace.line && trace.line.dash) || null,
-          // El color del trazo: el marco del ID lo toma de su TEMPORALIDAD y es
-          // lo único que dice de quién es cada recuadro cuando hay dos.
           color: (trace.line && trace.line.color) || null,
           fill: trace.fill || null,
           fillcolor: trace.fillcolor || null,
+          // La acumulación va con TRAMA: es lo que la separa de un relleno liso.
+          fillpattern: (trace.fillpattern && trace.fillpattern.shape) || null,
           captions: trace.text && trace.text.length <= 200 ? trace.text.slice() : null,
           xs: trace.mode === 'markers' && (trace.x || []).length <= 200
             ? trace.x.slice()
@@ -268,16 +269,10 @@ global.Plotly = {
           label: (shape.label && shape.label.text) || null,
         };
       }),
-      // El RSI vive en su propio panel: el reparto de alto entre precio e índice
-      // es lo que mantiene los tiradores donde se ve la línea.
+      // El precio ocupa la figura entera: sin RSI no hay segundo panel ni
+      // segundo eje, y esto es lo que lo comprueba.
       priceDomain: (layout.yaxis && layout.yaxis.domain) || null,
-      rsiAxis: layout.yaxis2
-        ? {
-          domain: layout.yaxis2.domain,
-          ticks: layout.yaxis2.tickvals,
-          title: layout.yaxis2.title && layout.yaxis2.title.text,
-        }
-        : null,
+      hasSecondAxis: !!layout.yaxis2,
       xAnchor: (layout.xaxis && layout.xaxis.anchor) || null,
       yTickFormat: layout.yaxis && layout.yaxis.tickformat,
       xRange: (layout.xaxis && layout.xaxis.range) || null,
@@ -308,11 +303,13 @@ function snapshot(label) {
       return button.getAttribute('aria-pressed') === 'true';
     })[0] || {}).dataset?.side || null,
     simClearDisabled: elements['sim-clear'].disabled === true,
-    // El R:R que el panel dice que hay dibujado: siempre medido de la caja.
-    simReadout: elements['sim-rr'].textContent,
-    simReadoutSource: elements['sim-rr'].dataset.source || '',
-    simReadoutTitle: elements['sim-rr'].title,
+    simRatio: (elements['sim-ratio'].children.filter(function (button) {
+      return button.getAttribute('aria-pressed') === 'true';
+    })[0] || {}).dataset?.ratio || null,
     simCursor: elements['chart'].style.cursor || '',
+    // La acumulación está aparcada: la casilla tiene que esconderse cuando el
+    // payload no la trae, y el payload no la trae hasta que se vuelva a encender.
+    accumulationHidden: elements['accumulation-layer'].style.display === 'none',
     // I.3 — los recuadros a mano: qué botón espera el clic y si hay algo que quitar.
     rectArmed: (elements['rect-buttons'].children.filter(function (button) {
       return button.getAttribute('aria-pressed') === 'true';
@@ -359,7 +356,7 @@ function snapshot(label) {
     // Las casillas que el preset mueve sin que nadie las toque: si el estado y
     // el control se separan, el explorador miente sobre lo que se está viendo.
     boxes: ['layer-limbo', 'layer-marks', 'layer-contacts', 'layer-mid', 'layer-wrong',
-      'layer-frame']
+      'layer-accumulation']
       .reduce(function (state, id) {
         state[id] = elements[id].checked === true;
         return state;
@@ -427,12 +424,15 @@ steps.push(snapshot('teclado-derecha'));
 pressKey('ArrowLeft', 'INPUT');
 steps.push(snapshot('teclado-en-un-campo'));
 
-// Atajos de temporalidad: d/4/1/m saltan de gráfico, salvo con el foco en un
-// campo de texto o con una tecla modificadora (Ctrl+D es del navegador).
+// Atajos de temporalidad: d/4/1/m/5 saltan de gráfico, salvo con el foco en un
+// campo de texto o con una tecla modificadora (Ctrl+D es del navegador). Una
+// tecla de un gráfico que la corrida no trae no hace nada.
 pressKey('4');
 steps.push(snapshot('teclado-tf-h4'));
 pressKey('m');
 steps.push(snapshot('teclado-tf-m15'));
+pressKey('5');
+steps.push(snapshot('teclado-tf-m5'));
 pressKey('1');
 steps.push(snapshot('teclado-tf-h1'));
 pressKey('d', 'INPUT');
@@ -470,49 +470,45 @@ steps.push(snapshot('con-nivel-50'));
 elements['layer-contacts'].fire('change', { target: { checked: false } });
 elements['layer-mid'].fire('change', { target: { checked: false } });
 
-// El MARCO del ID: el recuadro de la constitución a la muerte y del ancla al
-// extremo. Se enciende y se apaga sobre las mismas velas. Si el reparto tiene
-// algún gráfico con contexto se retrata ahí, porque así comprueba de paso que el
-// marco de la temporalidad superior se dibuja y con su color; el reparto por
-// defecto no tiene ninguno —el Diario se dibuja sólo en su gráfico— y entonces
-// se retrata H4, que es donde el propietario audita el ID.
-const conMarco = tabs.filter(function (tab) {
+// El PERIODO COMPLETO con todas las capas de impulso encendidas. Si el reparto
+// tiene algún gráfico con contexto se retrata ahí, porque así comprueba de paso
+// que el ID de la temporalidad superior se dibuja; el reparto por defecto no
+// tiene ninguno —el Diario se dibuja sólo en su gráfico— y entonces se retrata
+// H4, que es donde el propietario audita el ID.
+const graficoCompleto = tabs.filter(function (tab) {
   return JSON.parse(elements['explorer-data'].textContent).layout[tab.dataset.tf].length > 1;
 })[0] || tabs.filter(function (tab) { return tab.dataset.tf === 'H4'; })[0] || tabs[0];
-conMarco.fire('click');
+graficoCompleto.fire('click');
 presets[0].fire('click');
-// El paso `sin-principal` dejó apagado el impulso del gráfico: el marco cuelga
-// de las mismas casillas, así que se encienden todas antes de retratarlo.
+// El paso `sin-principal` dejó apagado el impulso del gráfico: se encienden
+// todas las casillas antes de retratarlo.
 elements['impulse-layers'].children.forEach(function (wrapper) {
   wrapper.children[0].fire('change', { target: { checked: true } });
 });
-steps.push(snapshot('marco-por-defecto'));
-elements['layer-frame'].fire('change', { target: { checked: false } });
-steps.push(snapshot('marco-apagado'));
-elements['layer-frame'].fire('change', { target: { checked: true } });
-// El marco obedece el selector de ID visibles, igual que las líneas del ID.
-const visiblesMarco = elements['visible-buttons'].children;
-visiblesMarco.forEach(function (button) {
+steps.push(snapshot('completo-por-defecto'));
+// El selector de ID visibles, sobre las mismas velas.
+const visiblesCompleto = elements['visible-buttons'].children;
+visiblesCompleto.forEach(function (button) {
   button.fire('click');
-  steps.push(snapshot('marco-ids-' + button.dataset.visible));
+  steps.push(snapshot('completo-ids-' + button.dataset.visible));
 });
 // Se devuelve el filtro a su valor de salida: los pasos de más abajo lo dan por
 // supuesto y este bloque no debe cambiar el estado con el que se encuentran.
-visiblesMarco.filter(function (button) { return button.dataset.visible === 'pair'; })
+visiblesCompleto.filter(function (button) { return button.dataset.visible === 'pair'; })
   .forEach(function (button) { button.fire('click'); });
 
-// Cada gráfico lleva su marco y el de la temporalidad que le toca. Se retrata
-// cada gráfico con el periodo completo para poder comprobarlo.
+// Cada gráfico lleva su ID y el de la temporalidad que le toca. Se retrata cada
+// gráfico con el periodo completo para poder comprobarlo.
 tabs.forEach(function (tab) {
   tab.fire('click');
-  steps.push(snapshot('marco-de-' + tab.dataset.tf));
+  steps.push(snapshot('completo-' + tab.dataset.tf));
 });
 // El gráfico vuelve a ser el que los pasos siguientes dan por supuesto.
-conMarco.fire('click');
+graficoCompleto.fire('click');
 
 // Todos los ID a la vista y el impulso principal encendido —el paso
 // `sin-principal` lo dejó apagado—: los marcadores son suyos.
-visiblesMarco.filter(function (button) { return button.dataset.visible === 'all'; })
+visiblesCompleto.filter(function (button) { return button.dataset.visible === 'all'; })
   .forEach(function (button) { button.fire('click'); });
 const capaPrincipal = elements['impulse-layers'].children[0].children[0];
 capaPrincipal.fire('change', { target: { checked: true } });
@@ -526,8 +522,17 @@ elements['layer-marks'].fire('change', { target: { checked: false } });
 steps.push(snapshot('sin-marcas'));
 elements['layer-marks'].fire('change', { target: { checked: true } });
 
+// La acumulación (aparcada): se enciende y se apaga sobre las mismas velas. Sin
+// ninguna en el payload los dos pasos salen iguales y la casilla va escondida,
+// que es lo que comprueba el test. Con «Todos» puesto, para que el paso
+// compruebe la capa y no el filtro.
+steps.push(snapshot('acumulacion-por-defecto'));
+elements['layer-accumulation'].fire('change', { target: { checked: false } });
+steps.push(snapshot('acumulacion-apagada'));
+elements['layer-accumulation'].fire('change', { target: { checked: true } });
+
 capaPrincipal.fire('change', { target: { checked: false } });
-visiblesMarco.filter(function (button) { return button.dataset.visible === 'pair'; })
+visiblesCompleto.filter(function (button) { return button.dataset.visible === 'pair'; })
   .forEach(function (button) { button.fire('click'); });
 tabs[0].fire('click');
 presets[presets.length - 1].fire('click');
@@ -779,10 +784,8 @@ const simY = precios;
 zoomTo(simX, simY);
 
 // El mismo cálculo que hace el explorador: MARGIN sobre el div de 1200 x 720, y
-// de ese alto, la franja que le queda al PRECIO. El RSI se lleva la de abajo
-// (`PRICE_DOMAIN` = [0.28, 1] en el explorador), así que sin descontarla precio
-// y píxel se separarían y ningún tirador caería donde se ve.
-const PRICE_DOMAIN = [0.28, 1];
+// de ese alto, la franja que le queda al PRECIO, que sin RSI es entera.
+const PRICE_DOMAIN = [0, 1];
 
 function pixelOf(minute, price) {
   const width = 1200 - 66 - 18;
@@ -853,8 +856,7 @@ armar('long');
 clicGrafico(pixelOf(minutoSimulado, entradaSimulada));
 steps.push(snapshot('sim-largo'));
 
-// El borde de fuera de la caja roja mueve el stop y nada más: el objetivo se
-// queda donde estaba y el R:R se vuelve a medir solo.
+// El borde de fuera de la caja roja mueve el stop y nada más.
 const asaStop = asaDeLaCaja('stop');
 arrastrarCaja(asaStop, { x: asaStop.x, y: asaStop.y + 40 });
 steps.push(snapshot('sim-stop-arrastrado'));
@@ -864,26 +866,29 @@ const asaEntrada = asaDeLaCaja('entry');
 arrastrarCaja(asaEntrada, { x: asaEntrada.x, y: asaEntrada.y - 25 });
 steps.push(snapshot('sim-entrada-arrastrada'));
 
-// Arrastrar el objetivo cambia el R:R: manda la distancia que se ve.
+// El R:R fijo: 1:3 recoloca el objetivo sin tocar el stop, y con el candado
+// puesto mover el stop arrastra el objetivo con él.
+const ratios = elements['sim-ratio'].children;
+
+function fijarRatio(value) {
+  ratios.filter(function (button) { return button.dataset.ratio === value; })
+    .forEach(function (button) { button.fire('click'); });
+}
+
+fijarRatio('3');
+steps.push(snapshot('sim-ratio-1-3'));
+
+const asaStopConCandado = asaDeLaCaja('stop');
+arrastrarCaja(asaStopConCandado, { x: asaStopConCandado.x, y: asaStopConCandado.y - 20 });
+steps.push(snapshot('sim-stop-con-candado'));
+
+// Arrastrar el objetivo suelta el candado: manda lo que se ve.
 const asaObjetivo = asaDeLaCaja('target');
 arrastrarCaja(asaObjetivo, { x: asaObjetivo.x, y: asaObjetivo.y + 30 });
 steps.push(snapshot('sim-objetivo-a-mano'));
 
-// El R:R del panel se mide MIENTRAS se coloca el objetivo, no al soltarlo: se
-// suelta el botón del ratón cuando el número ya dice lo que se buscaba.
-const asaEnVuelo = asaDeLaCaja('target');
-elements['chart'].fire('mousedown', {
-  clientX: asaEnVuelo.x, clientY: asaEnVuelo.y,
-  preventDefault() {}, stopPropagation() {},
-});
-fireDocument('mousemove', {
-  clientX: asaEnVuelo.x, clientY: asaEnVuelo.y - 18, preventDefault() {},
-});
-const rrEnVuelo = elements['sim-rr'].textContent;
-fireDocument('mouseup', {});
-steps.push(Object.assign(snapshot('sim-objetivo-en-vuelo'), { simReadoutEnVuelo: rrEnVuelo }));
-
 // En corto el objetivo va por debajo de la entrada y el riesgo por encima.
+fijarRatio('4');
 armar('short');
 clicGrafico(pixelOf(minutoSimulado, entradaSimulada));
 steps.push(snapshot('sim-corto'));
@@ -893,10 +898,9 @@ steps.push(snapshot('sim-quitado'));
 
 
 // I.2 — la cuenta simulada: el capital, el riesgo y los tres botones que apuntan
-// la caja dibujada. El encuadre es el mismo que usa el bloque de arriba y las
-// cajas se plantan y se cobran sin arrastrar nada, así que su R:R es el 1:2 con
-// el que nacen y las cifras se pueden comprobar a mano: 50 $ al 2 % son 1,00 $
-// de riesgo y 2,00 $ de objetivo.
+// la caja dibujada. El encuadre y el ratio son los mismos que usa el bloque de
+// arriba, así que el R:R de cada caja es 1:2 exacto y las cifras se pueden
+// comprobar a mano: 50 $ al 2 % son 1,00 $ de riesgo y 2,00 $ de objetivo.
 const resultados = elements['account-buttons'].children;
 
 function apuntar(result) {
@@ -909,6 +913,10 @@ function plantarCaja(side) {
   clicGrafico(pixelOf(minutoSimulado, entradaSimulada));
 }
 
+// Fijar un R:R sin caja plantada deja el ratio puesto para la siguiente y no
+// puede romper nada: es el gesto natural antes de dibujar.
+fijarRatio('2');
+steps.push(snapshot('ratio-sin-caja'));
 steps.push(snapshot('cuenta-sin-nada'));
 plantarCaja('long');
 steps.push(snapshot('cuenta-con-caja'));
@@ -925,7 +933,8 @@ steps.push(snapshot('cuenta-deshecha'));
 elements['account-copy'].fire('click');
 steps.push(snapshot('cuenta-copiada'));
 
-// Cambiar el capital de partida vuelve a contar la curva entera.
+// Cambiar el capital no toca lo apuntado: el saldo se queda y sólo cambia la
+// apuesta de la siguiente (el 2 % de 100 $ son 2,00 $).
 elements['account-initial'].fire('change', { target: { value: '100' } });
 steps.push(snapshot('cuenta-capital-100'));
 
@@ -933,6 +942,13 @@ steps.push(snapshot('cuenta-capital-100'));
 elements['account-mode'].fire('change', { target: { value: 'cash' } });
 elements['account-risk'].fire('change', { target: { value: '5' } });
 steps.push(snapshot('cuenta-riesgo-fijo'));
+
+// La siguiente ganada se cobra con los 5 $ nuevos; las dos anteriores siguen
+// valiendo 1,00 $ cada una en el historial.
+plantarCaja('long');
+apuntar('win');
+elements['account-copy'].fire('click');
+steps.push(snapshot('cuenta-riesgo-nuevo'));
 
 // Un riesgo imposible no se acepta y el control repone el que está puesto.
 elements['account-risk'].fire('change', { target: { value: '0' } });
@@ -942,7 +958,7 @@ elements['account-reset'].fire('click');
 steps.push(snapshot('cuenta-reiniciada'));
 elements['sim-clear'].fire('click');
 
-// I.3 — los recuadros a mano: tres botones —PUL, UL y APUL— que arman, un clic
+// I.3 — los recuadros a mano: tres botones —A, B y C— que arman, un clic
 // que planta el suyo y arrastres que lo mueven. Se marcan varios de cada nombre y
 // se quitan de uno en uno o de golpe. Es dibujo del propietario: no lo ha
 // detectado el motor y no cuenta como capa.
@@ -977,13 +993,13 @@ function asaDelRecuadro(index, borde) {
 }
 
 steps.push(snapshot('rect-sin-nada'));
-armarRect('PUL');
+armarRect('A');
 steps.push(snapshot('rect-armado'));
 // Escape suelta el botón sin plantar nada, igual que en el simulador.
 pressKey('Escape');
 steps.push(snapshot('rect-desarmado'));
 
-armarRect('PUL');
+armarRect('A');
 clicGrafico(pixelOf(minutoSimulado, entradaSimulada));
 steps.push(snapshot('rect-plantado'));
 
@@ -999,12 +1015,12 @@ steps.push(snapshot('rect-movido'));
 
 // Se marcan varios y de nombres distintos: cada uno con su color.
 const medioSimulado = (simY[0] + entradaSimulada) / 2;
-armarRect('UL');
+armarRect('B');
 clicGrafico(pixelOf(minutoSimulado, medioSimulado));
 steps.push(snapshot('rect-segundo'));
 
-// Y se numeran POR NOMBRE: el segundo PUL es «PUL 2» aunque entre medias haya un UL.
-armarRect('PUL');
+// Y se numeran POR NOMBRE: el segundo A es «A 2» aunque entre medias haya un B.
+armarRect('A');
 clicGrafico(pixelOf(minutoSimulado, (simY[0] + medioSimulado) / 2));
 steps.push(snapshot('rect-tercero'));
 
@@ -1013,7 +1029,7 @@ steps.push(snapshot('rect-deshecho'));
 elements['rect-clear'].fire('click');
 steps.push(snapshot('rect-limpio'));
 
-// I.4 — las líneas a mano: tres botones —Diario, H4 y H1— que arman, un clic que
+// I.4 — las líneas a mano: tres botones —H4, H1 y M15— que arman, un clic que
 // planta la suya HORIZONTAL al precio pulsado y arrastres que la mueven y la
 // inclinan. Es dibujo del propietario: no la ha calculado el motor y no cuenta
 // como capa.
@@ -1050,13 +1066,13 @@ function asaDeLinea(index, extremo) {
 }
 
 steps.push(snapshot('linea-sin-nada'));
-armarLinea('D');
+armarLinea('H4');
 steps.push(snapshot('linea-armada'));
 // Escape suelta el botón sin plantar nada, igual que en los recuadros.
 pressKey('Escape');
 steps.push(snapshot('linea-desarmada'));
 
-armarLinea('D');
+armarLinea('H4');
 clicGrafico(pixelOf(minutoSimulado, entradaSimulada));
 steps.push(snapshot('linea-plantada'));
 
@@ -1072,13 +1088,13 @@ steps.push(snapshot('linea-movida'));
 
 // Se trazan varias, una por temporalidad: cada una con su nombre y su color.
 const precioAlto = (simY[1] + entradaSimulada) / 2;
-armarLinea('H4');
+armarLinea('H1');
 clicGrafico(pixelOf(minutoSimulado, precioAlto));
 steps.push(snapshot('linea-segunda'));
 
-// Y se numeran POR TEMPORALIDAD: la segunda del Diario es «Diario 2» aunque
-// entre medias haya una de H4.
-armarLinea('D');
+// Y se numeran POR TEMPORALIDAD: la segunda de H4 es «H4 2» aunque entre
+// medias haya una de H1.
+armarLinea('H4');
 clicGrafico(pixelOf(minutoSimulado, (simY[1] + precioAlto) / 2));
 steps.push(snapshot('linea-tercera'));
 
@@ -1088,7 +1104,7 @@ elements['line-clear'].fire('click');
 steps.push(snapshot('linea-limpia'));
 
 // I.5 — el Fibonacci a mano: un botón que arma, DOS clics —el 0 y el 100— y los
-// cinco niveles dibujados entre ellos. Es la regla del propietario: no la ha
+// seis niveles dibujados entre ellos, con la gold zone en amarillo. Es la regla del propietario: no la ha
 // calculado el motor y no cuenta como capa.
 function botonFib() {
   return elements['fib-buttons'].children[0];
@@ -1138,13 +1154,13 @@ const minutoFibCien = minutoSimulado + Math.round((simX[1] - simX[0]) * 0.2);
 clicGrafico(pixelOf(minutoFibCien, fibCien));
 steps.push(snapshot('fib-trazado'));
 
-// El ancla del 100 se mueve sola: los tres retrocesos la siguen.
+// El ancla del 100 se mueve sola: los retrocesos la siguen.
 const asaCien = pixelOf(minutoFibCien, fibCien);
 arrastrarCaja(asaCien, { x: asaCien.x, y: asaCien.y - 30 });
 steps.push(snapshot('fib-cien-movido'));
 
 // Por dentro se desplaza el conjunto entero y el retroceso medido no cambia.
-const fibTrazado = nivelFib(0, 80);
+const fibTrazado = nivelFib(0, 79);
 const asaFib = pixelOf(
   Math.round((fibTrazado.from + fibTrazado.to) / 2), fibTrazado.price
 );
@@ -1161,13 +1177,6 @@ elements['fib-undo'].fire('click');
 steps.push(snapshot('fib-deshecho'));
 elements['fib-clear'].fire('click');
 steps.push(snapshot('fib-limpio'));
-
-// El RSI no se enciende ni se apaga: está puesto en los cuatro gráficos y sólo
-// desaparece con la venda de la auditoría ciega, porque lo calcula el motor.
-tabs[1].fire('click');
-steps.push(snapshot('rsi-en-h4'));
-tabs[0].fire('click');
-steps.push(snapshot('rsi-en-diario'));
 
 console.log(JSON.stringify({
   unknownElements: missing,
