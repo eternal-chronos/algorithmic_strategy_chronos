@@ -25,15 +25,15 @@ BASELINE = "#c3c2b7"
 SERIES = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100")
 
 # Un tono más fuera de la serie categórica, para las capas que necesitan
-# distinguir una tercera cosa sin repetir el azul, el naranja o el verde: las
-# zonas del módulo de estructura llevan un color por temporalidad.
+# distinguir una tercera cosa sin repetir el azul, el naranja o el verde: la
+# acumulación del módulo de estructura.
 VIOLET = "#6f4bd8"
 
 # Los tonos de lo que dibuja el PROPIETARIO a mano encima del gráfico y no ha
-# pintado el motor: los tres recuadros con los que marca un PUL, un UL y un
-# APUL. Quedan fuera de la serie categórica y del violeta de las temporalidades
-# a propósito, para que no se confundan con ninguna capa calculada, y entre
-# ellos van a hues separados (318°, 190° y 70°) para poder distinguirse.
+# pintado el motor: sus recuadros y sus líneas. Quedan fuera de la serie
+# categórica y del violeta a propósito, para que no se confundan con ninguna
+# capa calculada, y entre ellos van a hues separados (318°, 190° y 70°) para
+# poder distinguirse.
 MAGENTA = "#c0359a"
 CYAN = "#0b8fa8"
 OLIVE = "#7c8b12"

@@ -52,10 +52,9 @@
    * pasan cosas, no CUÁLES. Estos tres niveles son un preset de las casillas que
    * ya existen —ni una capa nueva, ni un cálculo nuevo— y se aplican de golpe:
    *
-   *   · Limpio  — el ID actual y sus zonas en la temporalidad que se está
-   *               mirando, y nada más. Fuera se quedan las capas que no deciden
-   *               nada sobre el ID vigente: limbo, contactos, 50 %, extremo
-   *               contrario, zonas del contexto, roturas evitadas y escalera.
+   *   · Limpio  — el ID actual en la temporalidad que se está mirando, y nada
+   *               más. Fuera se quedan las capas que no deciden nada sobre el
+   *               ID vigente: limbo, contactos, 50 % y extremo contrario.
    *   · Normal  — lo que el explorador enseñaba hasta ahora.
    *   · Todo    — todo, incluidos los contactos.
    *
@@ -72,20 +71,17 @@
     clean: {
       visible: "current",
       limbo: false, marks: true, contacts: false, mid: false, wrong: false,
-      frame: true, zones: true, pullback: true, accumulation: true,
-      signals: false, avoided: false, steps: false
+      accumulation: true
     },
     normal: {
       visible: "pair",
       limbo: true, marks: true, contacts: false, mid: false, wrong: true,
-      frame: true, zones: true, pullback: true, accumulation: true,
-      signals: true, avoided: true, steps: true
+      accumulation: true
     },
     all: {
       visible: "all",
       limbo: true, marks: true, contacts: true, mid: true, wrong: true,
-      frame: true, zones: true, pullback: true, accumulation: true,
-      signals: true, avoided: true, steps: true
+      accumulation: true
     }
   };
 
@@ -118,37 +114,11 @@
     marks: true,
     contacts: false,   // capa de contactos: apagada por defecto (F.2)
     mid: false,        // nivel del 50 % de cada ID (F.3)
-    /* El marco de cada ID: el recuadro que va de la vela que lo constituye a la
-     * que lo mata, y de su ancla a su extremo, con el color de su temporalidad.
-     * Nace encendido en los tres niveles de ruido: es dónde empieza y dónde
-     * acaba el ID, que es lo primero que hay que ver. */
-    frame: true,
-    /* Las zonas del ID —el UL y el PUL— dibujadas como recuadros. Nace
-     * encendida en los tres niveles de ruido: es lo que hay que auditar de la
-     * fase 2.0 y de la regla del lado en contra. Sólo se pintan las del ID que
-     * se está mirando, así que no vuelven a tapar el precio. */
-    zones: true,
-    /* Señales de zona: toque del PUL, rechazo del UL y rotura del UL. Nace
-     * encendida en los tres niveles de ruido —es lo que el propietario ha pedido
-     * ver— y sólo existe donde existen las zonas: Diario y H4. */
-    signals: true,
-    /* La CAJA DEL 50 % DEL RETROCESO del mentor: del ancla del ID a su PUL, con
-     * la línea media que él mira, el paso de la tendencia (rápida espera el
-     * PUL, lenta el 50 %) y la confluencia con la caja de la temporalidad de
-     * encima. Nace encendida en los tres niveles: es lo que se ha pedido ver. */
-    pullback: true,
     /* La ACUMULACIÓN: desde la vela en que el ID cumple la firma del propietario
      * —dos toques arriba y dos abajo sin romper— hasta que muere. Encendida en
-     * los tres niveles por lo mismo. */
+     * los tres niveles; la capa está APARCADA y el payload no trae ninguna
+     * hasta que el propietario la vuelva a pedir. */
     accumulation: true,
-    /* Fase 2.1. Las roturas evitadas son lo primero que hay que auditar de la
-     * regla nueva, así que la capa nace encendida cuando la corrida trae alguna.
-     * Con `break_by_zone: false` no hay ninguna y la casilla ni se enseña. */
-    avoided: true,
-    /* Fase 2.1, §3.2. Los saltos de la escalera del extremo. Nace encendida: sin
-     * ella la línea del extremo cambia de precio a mitad del ID sin decir por
-     * qué, y eso se lee como un error de dibujo. */
-    steps: true,
     blind: false,      // auditoría ciega en curso (F.1)
     revealed: false,
     seed: null,
@@ -190,12 +160,28 @@
      * stop. `null` es «a mano»: lo dejó ahí un arrastre del objetivo. */
     ratio: 2,
     /* Recuadros marcados a mano (I.3). Cada uno es un rectángulo —`kind`,
-     * `from`, `to`, `low`, `high`— que planta el PROPIETARIO para señalar dónde
-     * ve un PUL, un UL o un APUL. No salen del explorador y el motor no los ve:
-     * en el proyecto no hay todavía ninguna regla de esas tres cosas.
-     * `arming === "rect:PUL"` es el botón de ese nombre esperando el clic que
-     * planta el siguiente. */
+     * `from`, `to`, `low`, `high`— que planta el PROPIETARIO para señalar lo
+     * que ve y todavía no tiene regla. No salen del explorador y el motor no
+     * los ve. `arming === "rect:A"` es el botón de ese nombre esperando el clic
+     * que planta el siguiente. */
     rects: [],
+    /* Líneas trazadas a mano (I.4). Cada una es un segmento —`kind`, `from`,
+     * `to` y el precio de cada extremo, `left` y `right`— que planta el
+     * PROPIETARIO para señalar lo que quiere explicar: un nivel, un tramo, de
+     * dónde a dónde mira. Cada una lleva el nombre de la TEMPORALIDAD que se
+     * está marcando con ella. Tampoco salen del explorador ni las ve el motor.
+     * `arming === "line:H4"` es el botón de esa temporalidad esperando el clic. */
+    lines: [],
+    /* Fibonacci trazados a mano (I.5). Cada uno son las DOS anclas que puso el
+     * propietario —`from`/`zero` la del 0 y `to`/`hundred` la del 100— y de
+     * ellas salen los porcentajes: el 0 y el 100 son los extremos, y los
+     * retrocesos —el 50, el 70,5 de la GOLD ZONE, el 72 y el 79— caen entre
+     * medias contando DESDE EL 0. Tampoco es capa del motor: nadie ha medido
+     * ese retroceso, no sale del explorador y no hay ninguna regla detrás. */
+    fibs: [],
+    /* El 0 ya clavado mientras se espera el clic del 100. Un Fibonacci son dos
+     * clics y entre uno y otro no hay nada que dibujar todavía. */
+    fibDraft: null,
     /* Cuenta simulada (I.2). El capital puesto, cómo se mide el riesgo de la
      * SIGUIENTE operación y las que se llevan apuntadas. Cada una guarda los
      * dólares que se jugó y el capital que había puesto al apuntarla: lo ya
@@ -400,59 +386,9 @@
   function keeps(allowed, id) { return allowed === null || allowed[id] === true; }
 
   /* Primer minuto que el ID llega a pintar: el nivel más antiguo de los dos ya
-   * existía en el precio antes de la constitución (tramo punteado de B.1). En un
-   * ID que estiró su extremo, el primer escalón es más antiguo que `xe`, que es
-   * el del final. */
+   * existía en el precio antes de la constitución (tramo punteado de B.1). */
   function drawnFrom(impulse) {
-    return Math.min(impulse.x0, impulse.xa, firstExtremeAt(impulse));
-  }
-
-  /* --- La escalera del extremo (fase 2.1, §3.2) ------------------------------
-   *
-   * El extremo de un ID vigente SE MUEVE: cada vela que cierra más allá de la
-   * línea sin atravesar el UL entero lo estira. `e` y `xe` son los del final, así
-   * que dibujar con ellos solos una línea recta desde la constitución enseñaría
-   * durante horas un precio al que el mercado todavía no había llegado —el mismo
-   * lookahead que el tramo punteado de B.1 evita por el otro lado—. Los ID
-   * estirados traen `st`, un par `[minuto, precio]` por tramo, y aquí se
-   * convierte en escalones: cada nivel desde que manda hasta que lo sustituye el
-   * siguiente.
-   *
-   * `defined` es la vela que fija el nivel. En el primer escalón es anterior a la
-   * constitución (el extremo se fija dentro de la pierna) y por eso lleva tramo
-   * punteado; en los demás es la propia vela que estira, así que el nivel y su
-   * vela nacen a la vez y no hay nada que puntear. */
-  function extremeSteps(impulse, timeframe, edges) {
-    if (!impulse.st) {
-      return [{
-        from: impulse.x0, to: impulse.x1, value: impulse.e, defined: impulse.xe,
-        step: 1, steps: 1
-      }];
-    }
-    var steps = [];
-    impulse.st.forEach(function (item, position) {
-      var next = impulse.st[position + 1];
-      steps.push({
-        from: position === 0 ? impulse.x0 : item[0],
-        to: next ? next[0] : impulse.x1,
-        value: item[1],
-        defined: item[0],
-        step: position + 1,
-        steps: impulse.st.length
-      });
-    });
-    // En replay un escalón no existe hasta que cierra la vela que lo estira: lo
-    // que se dibuja es lo que el motor sabía, y hasta ese cierre el extremo
-    // vigente era el anterior.
-    return steps.filter(function (item, position) {
-      return position === 0 || !pending(item.defined, timeframe, edges);
-    });
-  }
-
-  /* La vela que fijó el PRIMER extremo: la del final en un ID que no se estiró y
-   * la del extremo con el que nació en uno que sí. */
-  function firstExtremeAt(impulse) {
-    return impulse.st ? impulse.st[0][0] : impulse.xe;
+    return Math.min(impulse.x0, impulse.xa, impulse.xe);
   }
 
   // --- Trazas ---------------------------------------------------------------
@@ -639,23 +575,15 @@
         var bucket = buckets[impulse.d];
         var head = "ID " + timeframe + " nº " + impulse.id + " · " + impulse.d +
           "<br>constituido " + stamp(impulse.x0);
-        var levels = [{
-          name: "ancla", from: impulse.x0, to: impulse.x1,
-          value: impulse.a, defined: impulse.xa, step: 1, steps: 1
-        }].concat(extremeSteps(impulse, timeframe, edges).map(function (item) {
-          return {
-            name: "extremo", from: item.from, to: item.to, value: item.value,
-            defined: item.defined, step: item.step, steps: item.steps
-          };
-        }));
+        var levels = [
+          { name: "ancla", value: impulse.a, defined: impulse.xa },
+          { name: "extremo", value: impulse.e, defined: impulse.xe }
+        ];
         levels.forEach(function (level) {
-          var escalera = level.steps > 1
-            ? "<br>ESCALÓN " + level.step + " de " + level.steps +
-              ": el extremo se estiró estando el ID ya vigente (§3.2)"
-            : "";
-          push(bucket.live, level.from, clip(level.to, edges), level.value,
+          level.from = impulse.x0;
+          push(bucket.live, impulse.x0, clip(impulse.x1, edges), level.value,
             head + "<br>" + level.name + " " + price(level.value) +
-            "<br>fija la vela de " + stamp(level.defined) + escalera);
+            "<br>fija la vela de " + stamp(level.defined));
           if (level.defined < level.from) {
             push(bucket.pending, level.defined, level.from, level.value,
               "ANTES DE LA CONSTITUCIÓN · el nivel ya estaba en el precio, el ID no" +
@@ -708,86 +636,8 @@
     };
   }
 
-  /* Los SALTOS de la escalera del extremo (fase 2.1, §3.2).
-   *
-   * La escalera ya está en la línea del ID, pero un escalón se puede confundir
-   * con un ID nuevo si no se dice cuál es. Esta capa marca el salto: el tramo
-   * vertical que une el nivel viejo con el nuevo, sobre la vela que lo estiró, y
-   * un triángulo en el nivel nuevo apuntando hacia donde se fue. Sin ella, el
-   * dibujo enseña la escalera pero no dice que es una.
-   *
-   * Va sobre TODAS las temporalidades visibles, no sólo la principal: la línea
-   * del ID de contexto también es una escalera y su salto también engaña.
-   */
-  function hasSteps() { return DATA.hasSteps === true; }
-
-  function stepTraces(range) {
-    if (blindfolded() || !state.steps || !hasSteps()) { return []; }
-    var edges = window_(range);
-    var traces = [];
-    overlays().forEach(function (timeframe, position) {
-      if (!isVisible(timeframe)) { return; }
-      var own = position === 0;
-      var allowed = visibleIds(timeframe, edges);
-      var jumps = { x: [], y: [] };
-      var marks = { x: [], y: [], text: [], colour: [], symbol: [] };
-
-      impulsesOf(timeframe).list.forEach(function (impulse) {
-        if (!impulse.st) { return; }
-        if (impulse.x1 < edges.lo || drawnFrom(impulse) > edges.hi) { return; }
-        if (pending(impulse.x0, timeframe, edges)) { return; }
-        if (!keeps(allowed, impulse.id)) { return; }
-        var steps = extremeSteps(impulse, timeframe, edges);
-        steps.forEach(function (item, index) {
-          if (!index) { return; }
-          if (item.defined < edges.lo || item.defined > edges.hi) { return; }
-          var before = steps[index - 1].value;
-          jumps.x.push(iso(item.defined), iso(item.defined), null);
-          jumps.y.push(before, item.value, null);
-          marks.x.push(iso(item.defined));
-          marks.y.push(item.value);
-          marks.colour.push(impulse.d === "alcista" ? COLORS.bullish : COLORS.bearish);
-          marks.symbol.push(impulse.d === "alcista" ? "triangle-up" : "triangle-down");
-          marks.text.push(
-            "EXTREMO ESTIRADO (§3.2) · ID " + timeframe + " nº " + impulse.id +
-            " · " + impulse.d +
-            "<br>escalón " + item.step + " de " + item.steps + ": de " + price(before) +
-            " a " + price(item.value) +
-            "<br>lo estira la vela de " + stamp(item.defined) +
-            "<br>hasta aquí la línea del extremo estaba en " + price(before) +
-            "<br>el ID no muere: la vela cerró más allá de la línea sin atravesar el UL entero"
-          );
-        });
-      });
-
-      if (!marks.x.length) { return; }
-      var name = "Extremo estirado · " + label(timeframe) + (own ? "" : " (contexto)");
-      traces.push({
-        type: "scatter", mode: "lines", name: name,
-        x: jumps.x, y: jumps.y, hoverinfo: "skip", showlegend: false,
-        connectgaps: false, opacity: own ? 1 : 0.6,
-        line: { color: COLORS.ink, width: 1.6, dash: "dot" }
-      });
-      traces.push({
-        type: "scatter", mode: "markers", name: name,
-        x: marks.x, y: marks.y, text: marks.text,
-        hoverinfo: "text", hoverlabel: { align: "left" },
-        opacity: own ? 1 : 0.6,
-        marker: {
-          symbol: marks.symbol, size: 11, color: marks.colour,
-          line: { color: COLORS.ink, width: 1.4 }
-        }
-      });
-    });
-    return traces;
-  }
-
   /* Nivel del 50 % de cada ID: la línea punteada que el propietario traza a mano
-   * en mitad del rango (F.3). Visual y opcional; no entra en ningún cálculo.
-   *
-   * También va en escalera: el 50 % se mide contra el extremo, y el extremo se
-   * mueve. Una recta aquí volvería a meter por la puerta de atrás el nivel que
-   * la línea del ID ya no adelanta. */
+   * en mitad del rango (F.3). Visual y opcional; no entra en ningún cálculo. */
   function midTraces(range) {
     if (!state.mid || blindfolded()) { return []; }
     var edges = window_(range);
@@ -798,14 +648,11 @@
       impulsesOf(timeframe).list.forEach(function (impulse) {
         if (impulse.x1 < edges.lo || impulse.x0 > knownUntil(timeframe, edges)) { return; }
         if (!keeps(allowed, impulse.id)) { return; }
-        extremeSteps(impulse, timeframe, edges).forEach(function (item) {
-          var level = (impulse.a + item.value) / 2;
-          var caption = "50 % del ID " + timeframe + " nº " + impulse.id + "<br>" + price(level) +
-            (item.steps > 1 ? "<br>escalón " + item.step + " de " + item.steps : "");
-          x.push(iso(item.from), iso(clip(item.to, edges)), null);
-          y.push(level, level, null);
-          text.push(caption, caption, "");
-        });
+        var level = (impulse.a + impulse.e) / 2;
+        var caption = "50 % del ID " + timeframe + " nº " + impulse.id + "<br>" + price(level);
+        x.push(iso(impulse.x0), iso(clip(impulse.x1, edges)), null);
+        y.push(level, level, null);
+        text.push(caption, caption, "");
       });
     });
     if (!x.length) { return []; }
@@ -860,540 +707,6 @@
     }];
   }
 
-  /* --- Las zonas del ID: el UL y el PUL -------------------------------------
-   *
-   * Las tres llegan calculadas desde Python —de ellas cuelgan las señales de
-   * zona— y se dibujan como recuadros, pero SÓLO LAS DEL ID QUE SE
-   * ESTÁ MIRANDO: una caja por ID en todo el histórico tapaba el precio, que es
-   * por lo que dejaron de pintarse. Con el ID actual (y su anterior, si el
-   * selector de ID visibles lo pide) son dos o cuatro cajas y se pueden auditar.
-   * El resto de los ID siguen enseñando su MARCO, que no es la zona.
-   *
-   * Cada zona va en dos tramos, con la misma convención que las líneas del ID en
-   * B.1 (el UL continuo, el PUL a rayas y el APUL punteado): relleno sólido
-   * desde que la zona NACE —la constitución del ID— hasta
-   * que el ID muere, que es exactamente cuando existe, y contorno atenuado desde
-   * la vela que la define hasta ese nacimiento. La zona en contra cuelga de una
-   * vela anterior al ID —el extremo de un ID previo—, así que ese tramo
-   * atenuado es casi siempre el más largo de los dos.
-   *
-   * Lo que sí sigue mandando es de qué modo de R-36 son: se calcularon sobre los
-   * impulsos del modo activo, así que en otro modo las capas que cuelgan de
-   * ellas (zonas y señales) se quedan vacías.
-   */
-  function hasZones() { return DATA.hasZones === true; }
-
-  function zonesAvailable() {
-    return hasZones() && state.mode === DATA.meta.legStartMode;
-  }
-
-  function zonesOf(timeframe) {
-    if (!zonesAvailable()) { return []; }
-    return impulsesOf(timeframe).zones || [];
-  }
-
-  /* Qué ID enseñan sus zonas. NO es el filtro de dibujo entero: con «Todos» se
-   * quedan en el ID actual, porque las cajas de ocho años de historia son una
-   * pared que no deja ver ni las velas. El estado lo dice con todas las letras.
-   */
-  function zoneIds(timeframe, edges) {
-    return lastIds(timeframe, edges, state.visible === "pair" ? 2 : 1);
-  }
-
-  /* El COLOR lo pone la TEMPORALIDAD, igual que el marco: en el mismo gráfico
-   * hay zonas de dos —las de H4 sobre H1, las de H1 sobre M15— y lo primero que
-   * hay que poder decir es de quién es cada caja. Qué zona es se lee en el trazo
-   * del borde y en el globo: el UL continuo y el PUL a rayas. */
-  var ZONE_ALPHA = { UL: 0.26, PUL: 0.14, APUL: 0.14 };
-  var ZONE_DASH = { UL: "solid", PUL: "dash", APUL: "dot" };
-
-  /* Un polígono por zona dentro de una sola traza por (temporalidad, tipo): con
-   * `fill: toself` y separadores nulos, Plotly las dibuja todas sin multiplicar
-   * las trazas. */
-  function zoneTraces(range) {
-    if (blindfolded() || !state.zones || !zonesAvailable()) { return []; }
-    var edges = window_(range);
-    var traces = [];
-
-    overlays().forEach(function (timeframe) {
-      if (!isVisible(timeframe)) { return; }
-      pushZoneTraces(traces, timeframe, edges);
-    });
-    return traces;
-  }
-
-  function pushZoneTraces(traces, timeframe, edges) {
-    var allowed = zoneIds(timeframe, edges);
-    var buckets = {};
-
-    zonesOf(timeframe).forEach(function (zone) {
-      if (zone.x1 < edges.lo || zone.xd > edges.hi) { return; }
-      // La zona no existe hasta que cierra la vela que la hace nacer.
-      if (pending(zone.x0, timeframe, edges)) { return; }
-      if (!keeps(allowed, zone.id)) { return; }
-      if (!buckets[zone.k]) { buckets[zone.k] = { live: shape(), before: shape() }; }
-      pushZone(buckets[zone.k].live, zone.x0, clip(zone.x1, edges), zone, timeframe, false);
-      if (zone.xd < zone.x0) {
-        pushZone(buckets[zone.k].before, zone.xd, zone.x0, zone, timeframe, true);
-      }
-    });
-
-    Object.keys(buckets).forEach(function (kind) {
-      var name = "Zona " + kind + " " + label(timeframe) +
-        (timeframe === primary() ? "" : " (contexto)");
-      if (buckets[kind].live.x.length) {
-        traces.push(zoneTrace(name, buckets[kind].live, timeframe, kind, false));
-      }
-      if (buckets[kind].before.x.length) {
-        traces.push(zoneTrace(
-          "Antes de existir · " + name, buckets[kind].before, timeframe, kind, true
-        ));
-      }
-    });
-  }
-
-  /* Un rectángulo cerrado, en el orden que espera `fill: toself`, más el nulo
-   * que lo separa del siguiente. Una zona plana —la vela no dejó mecha— sale
-   * como una línea: es lo que es, y no se le inventa altura. */
-  function pushZone(bucket, from, to, zone, timeframe, before) {
-    var a = iso(from), b = iso(to);
-    var caption = zoneCaption(zone, timeframe, before);
-    bucket.x.push(a, b, b, a, a, null);
-    bucket.y.push(zone.lo, zone.lo, zone.hi, zone.hi, zone.lo, null);
-    bucket.text.push(caption, caption, caption, caption, caption, "");
-  }
-
-  /* Qué es cada zona. Las tres son tramos de MECHA: el UL de un ID, del borde
-   * del cuerpo a la punta. Lo que cambia es de qué ID sale. El APUL tiene TRES
-   * historias y el motor dice cuál con `apu`: la zona que le prestó el ID
-   * anterior —porque aquél iba al revés y su extremo es el ancla de éste—, el UL
-   * de ese mismo ID contrario cuando su extremo sí quedó por detrás del ancla, o
-   * la del último ID INTERIOR del retroceso cuando en medio se abortó una
-   * constitución. */
-  var ZONE_WHAT = {
-    UL: "el extremo de ESTE ID: el tramo de mecha de la vela que lo fijó, del " +
-      "borde del cuerpo a la punta",
-    PUL: "el lado EN CONTRA: el UL del ID ANTERIOR, que iba en el MISMO sentido " +
-      "—murió por rotura a favor y éste nació más allá, así que su extremo " +
-      "quedó por detrás—",
-    APUL: "el lado EN CONTRA de un ID que no tiene PUL",
-    APUL_HEREDADO: "el ID anterior iba AL REVÉS, así que su extremo es el ANCLA " +
-      "de éste y no un nivel al que volver: este ID HEREDA la zona en contra " +
-      "que llevaba aquél, con los mismos dos precios",
-    APUL_EXTREMO_CONTRARIO: "el ID anterior iba AL REVÉS pero su extremo quedó " +
-      "POR DETRÁS del ancla de éste —no murió de un giro sino por rotura a " +
-      "favor, y el giro lo trajo después una CONSTITUCIÓN ABORTADA—, así que el " +
-      "nivel es el UL de aquel ID",
-    APUL_RETROCESO: "nació tras una CONSTITUCIÓN ABORTADA: el ID que tenía que " +
-      "dar este nivel iba a nacer ahí y una vela lo mató antes, así que el " +
-      "nivel se fue a buscar DENTRO del retroceso del ID anterior",
-    CONTRA_MECHA: "la punta se estira a la mecha más lejana que alcanzó aquel " +
-      "ID en toda su vida, no sólo a la de su vela del extremo"
-  };
-
-  /* Cuál de los tres APUL es. Los payloads viejos no traen `apu` y ahí se dice
-   * el del retroceso, que es lo que el motor sabía cuando se generaron. */
-  function anteWhat(origin) {
-    if (origin === "heredado") { return ZONE_WHAT.APUL_HEREDADO; }
-    if (origin === "extremo_contrario") { return ZONE_WHAT.APUL_EXTREMO_CONTRARIO; }
-    return ZONE_WHAT.APUL_RETROCESO;
-  }
-
-  function zoneCaption(zone, timeframe, before) {
-    var head = before
-      ? "ANTES DE EXISTIR · la vela ya definía la zona, el ID todavía no estaba " +
-        "constituido<br>"
-      : "";
-    var body = "Zona " + zone.k + " del ID " + timeframe + " nº " + zone.id +
-      " · " + zone.d +
-      "<br>" + ZONE_WHAT[zone.k] +
-      (zone.k === "APUL" ? "<br>" + anteWhat(zone.apu) : "") +
-      (zone.k === "UL" ? "" : "<br>" + ZONE_WHAT.CONTRA_MECHA) +
-      "<br>interior " + price(zone.i) + " · exterior " + price(zone.o) +
-      "<br>altura " + price(zone.hi - zone.lo) +
-      "<br>la define la vela de " + stamp(zone.xd) +
-      "<br>la zona existe desde " + stamp(zone.x0);
-    if (zone.k === "UL") {
-      body += zone.ext
-        ? "<br>extendida a la vela siguiente, que llegó más lejos"
-        : "<br>sin extender";
-      // §3.2: el extremo se estira con cada rechazo, el UL NO. Se marca una vez,
-      // al constituirse el ID, y es el mismo hasta que el ID muere.
-      body += "<br>el UL no se remarca: es el de la constitución del ID";
-    } else if (DATA.meta.breakByZone) {
-      body += "<br>su borde exterior es el nivel de ROTURA EN CONTRA del ID";
-    } else {
-      body += "<br>con break_by_zone apagado NO manda la rotura: se rompe por " +
-        "la línea del ancla";
-    }
-    if (zone.flat) { body += "<br>ALTURA CERO: la vela no dejó mecha"; }
-    return head + body;
-  }
-
-  function zoneTrace(name, bucket, timeframe, kind, before) {
-    var color = timeframeColor(timeframe);
-    return {
-      type: "scatter", mode: "lines", name: name,
-      x: bucket.x, y: bucket.y, text: bucket.text,
-      hoverinfo: "text", hoverlabel: { align: "left" }, connectgaps: false,
-      fill: before ? "none" : "toself",
-      fillcolor: before ? undefined : rgba(color, ZONE_ALPHA[kind]),
-      opacity: before ? 0.35 : 1,
-      line: {
-        color: color,
-        width: before ? 1 : 1.3,
-        dash: before ? "dot" : ZONE_DASH[kind]
-      }
-    };
-  }
-
-  /* --- El RSI por zonas, bajo el precio --------------------------------------
-   *
-   * Un panel propio DEBAJO del precio con el RSI de la temporalidad que se está
-   * mirando y las tres referencias del propietario: 55 arriba, 50 en medio y 45
-   * abajo. No se lee como sobrecompra/sobreventa sino como LIQUIDEZ y como
-   * NIVEL: por encima de 55 hay liquidez alcista, por debajo de 45 bajista, y
-   * dentro de la banda el 50 hace de SOPORTE si el índice bajó desde arriba y de
-   * RESISTENCIA si subió desde abajo. Por eso la línea va de tres colores —verde
-   * arriba, rojo abajo, tinta dentro— y la banda sombreada: es la lectura que
-   * hace el propietario en su plataforma, dibujada igual.
-   *
-   * Sólo va en el Diario, H4 y H1 (`DATA.meta.rsiCharts`): en M15 y M5 el
-   * propietario no lo mira —ahí rompe en falso— y esos gráficos no lo llevan.
-   * No es una capa que se apague: o el gráfico lo lleva, o no.
-   *
-   * Lo CALCULA EL MOTOR y viaja ya LEÍDO: una lectura por vela (`rsi`), en qué
-   * zona está (`rz`) y de qué lado entró en la banda (`rf`). Aquí no se calcula
-   * ni se interpreta nada: se recorta por el mismo sitio que las velas —así el
-   * replay no lo adelanta— y se pinta. Las velas del arranque no tienen lectura
-   * y llegan como hueco: se dibujan como hueco, no como un cero.
-   *
-   * NO DECIDE NADA: ni entra en la detección, ni mueve un ID, ni abre ni cierra.
-   */
-  var RSI_DOMAIN = [0, 0.2];
-
-  /* Cuánto alto se queda el precio con el RSI puesto. El hueco entre los dos
-   * paneles es lo que impide que la última vela y el índice se toquen. */
-  var PRICE_DOMAIN = [0.28, 1];
-
-  var RSI_ZONE = { above: 1, inside: 0, below: -1 };
-
-  function rsiPeriod() { return DATA.meta.rsiPeriod; }
-
-  function rsiBands() { return DATA.meta.rsiBands || []; }
-
-  function rsiUpper() { return Math.max.apply(null, rsiBands()); }
-
-  function rsiLower() { return Math.min.apply(null, rsiBands()); }
-
-  function hasRsi() {
-    var b = bars();
-    return !!(rsiPeriod() && b && b.rsi && b.rsi.length);
-  }
-
-  /* En auditoría ciega no se enseña: el RSI lo ha calculado el motor y el punto
-   * de la prueba es mirar el gráfico pelado antes de ver una sola lectura. */
-  function rsiOn() { return hasRsi() && !blindfolded(); }
-
-  function priceDomain() { return rsiOn() ? PRICE_DOMAIN : [0, 1]; }
-
-  function rsiColor(zone) {
-    var colors = COLORS.rsi || {};
-    if (zone === RSI_ZONE.above) { return colors.above || COLORS.bullish; }
-    if (zone === RSI_ZONE.below) { return colors.below || COLORS.bearish; }
-    return colors.inside || COLORS.ink;
-  }
-
-  /* Qué dice la lectura de UNA vela, con las palabras del propietario. */
-  function rsiWords(value, zone, origin) {
-    if (value === null || value === undefined) { return "sin lectura todavía"; }
-    var head = "RSI " + rsiPeriod() + " " + value.toFixed(1);
-    if (zone === RSI_ZONE.above) {
-      return head + " · por encima de " + rsiUpper() + ": LIQUIDEZ ALCISTA";
-    }
-    if (zone === RSI_ZONE.below) {
-      return head + " · por debajo de " + rsiLower() + ": LIQUIDEZ BAJISTA";
-    }
-    var inside = head + " · en la banda " + rsiLower() + "–" + rsiUpper();
-    if (origin === RSI_ZONE.above) {
-      return inside + " · bajó desde arriba: el 50 hace de SOPORTE, se espera rebote al alza";
-    }
-    if (origin === RSI_ZONE.below) {
-      return inside + " · subió desde abajo: el 50 hace de RESISTENCIA, se espera rechazo a la baja";
-    }
-    return inside + " · no ha salido de la banda desde que hay lectura";
-  }
-
-  function rsiTraces(cut) {
-    if (!rsiOn()) { return []; }
-    var b = bars();
-    var x = b.t.slice(cut.start, cut.end).map(iso);
-    if (!x.length) { return []; }
-    var y = b.rsi.slice(cut.start, cut.end);
-    var zone = (b.rz || []).slice(cut.start, cut.end);
-    var origin = (b.rf || []).slice(cut.start, cut.end);
-    var first = x[0], last = x[x.length - 1];
-    var traces = [{
-      // La banda 45–55 sombreada, como en la plataforma del propietario.
-      type: "scatter", mode: "lines", name: "Banda " + rsiLower() + "–" + rsiUpper(),
-      x: [first, last, last, first, first], yaxis: "y2",
-      y: [rsiLower(), rsiLower(), rsiUpper(), rsiUpper(), rsiLower()],
-      fill: "toself", fillcolor: rgba(COLORS.muted, 0.12),
-      line: { color: COLORS.muted, width: 1, dash: "dot" },
-      hoverinfo: "skip", showlegend: false
-    }, {
-      type: "scatter", mode: "lines", name: "Referencia 50",
-      x: [first, last], y: [50, 50], yaxis: "y2",
-      line: { color: COLORS.muted, width: 1, dash: "dash" },
-      hoverinfo: "skip", showlegend: false
-    }];
-    // Tres trazas por zona, con nulos donde la vela no está en esa zona: así la
-    // línea cambia de color al cruzar la banda sin partir la serie en trozos.
-    // Cada tramo lleva además la vela anterior para que no queden huecos en el
-    // cruce. El color lo pone `rz`, que viene leído del motor.
-    [RSI_ZONE.above, RSI_ZONE.inside, RSI_ZONE.below].forEach(function (which) {
-      var ys = y.map(function (value, position) {
-        if (value === null) { return null; }
-        if (zone[position] === which) { return value; }
-        // La vela anterior a un tramo de esta zona cierra el hueco del cruce.
-        if (position + 1 < y.length && zone[position + 1] === which && y[position + 1] !== null) {
-          return value;
-        }
-        return null;
-      });
-      if (!ys.some(function (value) { return value !== null; })) { return; }
-      traces.push({
-        type: "scatter", mode: "lines",
-        name: "RSI " + rsiPeriod() + (which === RSI_ZONE.above ? " · sobre " + rsiUpper()
-          : which === RSI_ZONE.below ? " · bajo " + rsiLower() : " · en banda"),
-        x: x, y: ys, yaxis: "y2", connectgaps: false,
-        line: { color: rsiColor(which), width: 1.6 },
-        text: y.map(function (value, position) {
-          return stamp(b.t[cut.start + position]) + "<br>" +
-            rsiWords(value, zone[position], origin[position]) +
-            "<br>ES DIBUJO: lo lee el motor y no decide nada";
-        }),
-        hoverinfo: "text", hoverlabel: { align: "left" }
-      });
-    });
-    return traces;
-  }
-
-  /* El eje del panel de abajo. Se autoescala con lo que haya dibujado —índice y
-   * bandas—, y los ticks son las tres referencias: son los números que se
-   * miran, y ponerle una escala de diez en diez sólo añadiría ruido. */
-  function rsiAxis() {
-    return {
-      domain: RSI_DOMAIN, gridcolor: COLORS.grid, fixedrange: true,
-      tickmode: "array", tickvals: rsiBands(),
-      tickfont: { size: 10, color: COLORS.muted },
-      title: { text: "RSI " + rsiPeriod(), font: { size: 11, color: COLORS.muted } }
-    };
-  }
-
-  /* La lectura de la ÚLTIMA vela a la vista: es la que se mira para saber en qué
-   * zona está el índice ahora y de dónde viene. En replay es la última cerrada. */
-  function rsiReading(cut) {
-    var b = bars();
-    for (var position = cut.end - 1; position >= cut.start; position--) {
-      if (b.rsi[position] !== null) {
-        return {
-          at: b.t[position],
-          words: rsiWords(b.rsi[position], (b.rz || [])[position], (b.rf || [])[position])
-        };
-      }
-    }
-    return null;
-  }
-
-  /* Qué se está viendo abajo. Un panel con una línea de tres colores y una
-   * banda no dice de quién es ni con qué está hecho: el estado lo tiene que
-   * decir, y decir también la lectura de la última vela con las palabras del
-   * propietario. En M15 y M5 dice por qué no hay panel. */
-  function rsiNote(cut) {
-    if (blindfolded()) { return null; }
-    if (!hasRsi()) {
-      var where = (DATA.meta.rsiCharts || []).map(label).join(", ");
-      return "sin RSI en " + label(state.chart) + ": el propietario sólo lo mira en " +
-        where + " (en las finas rompe en falso)";
-    }
-    var reading = rsiReading(cut);
-    return "abajo, el RSI " + rsiPeriod() + " de " + label(state.chart) +
-      " leído por zonas —verde sobre " + rsiUpper() + ", rojo bajo " + rsiLower() +
-      ", tinta en la banda— " +
-      (reading
-        ? "· última vela (" + stamp(reading.at) + "): " + reading.words + " "
-        : "· sin lectura en la ventana ") +
-      "· lo calcula y lo lee el motor sobre las velas cerradas de esta " +
-      "temporalidad y no decide nada: no entra en la detección, no mueve un ID " +
-      "y no abre ni cierra nada";
-  }
-
-  /* --- La caja del 50 % del retroceso ----------------------------------------
-   *
-   * NO ES EL NIVEL 50 % DEL ID (ése es el punto medio entre ancla y extremo y
-   * tiene su propia casilla). Ésta es la caja del mentor: cuando un ID se rompe
-   * a favor y nace el siguiente en el mismo sentido, el rectángulo va del ANCLA
-   * del ID nuevo al UL del ID anterior —que es el PUL del nuevo— y su LÍNEA
-   * MEDIA es el 50 % que él mira. Sólo la llevan los ID con PUL.
-   *
-   * Con ella viajan, ya calculados por el motor:
-   *   · el PASO de la tendencia, leído de los ID anteriores de la cadena: RÁPIDA
-   *     cuando ninguno llegó a su 50 % (el retroceso se frena en el PUL y se
-   *     espera ahí) y LENTA cuando alguno sí (se espera el 50 %). Sin ID
-   *     anteriores con caja no hay paso: no se inventa;
-   *   · cuándo la mecha LLEGÓ al PUL y al 50 % en la vida del ID, si llegó, y
-   *     hasta dónde devolvió el precio. En replay se esconden hasta que el reloj
-   *     los alcanza: son hechos de la vida entera del ID;
-   *   · la CONFLUENCIA: la caja de la temporalidad de encima (H4 para H1, el
-   *     Diario para H4) dentro de la que cae este 50 %, cuando cae. Es lo que
-   *     el mentor hace a mano al «encajar» el 50 % de H1 en el de H4.
-   *
-   * Obedece el mismo filtro que las zonas: sólo las del ID que se está mirando.
-   */
-  function hasPullbacks() { return DATA.hasPullbacks === true; }
-
-  function pullbacksOf(timeframe) {
-    if (!zonesAvailable()) { return []; }
-    return impulsesOf(timeframe).pullbacks || [];
-  }
-
-  var PACE_WORDS = {
-    rapida: "tendencia RÁPIDA: los ID anteriores no llegaron a su 50 % → el nivel " +
-      "a esperar es el PUL",
-    lenta: "tendencia LENTA: algún ID anterior llegó a su 50 % → el nivel a esperar " +
-      "es el 50 % de la caja"
-  };
-
-  function paceWords(box) {
-    if (!box.pace) {
-      return "sin paso: no hay ID anteriores con caja en la cadena" +
-        (box.chain ? " (" + box.chain + " detrás, sin PUL propio)" : "");
-    }
-    return PACE_WORDS[box.pace] + " (leído de " + box.chain + " ID detrás)";
-  }
-
-  function pullbackCaption(box, timeframe, edges) {
-    var until = knownUntil(timeframe, edges);
-    var text = "CAJA 50 % DEL RETROCESO · ID " + timeframe + " nº " + box.id + " · " + box.d +
-      "<br>del ANCLA del ID al PUL (el UL del ID anterior): " + price(box.lo) + " → " +
-      price(box.hi) +
-      "<br>línea media (el 50 % del mentor): " + price(box.m) +
-      "<br>" + paceWords(box);
-    if (box.xp !== null && box.xp <= until) {
-      text += "<br>llegó al PUL (" + price(box.pul) + ") en la vela de " + stamp(box.xp);
-    } else {
-      text += "<br>no ha llegado al PUL" + (state.replay ? " todavía" : "");
-    }
-    if (box.xm !== null && box.xm <= until) {
-      text += "<br>llegó al 50 % en la vela de " + stamp(box.xm);
-    } else {
-      text += "<br>no ha llegado al 50 %" + (state.replay ? " todavía" : "");
-    }
-    text += "<br>pierna: " + price(box.leg[0]) + " en " + box.leg[1] + " velas";
-    if (box.xr !== null && box.xr <= until) {
-      var share = box.leg[0] > 0 ? Math.round(box.ret[0] / box.leg[0] * 100) : 0;
-      text += "<br>retroceso: " + price(box.ret[0]) + " (" + share + " % de la pierna) en " +
-        box.ret[1] + " velas, hasta la vela de " + stamp(box.xr);
-    } else if (box.xr !== null) {
-      text += "<br>retroceso en curso: hasta dónde llega se sabrá al verlo";
-    } else {
-      text += "<br>sin retroceso: no devolvió nada";
-    }
-    if (box.c) {
-      text += "<br>CONFLUENCIA con la caja del ID " + box.c.tf + " nº " + box.c.id +
-        " (" + price(box.c.lo) + " → " + price(box.c.hi) + ", 50 % en " + price(box.c.m) +
-        "): este 50 % cae dentro de ella";
-    } else {
-      text += "<br>sin confluencia: no cae dentro de la caja de la temporalidad de encima";
-    }
-    return text + "<br>ES DIBUJO: no decide nada";
-  }
-
-  function pullbackTraces(range) {
-    if (blindfolded() || !state.pullback || !hasPullbacks() || !zonesAvailable()) { return []; }
-    var edges = window_(range);
-    var traces = [];
-    overlays().forEach(function (timeframe) {
-      if (!isVisible(timeframe)) { return; }
-      var allowed = zoneIds(timeframe, edges);
-      var boxes = shape(), mids = shape(), joint = shape();
-      var marks = { x: [], y: [], text: [], symbol: [] };
-      pullbacksOf(timeframe).forEach(function (box) {
-        if (box.x1 < edges.lo || box.x0 > edges.hi) { return; }
-        if (pending(box.x0, timeframe, edges)) { return; }
-        if (!keeps(allowed, box.id)) { return; }
-        var a = iso(box.x0), b = iso(clip(box.x1, edges));
-        var caption = pullbackCaption(box, timeframe, edges);
-        boxes.x.push(a, b, b, a, a, null);
-        boxes.y.push(box.lo, box.lo, box.hi, box.hi, box.lo, null);
-        boxes.text.push(caption, caption, caption, caption, caption, "");
-        mids.x.push(a, b, null);
-        mids.y.push(box.m, box.m, null);
-        mids.text.push(caption, caption, "");
-        if (box.c) {
-          // La franja entre los dos 50 %: la de este ID y la de encima. Es lo
-          // que el mentor llama «encajar».
-          var lo = Math.min(box.m, box.c.m), hi = Math.max(box.m, box.c.m);
-          var what = "CONFLUENCIA 50 % " + timeframe + " · " + box.c.tf +
-            "<br>50 % del ID " + timeframe + " nº " + box.id + ": " + price(box.m) +
-            "<br>50 % del ID " + box.c.tf + " nº " + box.c.id + ": " + price(box.c.m) +
-            "<br>el de " + timeframe + " cae dentro de la caja de " + box.c.tf +
-            " (" + price(box.c.lo) + " → " + price(box.c.hi) + ")";
-          joint.x.push(a, b, b, a, a, null);
-          joint.y.push(lo, lo, hi, hi, lo, null);
-          joint.text.push(what, what, what, what, what, "");
-        }
-        var until = knownUntil(timeframe, edges);
-        if (box.xp !== null && box.xp <= until && box.xp >= edges.lo) {
-          marks.x.push(iso(box.xp)); marks.y.push(box.pul); marks.symbol.push("triangle-down");
-          marks.text.push("LLEGA AL PUL · ID " + timeframe + " nº " + box.id +
-            "<br>la mecha toca " + price(box.pul) + " en la vela de " + stamp(box.xp));
-        }
-        if (box.xm !== null && box.xm <= until && box.xm >= edges.lo) {
-          marks.x.push(iso(box.xm)); marks.y.push(box.m); marks.symbol.push("diamond-wide");
-          marks.text.push("LLEGA AL 50 % · ID " + timeframe + " nº " + box.id +
-            "<br>la mecha toca " + price(box.m) + " en la vela de " + stamp(box.xm));
-        }
-      });
-      if (!boxes.x.length) { return; }
-      var tag = " " + label(timeframe) + (timeframe === primary() ? "" : " (contexto)");
-      traces.push({
-        type: "scatter", mode: "lines", name: "Caja 50 % retroceso" + tag,
-        x: boxes.x, y: boxes.y, text: boxes.text,
-        hoverinfo: "text", hoverlabel: { align: "left" }, connectgaps: false,
-        fill: "toself", fillcolor: rgba(COLORS.pullback, 0.1),
-        line: { color: COLORS.pullback, width: 1, dash: "dashdot" }
-      });
-      traces.push({
-        type: "scatter", mode: "lines", name: "50 % del retroceso" + tag,
-        x: mids.x, y: mids.y, text: mids.text,
-        hoverinfo: "text", hoverlabel: { align: "left" }, connectgaps: false,
-        line: { color: COLORS.pullback, width: 1.8 }
-      });
-      if (joint.x.length) {
-        traces.push({
-          type: "scatter", mode: "lines", name: "Confluencia 50 %" + tag,
-          x: joint.x, y: joint.y, text: joint.text,
-          hoverinfo: "text", hoverlabel: { align: "left" }, connectgaps: false,
-          fill: "toself", fillcolor: rgba(COLORS.pullback, 0.35),
-          fillpattern: { shape: "/", fgcolor: COLORS.pullback, bgcolor: rgba(COLORS.pullback, 0.15), size: 6 },
-          line: { color: COLORS.pullback, width: 1.2 }
-        });
-      }
-      if (marks.x.length) {
-        traces.push({
-          type: "scatter", mode: "markers", name: "Llegada al PUL / al 50 %" + tag,
-          x: marks.x, y: marks.y, text: marks.text,
-          hoverinfo: "text", hoverlabel: { align: "left" },
-          marker: { symbol: marks.symbol, size: 9, color: COLORS.pullback,
-            line: { color: COLORS.surface, width: 1 } }
-        });
-      }
-    });
-    return traces;
-  }
-
   /* --- La acumulación ---------------------------------------------------------
    *
    * La firma del propietario: el precio toca la parte alta del ID, toca la
@@ -1405,6 +718,9 @@
    * Viene fechada del motor: `x` es la vela del toque que completa la firma y
    * desde ahí hasta que el ID muere se sombrea el rango. Antes de esa vela no
    * se sabía, y por eso el sombreado no empieza en la constitución.
+   *
+   * La capa está APARCADA: el motor no manda ninguna hasta que el propietario
+   * la vuelva a pedir, y sin ninguna la casilla se esconde.
    */
   function hasAccumulations() { return DATA.hasAccumulations === true; }
 
@@ -1446,123 +762,6 @@
       });
     });
     return traces;
-  }
-
-  /* --- El marco del ID ------------------------------------------------------
-   *
-   * Dónde EMPIEZA y dónde ACABA cada ID, dibujado como un recuadro: las dos
-   * verticales son la vela que lo constituye y la que lo mata, y las dos
-   * horizontales su ancla y su extremo. Lo lleva CADA ID dibujado: las cajas de
-   * las zonas son sólo las del ID que se está mirando.
-   *
-   * El color lo pone la TEMPORALIDAD y no la dirección: en el mismo gráfico hay
-   * marcos de dos —el de H4 sobre H1, el de H1 sobre M15— y lo primero que hay
-   * que poder decir es de quién es cada uno. La dirección sigue leyéndose en la
-   * línea del ID y en el globo.
-   *
-   * Y SE REMARCA mientras el ID vive: el lado derecho llega al presente y el
-   * lado del extremo sube o baja con la escalera (§3.2), así que el recuadro de
-   * un ID vigente crece con él. Los dos datos vienen ya calculados —`v` dice si
-   * el ID sigue vivo, `st` cuál era el extremo en cada tramo—: aquí no se
-   * decide ninguno, sólo se dibujan.
-   */
-  function timeframeColor(timeframe) {
-    return (COLORS.timeframes || {})[timeframe] || COLORS.muted;
-  }
-
-  function frameTraces(range) {
-    if (blindfolded() || !state.frame) { return []; }
-    var edges = window_(range);
-    var traces = [];
-
-    overlays().forEach(function (timeframe, position) {
-      if (!isVisible(timeframe)) { return; }
-      var own = position === 0;
-      var allowed = visibleIds(timeframe, edges);
-      var bucket = shape();
-
-      impulsesOf(timeframe).list.forEach(function (impulse) {
-        if (impulse.x1 < edges.lo || impulse.x0 > edges.hi) { return; }
-        // Igual que la línea del ID: no hay marco hasta que cierra la vela que
-        // lo constituye.
-        if (pending(impulse.x0, timeframe, edges)) { return; }
-        if (!keeps(allowed, impulse.id)) { return; }
-        pushFrame(bucket, impulse, timeframe, edges);
-      });
-
-      if (!bucket.x.length) { return; }
-      traces.push(frameTrace(timeframe, bucket, own));
-    });
-    return traces;
-  }
-
-  /* Un rectángulo cerrado por ID, más el nulo que lo separa del siguiente. El
-   * extremo es el del ÚLTIMO escalón conocido, no el del final: dibujar el del
-   * final desde la constitución enseñaría un precio al que el mercado todavía no
-   * había llegado. */
-  function pushFrame(bucket, impulse, timeframe, edges) {
-    var steps = extremeSteps(impulse, timeframe, edges);
-    var extreme = steps[steps.length - 1].value;
-    var end = clip(impulse.x1, edges);
-    var a = iso(impulse.x0), b = iso(end);
-    var caption = frameCaption(impulse, timeframe, extreme, end, edges);
-    bucket.x.push(a, b, b, a, a, null);
-    bucket.y.push(impulse.a, impulse.a, extreme, extreme, impulse.a, null);
-    bucket.text.push(caption, caption, caption, caption, caption, "");
-  }
-
-  function frameCaption(impulse, timeframe, extreme, end, edges) {
-    // En replay, un ID que muere después del reloj todavía está vivo a esta
-    // hora: fechar aquí su muerte sería enseñar el futuro.
-    var alive = impulse.v || pending(impulse.x1, timeframe, edges);
-    return "MARCO del ID " + timeframe + " nº " + impulse.id + " · " + impulse.d +
-      "<br>empieza en la vela de " + stamp(impulse.x0) +
-      (alive
-        ? "<br>SIGUE VIVO: el marco llega hasta " + stamp(end)
-        : "<br>termina en la vela de " + stamp(impulse.x1)) +
-      "<br>ancla " + price(impulse.a) + " · extremo " + price(extreme) +
-      (extreme !== impulse.e
-        ? "<br>el extremo del final es " + price(impulse.e) +
-          ": el marco enseña el que estaba puesto en este tramo (§3.2)"
-        : "") +
-      againstNote(impulse);
-  }
-
-  /* Qué lleva el ID en su LADO EN CONTRA. Viene calculado (`az`) porque
-   * derivarlo aquí exigiría la lista de impulsos. Sin `break_by_zone` la zona no
-   * manda la rotura y el globo lo dice: si no, se leería como si el motor ya
-   * estuviera rompiendo por ahí. */
-  function againstNote(impulse) {
-    if (!impulse.az) { return ""; }
-    var manda = DATA.meta.breakByZone
-      ? " (es su nivel de rotura EN CONTRA)"
-      : " (con break_by_zone apagado NO manda: rompe por el ancla)";
-    if (impulse.az === "linea") {
-      return "<br>en contra: SIN ZONA, no hay ningún ID anterior del que salga " +
-        "la vela" +
-        "<br>rompe por la línea del ancla";
-    }
-    if (impulse.az === "APUL") {
-      return "<br>en contra: APUL" + manda +
-        "<br>NO tiene PUL: " + anteWhat(impulse.ah);
-    }
-    return "<br>en contra: PUL" + manda;
-  }
-
-  function frameTrace(timeframe, bucket, own) {
-    return {
-      type: "scatter", mode: "lines",
-      name: "Marco ID " + label(timeframe) + (own ? "" : " (contexto)"),
-      x: bucket.x, y: bucket.y, text: bucket.text,
-      hoverinfo: "text", hoverlabel: { align: "left" }, connectgaps: false,
-      fill: "none",
-      line: {
-        color: timeframeColor(timeframe),
-        width: own ? 1.4 : 1.1,
-        dash: own ? "solid" : "dot"
-      },
-      opacity: own ? 0.9 : 0.6
-    };
   }
 
   function shape() { return { x: [], y: [], text: [] }; }
@@ -1650,265 +849,32 @@
       });
     }
 
-    /* Las constituciones que no fueron: la vela contraria enorme que habría
-     * dado a luz un ID ya roto y en su lugar rompe y gira la pierna. No cuelgan
-     * de ningún ID —ése es el punto: no llegó a existir—, así que son las únicas
-     * marcas que el selector de ID no filtra. Van con las constituciones porque
-     * es exactamente donde el propietario busca el rombo que falta. */
-    var aborted = (source.aborted || []).filter(function (item) {
-      return item.x >= edges.lo && item.x <= edges.hi &&
-        !pending(item.x, primary(), edges);
-    });
-    if (aborted.length) {
-      traces.push({
-        type: "scatter", mode: "markers", name: "Constitución abortada " + label(primary()),
-        x: aborted.map(function (item) { return iso(item.x); }),
-        y: aborted.map(function (item) { return item.y; }),
-        text: aborted.map(function (item) {
-          return "CONSTITUCIÓN ABORTADA (" + primary() + ")<br>" + stamp(item.x) +
-            "<br>habría nacido un ID " + item.d + " ya roto: el cierre " + price(item.y) +
-            " ya estaba más allá de " + price(item.lvl) +
-            (item.src === "linea"
-              ? " (ancla)"
-              : "<br>por ZONA " + item.src + "<br>línea del ancla en " + price(item.ln)) +
-            "<br>esta vela no constituye: rompe y gira la pierna" +
-            "<br>pierna en curso: " + item.next;
-        }),
-        hoverinfo: "text", hoverlabel: { align: "left" },
-        marker: {
-          symbol: "hourglass", size: 11,
-          color: aborted.map(function (item) {
-            return item.d === "alcista" ? COLORS.bullish : COLORS.bearish;
-          }),
-          line: { color: COLORS.surface, width: 1 }
-        }
-      });
-    }
-
     var breaks = source.breaks.filter(function (item) {
       return item.x >= edges.lo && item.x <= edges.hi &&
         !pending(item.x, primary(), edges) && keeps(allowed, item.id);
     });
-    /* Fase 2.1: morir atravesando una zona y morir por línea son dos cosas
-     * distintas y se distinguen en el dibujo. El símbolo relleno es el de
-     * siempre —así la fase 1 se sigue leyendo igual, porque ahí todo es línea— y
-     * el hueco marca la excepción: no había zona en ese lado. */
-    traces.push(breakTrace(breaks, "favor", "linea", "ROTURA_A_FAVOR", "triangle-up", COLORS.ink));
-    traces.push(breakTrace(breaks, "favor", "UL", "ROTURA_A_FAVOR", "triangle-up-open", COLORS.ink));
-    traces.push(breakTrace(breaks, "contra", "linea", "ROTURA_EN_CONTRA", "x", COLORS.muted));
-    traces.push(breakTrace(breaks, "contra", "PUL", "ROTURA_EN_CONTRA", "x-open", COLORS.muted));
-    /* El APUL lleva SÍMBOLO PROPIO. Es otra regla —el ID nació tras una
-     * constitución abortada y su nivel sale del retroceso anterior— y meterla en
-     * la misma traza que el PUL diría que el motor rompió por donde no rompió. */
-    traces.push(breakTrace(breaks, "contra", "APUL", "ROTURA_EN_CONTRA", "x-dot", COLORS.muted));
+    traces.push(breakTrace(breaks, "favor", "ROTURA_A_FAVOR", "triangle-up", COLORS.ink));
+    traces.push(breakTrace(breaks, "contra", "ROTURA_EN_CONTRA", "x", COLORS.muted));
     return traces.filter(Boolean);
   }
 
-  /* `source` es el ORIGEN EXACTO del nivel que rompió, tal como lo escribió el
-   * motor: `linea` es la regla de la fase 1 y `UL`, `PUL` o `APUL` la de la 2.1.
-   * Con `break_by_zone` apagado todas caen en `linea` y las demás salen
-   * vacías. */
-  function breakTrace(breaks, kind, source, name, symbol, color) {
-    var items = breaks.filter(function (item) {
-      return item.k === kind && item.src === source;
-    });
+  function breakTrace(breaks, kind, name, symbol, color) {
+    var items = breaks.filter(function (item) { return item.k === kind; });
     if (!items.length) { return null; }
-    var suffix = DATA.meta.breakByZone
-      ? " · " + (source === "linea" ? "por línea" : "por " + source)
-      : "";
     return {
       type: "scatter", mode: "markers",
-      name: name + " " + label(primary()) + suffix,
+      name: name + " " + label(primary()),
       x: items.map(function (item) { return iso(item.x); }),
       y: items.map(function (item) { return item.y; }),
       text: items.map(function (item) {
-        var how = item.src === "linea"
-          ? (DATA.meta.breakByZone
-            ? "<br>por LÍNEA: ese lado no tenía zona (los primeros ID del " +
-              "histórico no tienen PUL)"
-            : "")
-          : "<br>por ZONA " + item.src + ": la atravesó entera" +
-            (item.src === "APUL"
-              ? "<br>este ID no tenía PUL: nació tras una constitución abortada, " +
-                "así que su lado en contra lo llevaba el APUL, dentro del " +
-                "retroceso del ID anterior"
-              : "") +
-            "<br>línea del ID en " + price(item.ln);
         return name + " (" + primary() + ")<br>" + stamp(item.x) +
           "<br>ID roto: " + item.id + " (" + item.d + ")" +
-          "<br>cierre " + price(item.y) + " más allá de " + price(item.lvl) + how +
+          "<br>cierre " + price(item.y) + " más allá de " + price(item.lvl) +
           "<br>pierna en curso: " + item.next;
       }),
       hoverinfo: "text", hoverlabel: { align: "left" },
       marker: { symbol: symbol, size: 10, color: color, line: { color: COLORS.surface, width: 1 } }
     };
-  }
-
-  /* --- Fase 2.1: las roturas evitadas ---------------------------------------
-   *
-   * Velas que bajo la regla antigua habrían matado el ID y con la nueva no:
-   * cerraron más allá de la línea sin atravesar la zona entera. Es la capa que
-   * el propietario audita primero, así que el dibujo lleva las dos cosas que
-   * hacen falta para juzgarla sin abrir ningún CSV: el segmento que va del
-   * cierre a la línea que cruzó —eso es exactamente lo que la regla antigua
-   * contaba como rotura— y el marcador sobre el cierre. */
-
-  function hasAvoided() { return DATA.hasAvoided === true; }
-
-  function avoidedOf(timeframe) {
-    return impulsesOf(timeframe).avoided || [];
-  }
-
-  function avoidedTraces(range) {
-    if (blindfolded() || !state.avoided || !hasAvoided()) { return []; }
-    if (!isVisible(primary())) { return []; }
-    var edges = window_(range);
-    var allowed = visibleIds(primary(), edges);
-    var items = avoidedOf(primary()).filter(function (item) {
-      return item.x >= edges.lo && item.x <= edges.hi &&
-        !pending(item.x, primary(), edges) && keeps(allowed, item.id);
-    });
-    if (!items.length) { return []; }
-
-    // Un solo trazo con separadores nulos: una traza por vela salvada
-    // multiplicaría por cien las trazas de una ventana larga.
-    var sx = [];
-    var sy = [];
-    items.forEach(function (item) {
-      sx.push(iso(item.x), iso(item.x), null);
-      sy.push(item.ln, item.y, null);
-    });
-
-    return [
-      {
-        type: "scatter", mode: "lines", name: "Rotura evitada · tramo",
-        x: sx, y: sy, hoverinfo: "skip", showlegend: false,
-        line: { color: COLORS.ink, width: 2.4 }
-      },
-      {
-        type: "scatter", mode: "markers",
-        name: "ROTURA EVITADA " + label(primary()),
-        x: items.map(function (item) { return iso(item.x); }),
-        y: items.map(function (item) { return item.y; }),
-        text: items.map(function (item) {
-          return "ROTURA EVITADA (" + (item.k === "favor"
-            ? "ROTURA_A_FAVOR" : "ROTURA_EN_CONTRA") + ")<br>" + stamp(item.x) +
-            "<br>ID " + item.id + " (" + item.d + ")" +
-            "<br>cierre " + price(item.y) + " más allá de la línea " + price(item.ln) +
-            "<br>zona " + item.z + " [" + price(item.zi) + ", " + price(item.zo) + "]" +
-            "<br>le faltó " + price(Math.abs(item.zo - item.y)) + " para atravesarla" +
-            (item.ext ? "<br>aquí el ID extiende su extremo" : "");
-        }),
-        hoverinfo: "text", hoverlabel: { align: "left" },
-        marker: {
-          symbol: "circle-x", size: 12, color: COLORS.ink,
-          line: { color: COLORS.surface, width: 1 }
-        }
-      }
-    ];
-  }
-
-  /* --- Señales de zona (visual) ---------------------------------------------
-   *
-   * Las tres marcas que el propietario quiere ver sobre el Diario y H4 mientras
-   * audita el toque de una zona: el precio TOCA un PUL, LLEGA a un UL DESDE FUERA
-   * y lo RECHAZA, o ROMPE un UL.
-   *
-   * DIBUJO Y NADA MÁS, como el resto del fichero. Vienen calculadas de Python
-   * sobre las zonas de la fase 2.0 y no producen entradas, ni stops, ni
-   * targets: el proyecto sigue sin señales operativas. Aquí no se decide cuál
-   * cuenta ni se agrupa nada; se elige qué se pinta.
-   *
-   * Van con el impulso PRINCIPAL del gráfico, igual que los demás marcadores: la
-   * señal de un ID de H4 sobre velas de H1 caería en un sitio que en ese gráfico
-   * no es el suyo. Y obedecen el filtro de ID visibles (B.2), no el de las
-   * zonas: son marcas puntuales, no rectángulos que tapen el precio, y el globo
-   * lleva los dos bordes de su zona, así que una señal de un ID cuyo rectángulo
-   * ya no se dibuja se sigue pudiendo juzgar. Con el filtro en «ID actual» se
-   * ven las del ID vigente y su zona a la vez.
-   */
-
-  function hasSignals() { return DATA.hasSignals === true; }
-
-  /* Se calcularon sobre las zonas del modo activo de R-36, así que desaparecen
-   * al cambiar de modo por la misma razón que las zonas. */
-  function signalsOf(timeframe) {
-    if (!zonesAvailable()) { return []; }
-    return impulsesOf(timeframe).signals || [];
-  }
-
-  /* Un símbolo por tipo, ninguno repetido de las capas que ya existían, y el
-   * color del ID al que pertenece la señal. */
-  var SIGNAL_STYLE = {
-    TOQUE_PUL: { symbol: "pentagon", size: 12, title: "TOQUE DE PUL" },
-    RECHAZO_UL: { symbol: "hexagram", size: 12, title: "RECHAZO DEL UL" },
-    ROTURA_UL: { symbol: "star-diamond", size: 13, title: "ROTURA DEL UL" }
-  };
-  var SIGNAL_KINDS = ["TOQUE_PUL", "RECHAZO_UL", "ROTURA_UL"];
-
-  function visibleSignals(edges) {
-    if (blindfolded() || !state.signals || !hasSignals()) { return []; }
-    if (!zonesAvailable() || !isVisible(primary())) { return []; }
-    var allowed = visibleIds(primary(), edges);
-    return signalsOf(primary()).filter(function (item) {
-      // Cada señal se sabe cuando cierra LA VELA QUE LA MIDIÓ: el toque del PUL
-      // va en la vela fina y no espera las cuatro horas de H4.
-      return item.x >= edges.lo && item.x <= edges.hi &&
-        !pending(item.x, item.src || primary(), edges) && keeps(allowed, item.id);
-    });
-  }
-
-  function signalTraces(range) {
-    var visible = visibleSignals(window_(range));
-    if (!visible.length) { return []; }
-    return SIGNAL_KINDS.map(function (kind) {
-      return signalTrace(visible, kind);
-    }).filter(Boolean);
-  }
-
-  function signalTrace(signals, kind) {
-    var items = signals.filter(function (item) { return item.k === kind; });
-    if (!items.length) { return null; }
-    var style = SIGNAL_STYLE[kind];
-    return {
-      type: "scatter", mode: "markers",
-      name: kind + " " + label(primary()),
-      x: items.map(function (item) { return iso(item.x); }),
-      y: items.map(function (item) { return item.y; }),
-      text: items.map(signalCaption),
-      hoverinfo: "text", hoverlabel: { align: "left" },
-      marker: {
-        symbol: style.symbol, size: style.size,
-        color: items.map(function (item) {
-          return item.d === "alcista" ? COLORS.bullish : COLORS.bearish;
-        }),
-        line: { color: COLORS.surface, width: 1.2 }
-      }
-    };
-  }
-
-  function signalCaption(item) {
-    var style = SIGNAL_STYLE[item.k];
-    var title = item.k === "TOQUE_PUL" ? "TOQUE DE " + item.z : style.title;
-    var text = title + " (" + primary() + ")<br>" + stamp(item.x) +
-      "<br>ID nº " + item.id + " (" + item.d + ") · zona " + item.z +
-      "<br>señal nº " + item.n + " de este tipo en este ID";
-    if (item.k === "ROTURA_UL") {
-      text += "<br>cierre " + price(item.c) + " más allá del borde exterior " +
-        price(item.lvl);
-    } else {
-      text += "<br>borde interior " + price(item.lvl) +
-        " · la mecha llegó a " + price(item.r) +
-        "<br>cierre " + price(item.c) +
-        (item["in"] ? " DENTRO de la zona" : " fuera de la zona");
-      if (item.k === "RECHAZO_UL") {
-        text += "<br>llegó desde fuera y no pasó del borde exterior: el UL aguanta";
-      } else if (item.src && item.src !== primary()) {
-        text += "<br>entró en la zona en la vela de " + item.src +
-          ": el minuto del toque, sin esperar al cierre de " + primary();
-      }
-    }
-    return text + "<br>SÓLO DIBUJO: no abre ni cierra ninguna operación";
   }
 
   /* El sombreado es el del impulso principal: dos capas de limbo superpuestas
@@ -1994,8 +960,6 @@
    * la de abajo la de las fechas. Fuera de las dos, no es este gesto. */
   function axisAt(box, x, y) {
     if (x - box.left < MARGIN.l) {
-      // Al lado del RSI no hay precios que escalar: ese panel tiene su propia
-      // escala y no se toca, así que el gesto se deja pasar.
       var plot = plotBox(box);
       if (y <= plot.top + plot.height) { return "y"; }
     }
@@ -2207,10 +1171,12 @@
   }
 
   /* El botón que está armado, cuando es de los del simulador: `arming` lo
-   * comparten la caja simulada y los recuadros a mano (I.3) —no se puede estar
-   * esperando dos clics a la vez— y los controles de cada uno sólo pueden
-   * hablar del suyo. */
-  function simArming() { return armedRect() ? null : state.arming; }
+   * comparten la caja simulada, los recuadros a mano (I.3), las líneas a mano
+   * (I.4) y el Fibonacci (I.5) —no se puede estar esperando dos clics a la
+   * vez— y los controles de cada uno sólo pueden hablar del suyo. */
+  function simArming() {
+    return armedRect() || armedLine() || armedFib() ? null : state.arming;
+  }
 
   function clearSim() {
     state.sim = null;
@@ -2299,10 +1265,9 @@
     var chart = document.getElementById("chart");
     var size = chart && chart._fullLayout && chart._fullLayout._size;
     var axis = chart && chart._fullLayout && chart._fullLayout.yaxis;
-    // Con el RSI abajo, el precio ya no ocupa todo el alto: su panel es la
-    // franja que dice el `domain` de su eje. Si no se descontara, precio y píxel
-    // se separarían y agarrar el stop volvería a ser cuestión de suerte.
-    var domain = (axis && axis.domain) || priceDomain();
+    // El precio ocupa todo el alto de la figura; se lee igualmente el `domain`
+    // resuelto por Plotly para que precio y píxel no se separen nunca.
+    var domain = (axis && axis.domain) || [0, 1];
     var share = domain[1] - domain[0];
     if (size && size.w > 0 && size.h > 0) {
       return {
@@ -2376,6 +1341,9 @@
     if (event.stopPropagation) { event.stopPropagation(); }
     var armed = armedRect();
     if (armed) { plantRect(armed, point); return; }
+    var traced = armedLine();
+    if (traced) { plantLine(traced, point); return; }
+    if (armedFib()) { plantFib(point); return; }
     plantSim(state.arming, point);
   }
 
@@ -2494,14 +1462,24 @@
   function hoverSim(event) {
     var chart = document.getElementById("chart");
     if (!chart || !chart.style || state.arming) { return; }
-    if (!state.sim && !state.rects.length) { return; }
+    if (!state.sim && !state.rects.length && !state.lines.length && !state.fibs.length) {
+      return;
+    }
     var box = chartBox();
     var part = box && state.sim ? simHandleAt(box, event.clientX, event.clientY) : null;
     if (part) { chart.style.cursor = SIM_CURSORS[part] || ""; return; }
     var hit = box && state.rects.length
       ? rectHandleAt(box, event.clientX, event.clientY)
       : null;
-    chart.style.cursor = hit ? (RECT_CURSORS[hit.part] || "") : "";
+    if (hit) { chart.style.cursor = RECT_CURSORS[hit.part] || ""; return; }
+    var stroke = box && state.lines.length
+      ? lineHandleAt(box, event.clientX, event.clientY)
+      : null;
+    if (stroke) { chart.style.cursor = LINE_CURSORS[stroke.part] || ""; return; }
+    var rule = box && state.fibs.length
+      ? fibHandleAt(box, event.clientX, event.clientY)
+      : null;
+    chart.style.cursor = rule ? (FIB_CURSORS[rule.part] || "") : "";
   }
 
   /* Qué caja hay puesta. Un rectángulo de colores sobre el precio se lee como
@@ -2564,11 +1542,12 @@
 
   /* --- Los recuadros a mano (I.3) -------------------------------------------
    *
-   * Tres rectángulos que planta el PROPIETARIO encima del gráfico para decir
-   * DÓNDE VE UN PUL, UN UL O UN APUL. No son zonas del motor: las de la fase
-   * 2.0 se calculan, viajan en el payload y de ellas cuelgan las señales; éstas
-   * no las ve nadie más que quien las dibuja. Existen para poder mandar una
-   * captura señalando lo que todavía no hay regla que detecte.
+   * Tres rectángulos —A, B y C— que planta el PROPIETARIO encima del gráfico
+   * para señalar lo que ve y todavía no tiene regla. No son zonas del motor —el
+   * motor no calcula ninguna—: no las ve nadie más que quien las dibuja.
+   * Existen para poder mandar una captura señalando lo que no hay regla que
+   * detecte. Los nombres son letras a propósito: lo que significan lo irá
+   * dictando el propietario sobre el dibujo.
    *
    * Cada nombre lleva SU COLOR y todos van punteados: ninguna capa calculada
    * usa esos tres tonos, así que lo que se vea con ellos lo ha puesto una mano,
@@ -2580,23 +1559,13 @@
    * se arrastra por los bordes o por dentro—, y por eso comparten `arming`: no
    * se puede estar esperando dos clics a la vez.
    */
-  var RECT_KINDS = [
-    {
-      id: "PUL", label: "PUL",
-      title: "Arma el recuadro del PUL: el clic siguiente sobre el gráfico lo\n" +
+  var RECT_KINDS = ["A", "B", "C"].map(function (name) {
+    return {
+      id: name, label: "Recuadro " + name,
+      title: "Arma el recuadro " + name + ": el clic siguiente sobre el gráfico lo\n" +
         "planta ahí. Escape desarma. Lo dibujas tú: el motor no lo ve."
-    },
-    {
-      id: "UL", label: "UL",
-      title: "Arma el recuadro del UL: el clic siguiente sobre el gráfico lo\n" +
-        "planta ahí. Escape desarma. Lo dibujas tú: el motor no lo ve."
-    },
-    {
-      id: "APUL", label: "APUL",
-      title: "Arma el recuadro del APUL: el clic siguiente sobre el gráfico lo\n" +
-        "planta ahí. Escape desarma. Lo dibujas tú: el motor no lo ve."
-    }
-  ];
+    };
+  });
 
   /* `arming` es UNO y lo comparten los tres botones y la caja simulada, así que
    * el nombre del recuadro viaja dentro del propio valor. */
@@ -2622,9 +1591,9 @@
 
   var rectDrag = null;
 
-  /* Se numeran POR NOMBRE: el segundo PUL es «PUL 2» aunque entre los dos se
-   * haya plantado un UL, porque lo que se cuenta al mirarlos es cuántos hay de
-   * cada cosa. */
+  /* Se numeran POR NOMBRE: el segundo A es «A 2» aunque entre los dos se haya
+   * plantado un B, porque lo que se cuenta al mirarlos es cuántos hay de cada
+   * cosa. */
   function rectShapes() {
     var seen = {};
     return state.rects.map(function (rect, position) {
@@ -2824,9 +1793,8 @@
     if (!state.rects.length) { return null; }
     return "recuadros marcados a mano: " + state.rects.length +
       " (" + rectCounts() + ")" +
-      " · los dibuja el propietario para señalar dónde ve un PUL, un UL o un " +
-      "APUL: NO los ha detectado el motor, no hay regla de PUL, UL ni APUL en " +
-      "el proyecto y no salen de la pantalla";
+      " · los dibuja el propietario para señalar lo que ve: NO los ha " +
+      "detectado el motor, no hay regla detrás y no salen de la pantalla";
   }
 
   function buildRectButtons() {
@@ -2851,6 +1819,625 @@
     chart.addEventListener("mousedown", startRectDrag, true);
     document.addEventListener("mousemove", moveRectDrag);
     document.addEventListener("mouseup", endRectDrag);
+  }
+
+  /* --- Las líneas a mano (I.4) ----------------------------------------------
+   *
+   * Tres LÍNEAS que traza el PROPIETARIO encima del gráfico para señalar lo que
+   * todavía no tiene regla: por dónde pasa un nivel, qué dos puntos une, de
+   * dónde a dónde mira. No son capa del motor —como los recuadros de I.3—: no
+   * las ha calculado nadie, el motor no se entera de que existen y no salen de
+   * la pantalla. Existen para poder mandar una captura señalando lo que se
+   * quiere explicar.
+   *
+   * El NOMBRE de cada una es la TEMPORALIDAD que se está marcando con ella —el
+   * nivel que se ve en H4, el de H1, el de M15—, que es lo que se quiere decir
+   * al señalarla: el color es sólo para distinguirlas. Los tonos son los tres
+   * de la mano, los mismos que los recuadros, para que una línea no se confunda
+   * con nada que haya calculado el motor. Lo que las separa de los recuadros es
+   * el TRAZO: continuo la línea, punteado el recuadro.
+   *
+   * Se plantan HORIZONTALES —marcar un nivel es lo que más se hace— y se
+   * inclinan arrastrando un extremo: los dos se mueven en precio y en tiempo, y
+   * por dentro se desplaza entera. El gesto es el de los recuadros y comparten
+   * `arming` con ellos y con la caja simulada.
+   */
+  var LINE_KINDS = [
+    { id: "H4", label: "H4", name: "línea de H4" },
+    { id: "H1", label: "H1", name: "línea de H1" },
+    { id: "M15", label: "M15", name: "línea de M15" }
+  ];
+
+  var LINE_ARM = "line:";
+
+  function armedLine() {
+    var arming = state.arming;
+    if (!arming || String(arming).indexOf(LINE_ARM) !== 0) { return null; }
+    return String(arming).slice(LINE_ARM.length);
+  }
+
+  function lineColor(kind) { return COLORS.lines[kind]; }
+
+  function lineName(kind) {
+    var found = LINE_KINDS.filter(function (item) { return item.id === kind; })[0];
+    return found ? found.name : kind;
+  }
+
+  var LINE_CURSORS = { left: "ew-resize", right: "ew-resize", body: "move" };
+
+  /* Dónde empiezan las líneas dentro de `layout.shapes`, igual que los
+   * recuadros: es lo que permite mover sólo la que se arrastra. */
+  var lineIndex = null;
+
+  var lineDrag = null;
+
+  /* Se numeran POR TEMPORALIDAD: la segunda de H4 es «H4 2» aunque entre las
+   * dos se haya trazado una de H1. */
+  function lineShapes() {
+    var seen = {};
+    return state.lines.map(function (line, position) {
+      var color = lineColor(line.kind);
+      seen[line.kind] = (seen[line.kind] || 0) + 1;
+      return {
+        type: "line", name: "line-" + position, xref: "x", yref: "y",
+        x0: iso(line.from), x1: iso(line.to), y0: line.left, y1: line.right,
+        line: { color: color, width: 2.2 },
+        layer: "above",
+        label: {
+          text: lineName(line.kind) + " " + seen[line.kind] + " (a mano)",
+          textposition: "top left",
+          font: { size: 11, color: color }
+        }
+      };
+    });
+  }
+
+  function armLine(kind) {
+    state.arming = armedLine() === kind ? null : LINE_ARM + kind;
+    draw();
+  }
+
+  /* La línea de salida: HORIZONTAL al precio del clic y de media ventana de
+   * ancho, centrada en él. Es un punto de partida para arrastrar, no una
+   * propuesta: el motor no ha dicho nada de ese precio. */
+  function plantLine(kind, point) {
+    var x = viewRange("x");
+    if (!x) { return; }
+    var half = Math.max(span(state.chart), Math.round((x[1] - x[0]) * 0.25));
+    var level = round_(point.price);
+    state.lines.push({
+      kind: kind,
+      from: point.minute - half,
+      to: point.minute + half,
+      left: level,
+      right: level
+    });
+    state.arming = null;
+    draw();
+  }
+
+  function undoLine() {
+    if (!state.lines.length) { return; }
+    state.lines.pop();
+    draw();
+  }
+
+  function clearLines() {
+    state.lines = [];
+    if (armedLine()) { state.arming = null; }
+    draw();
+  }
+
+  /* Una línea no puede darse la vuelta: el arrastre que cruza el otro extremo se
+   * queda a una vela, que es lo que impide un segmento de ancho cero o del
+   * revés. En vertical no hay nada que impedir: horizontal es justo como nace. */
+  function normalizeLine(line) {
+    if (line.to <= line.from) {
+      if (lineDrag && lineDrag.part === "left") {
+        line.from = line.to - span(state.chart);
+      } else {
+        line.to = line.from + span(state.chart);
+      }
+    }
+  }
+
+  /* Distancia del ratón al trazo, en píxeles: su proyección sobre el segmento,
+   * recortada a los extremos. Sin esto una línea inclinada sólo se dejaría
+   * agarrar en el punto donde coincide con el ratón en horizontal. */
+  function strokeDistance(cx, cy, a, b) {
+    var dx = b.x - a.x, dy = b.y - a.y;
+    var length = dx * dx + dy * dy;
+    var t = length ? ((cx - a.x) * dx + (cy - a.y) * dy) / length : 0;
+    t = Math.max(0, Math.min(1, t));
+    var x = a.x + t * dx, y = a.y + t * dy;
+    return Math.sqrt((cx - x) * (cx - x) + (cy - y) * (cy - y));
+  }
+
+  function nearPixel(cx, cy, point) {
+    return Math.abs(cx - point.x) <= GRAB && Math.abs(cy - point.y) <= GRAB;
+  }
+
+  /* Qué parte de una línea hay bajo el ratón. Los extremos ganan al trazo: son
+   * lo que la inclina, y con la línea corta todo ella cae dentro de la
+   * tolerancia de los dos. */
+  function linePartAt(box, line, cx, cy) {
+    var a = pixelAt(box, line.from, line.left);
+    var b = pixelAt(box, line.to, line.right);
+    if (!a || !b) { return null; }
+    if (nearPixel(cx, cy, a)) { return "left"; }
+    if (nearPixel(cx, cy, b)) { return "right"; }
+    return strokeDistance(cx, cy, a, b) <= GRAB ? "body" : null;
+  }
+
+  /* La última trazada está encima, así que se busca del final al principio. */
+  function lineHandleAt(box, cx, cy) {
+    for (var index = state.lines.length - 1; index >= 0; index -= 1) {
+      var part = linePartAt(box, state.lines[index], cx, cy);
+      if (part) { return { index: index, part: part }; }
+    }
+    return null;
+  }
+
+  function startLineDrag(event) {
+    // La caja simulada y los recuadros se registran antes y tienen preferencia:
+    // si uno de ellos ha agarrado el gesto, aquí no hay nada que hacer.
+    if (simDrag || rectDrag || axisDrag || state.arming || !state.lines.length) { return; }
+    var box = chartBox();
+    if (!box) { return; }
+    var hit = lineHandleAt(box, event.clientX, event.clientY);
+    if (!hit) { return; }
+    var origin = dataAt(box, event.clientX, event.clientY, true);
+    if (!origin) { return; }
+    var line = state.lines[hit.index];
+    lineDrag = {
+      index: hit.index, part: hit.part, origin: origin,
+      base: { from: line.from, to: line.to, left: line.left, right: line.right }
+    };
+    if (event.preventDefault) { event.preventDefault(); }
+    if (event.stopPropagation) { event.stopPropagation(); }
+  }
+
+  function moveLineDrag(event) {
+    if (simDrag || rectDrag || !lineDrag) { return; }
+    var box = chartBox();
+    var point = box && dataAt(box, event.clientX, event.clientY, true);
+    if (!point) { return; }
+    applyLineDrag(point);
+    if (event.preventDefault) { event.preventDefault(); }
+  }
+
+  function applyLineDrag(point) {
+    var line = state.lines[lineDrag.index], base = lineDrag.base, part = lineDrag.part;
+    if (part === "left") {
+      line.from = point.minute;
+      line.left = round_(point.price);
+    } else if (part === "right") {
+      line.to = point.minute;
+      line.right = round_(point.price);
+    } else {
+      // Por dentro se mueve la línea ENTERA: su inclinación es lo que se acaba
+      // de decidir y recolocarla no puede cambiarla por su cuenta.
+      var dy = point.price - lineDrag.origin.price;
+      var dx = point.minute - lineDrag.origin.minute;
+      line.from = base.from + dx;
+      line.to = base.to + dx;
+      line.left = round_(base.left + dy);
+      line.right = round_(base.right + dy);
+    }
+    normalizeLine(line);
+    redrawLines();
+  }
+
+  /* Igual que los recuadros: durante el arrastre se mueven sólo las formas de
+   * las líneas, no la figura entera. */
+  function redrawLines() {
+    var chart = document.getElementById("chart");
+    if (lineIndex === null || !chart || typeof Plotly === "undefined" || !Plotly.relayout) {
+      draw();
+      return;
+    }
+    var update = {};
+    lineShapes().forEach(function (shape, position) {
+      var key = "shapes[" + (lineIndex + position) + "]";
+      update[key + ".x0"] = shape.x0;
+      update[key + ".x1"] = shape.x1;
+      update[key + ".y0"] = shape.y0;
+      update[key + ".y1"] = shape.y1;
+    });
+    Plotly.relayout(chart, update);
+  }
+
+  function endLineDrag() {
+    if (!lineDrag) { return; }
+    lineDrag = null;
+    draw();
+  }
+
+  /* Cuántas hay de cada temporalidad, en el orden de los botones y sin nombrar
+   * las que no se han trazado. */
+  function lineCounts() {
+    var counts = {};
+    state.lines.forEach(function (line) {
+      counts[line.kind] = (counts[line.kind] || 0) + 1;
+    });
+    return LINE_KINDS.filter(function (kind) {
+      return counts[kind.id];
+    }).map(function (kind) {
+      return counts[kind.id] + " " + kind.label;
+    }).join(" · ");
+  }
+
+  /* Qué líneas hay trazadas. Un trazo sobre el precio se lee como un nivel que
+   * ha encontrado alguien: el estado tiene que decir que lo ha puesto una mano y
+   * que detrás no hay ninguna regla. */
+  function lineCaption() {
+    var armed = armedLine();
+    if (armed) {
+      return lineName(armed).toUpperCase() + " ARMADA: pulsa sobre el gráfico " +
+        "para plantarla, o Escape para dejarla";
+    }
+    if (!state.lines.length) { return null; }
+    return "líneas marcadas a mano: " + state.lines.length +
+      " (" + lineCounts() + ")" +
+      " · las traza el propietario para señalar lo que quiere explicar: NO las " +
+      "ha dibujado el motor, no hay ninguna regla detrás y no salen de la pantalla";
+  }
+
+  function buildLineButtons() {
+    var container = document.getElementById("line-buttons");
+    if (!container) { return; }
+    LINE_KINDS.forEach(function (kind) {
+      var button = document.createElement("button");
+      button.type = "button";
+      button.textContent = kind.label;
+      button.dataset.kind = kind.id;
+      button.title = "Arma la " + kind.name + ": el clic siguiente sobre el\n" +
+        "gráfico la planta ahí, horizontal al precio pulsado. Escape desarma.\n" +
+        "El nombre dice la temporalidad que estás marcando; la dibujas tú y el\n" +
+        "motor no la ve.";
+      button.addEventListener("click", function () { armLine(kind.id); });
+      container.appendChild(button);
+    });
+  }
+
+  function bindLines() {
+    var chart = document.getElementById("chart");
+    document.getElementById("line-undo").addEventListener("click", undoLine);
+    document.getElementById("line-clear").addEventListener("click", clearLines);
+    if (!chart || !chart.addEventListener || !document.addEventListener) { return; }
+    chart.addEventListener("mousedown", startLineDrag, true);
+    document.addEventListener("mousemove", moveLineDrag);
+    document.addEventListener("mouseup", endLineDrag);
+  }
+
+  /* --- El Fibonacci a mano (I.5) --------------------------------------------
+   *
+   * Una REGLA para medir retrocesos que planta el PROPIETARIO. Se traza con DOS
+   * CLICS: el primero clava el 0 y el segundo el 100, así que la dirección la
+   * decide él —el 0 arriba en un retroceso bajista, abajo en uno alcista— y no
+   * hay que darle la vuelta a nada después.
+   *
+   * Los porcentajes que se dibujan vienen en el payload: hoy son el 0, el 50,
+   * el 70,5, el 72, el 79 y el 100, y se cuentan SIEMPRE desde el 0 hacia el
+   * 100, que es lo que hace que el 79 esté cerca del 100 y no al revés. El
+   * tramo se estira un poco a la derecha del ancla del 100: un retroceso se
+   * mira hacia adelante.
+   *
+   * NO ES CAPA DEL MOTOR. Nadie ha medido ese retroceso, no hay ninguna regla
+   * detrás, no sale de la pantalla y el motor no se entera de que existe. Va en
+   * GRIS y no en un color porque no marca nada: es una regla, y lo que la
+   * identifica son sus porcentajes escritos al lado. La única excepción es la
+   * GOLD ZONE —el 70,5, que también viene en el payload—: va en AMARILLO y con
+   * su nombre, porque es el nivel que el propietario quiere ver de un vistazo.
+   *
+   * Después se arrastra, como los recuadros y las líneas: cada ancla se mueve
+   * sola y por dentro se desplaza el conjunto entero. Escape suelta el botón, y
+   * también el 0 ya clavado cuando falta el segundo clic.
+   */
+  var FIB_ARM = "fib";
+
+  function armedFib() { return state.arming === FIB_ARM; }
+
+  function fibLevels() { return DATA.meta.fibLevels || []; }
+
+  /* El nivel de la gold zone, o `null` si el payload no lo declara. */
+  function fibGold() {
+    var level = DATA.meta.fibGold;
+    return level === undefined ? null : level;
+  }
+
+  function isGold(level) { return fibGold() !== null && level === fibGold(); }
+
+  function fibColor() { return COLORS.fib; }
+
+  /* La gold zone lleva su color; sin él en la paleta, el del resto. */
+  function fibLevelColor(level) {
+    return isGold(level) ? (COLORS.fibGold || fibColor()) : fibColor();
+  }
+
+  /* El porcentaje escrito como se lee: «70,5 %», no «70.5 %». */
+  function fibLabel(level) {
+    return String(level).replace(".", ",") + " %";
+  }
+
+  /* Cuánto se estira el dibujo más allá del ancla del 100, en partes del tramo
+   * medido. Es dibujo: los niveles siguen siendo los mismos, sólo se ven venir. */
+  var FIB_AHEAD = 0.4;
+
+  var FIB_CURSORS = { zero: "ns-resize", hundred: "ns-resize", body: "move" };
+
+  /* Dónde empiezan los Fibonacci dentro de `layout.shapes`, igual que las
+   * líneas: es lo que permite mover sólo el que se arrastra. */
+  var fibIndex = null;
+
+  var fibDrag = null;
+
+  /* El precio de un porcentaje, contado desde el 0 hacia el 100. */
+  function fibPrice(fib, level) {
+    return fib.zero + (fib.hundred - fib.zero) * level / 100;
+  }
+
+  /* De dónde a dónde se pinta: del ancla más a la izquierda a la más a la
+   * derecha, más el tramo de adelanto. */
+  function fibSpan(fib) {
+    var from = Math.min(fib.from, fib.to);
+    var to = Math.max(fib.from, fib.to);
+    return { from: from, to: to + Math.round((to - from) * FIB_AHEAD) };
+  }
+
+  function fibShapes() {
+    var shapes = [];
+    state.fibs.forEach(function (fib, position) {
+      var edges = fibSpan(fib);
+      fibLevels().forEach(function (level) {
+        var value = round_(fibPrice(fib, level));
+        var edge = level === 0 || level === 100;
+        var gold = isGold(level);
+        shapes.push({
+          type: "line", name: "fib-" + position + "-" + level, xref: "x", yref: "y",
+          x0: iso(edges.from), x1: iso(edges.to), y0: value, y1: value,
+          line: {
+            color: fibLevelColor(level),
+            width: edge || gold ? 2 : 1.2,
+            dash: edge ? "solid" : "dash"
+          },
+          layer: "above",
+          label: {
+            text: (level === 0 ? "Fib " + (position + 1) + " (a mano) · " : "") +
+              (gold ? "GOLD ZONE " : "") + fibLabel(level) + " · " + price(value),
+            textposition: "top left",
+            font: { size: 11, color: fibLevelColor(level) }
+          }
+        });
+      });
+    });
+    // El 0 ya clavado mientras se espera el clic del 100: sin esto, el primer
+    // clic no deja rastro y parece que no ha pasado nada.
+    var draft = state.fibDraft;
+    if (draft) {
+      var half = Math.max(span(state.chart), Math.round(draft.width));
+      shapes.push({
+        type: "line", name: "fib-draft", xref: "x", yref: "y",
+        x0: iso(draft.minute - half), x1: iso(draft.minute + half),
+        y0: draft.price, y1: draft.price,
+        line: { color: fibColor(), width: 2, dash: "dot" },
+        layer: "above",
+        label: {
+          text: "0 % · " + price(draft.price) + " · pulsa dónde va el 100",
+          textposition: "top left",
+          font: { size: 11, color: fibColor() }
+        }
+      });
+    }
+    return shapes;
+  }
+
+  function armFib() {
+    state.arming = armedFib() ? null : FIB_ARM;
+    state.fibDraft = null;
+    draw();
+  }
+
+  /* Los dos clics. El primero deja el 0 clavado y el botón SIGUE armado: hasta
+   * que no se dice dónde va el 100 no hay retroceso que medir. */
+  function plantFib(point) {
+    var x = viewRange("x");
+    if (!x) { return; }
+    if (!state.fibDraft) {
+      state.fibDraft = {
+        minute: point.minute,
+        price: round_(point.price),
+        width: Math.round((x[1] - x[0]) * 0.12)
+      };
+      draw();
+      return;
+    }
+    var draft = state.fibDraft;
+    state.fibs.push({
+      from: draft.minute,
+      to: point.minute,
+      zero: draft.price,
+      hundred: round_(point.price)
+    });
+    state.fibDraft = null;
+    state.arming = null;
+    normalizeFib(state.fibs[state.fibs.length - 1]);
+    draw();
+  }
+
+  function undoFib() {
+    if (state.fibDraft) { state.fibDraft = null; draw(); return; }
+    if (!state.fibs.length) { return; }
+    state.fibs.pop();
+    draw();
+  }
+
+  function clearFibs() {
+    state.fibs = [];
+    state.fibDraft = null;
+    if (armedFib()) { state.arming = null; }
+    draw();
+  }
+
+  /* Un Fibonacci sin recorrido no mide nada: todos los niveles caerían en el
+   * mismo precio. El ancla que no se está moviendo se queda quieta y la otra se
+   * separa un pip, que es lo mínimo que el gráfico distingue. */
+  function normalizeFib(fib) {
+    if (Math.abs(fib.hundred - fib.zero) >= PIP) { return; }
+    if (fibDrag && fibDrag.part === "zero") {
+      fib.zero = round_(fib.hundred - PIP);
+    } else {
+      fib.hundred = round_(fib.zero + PIP);
+    }
+  }
+
+  /* Qué parte hay bajo el ratón. Las dos anclas ganan a los niveles: son lo que
+   * define el retroceso, y con el tramo corto todo cae dentro de la tolerancia. */
+  function fibPartAt(box, fib, cx, cy) {
+    var zero = pixelAt(box, fib.from, fib.zero);
+    var hundred = pixelAt(box, fib.to, fib.hundred);
+    if (!zero || !hundred) { return null; }
+    if (nearPixel(cx, cy, zero)) { return "zero"; }
+    if (nearPixel(cx, cy, hundred)) { return "hundred"; }
+    var edges = fibSpan(fib);
+    var hit = fibLevels().filter(function (level) {
+      var a = pixelAt(box, edges.from, fibPrice(fib, level));
+      var b = pixelAt(box, edges.to, fibPrice(fib, level));
+      return a && b && strokeDistance(cx, cy, a, b) <= GRAB;
+    });
+    return hit.length ? "body" : null;
+  }
+
+  /* El último trazado está encima, así que se busca del final al principio. */
+  function fibHandleAt(box, cx, cy) {
+    for (var index = state.fibs.length - 1; index >= 0; index -= 1) {
+      var part = fibPartAt(box, state.fibs[index], cx, cy);
+      if (part) { return { index: index, part: part }; }
+    }
+    return null;
+  }
+
+  function startFibDrag(event) {
+    // La caja simulada, los recuadros y las líneas se registran antes y tienen
+    // preferencia: si uno de ellos ha agarrado el gesto, aquí no hay nada que hacer.
+    if (simDrag || rectDrag || lineDrag || axisDrag) { return; }
+    if (state.arming || !state.fibs.length) { return; }
+    var box = chartBox();
+    if (!box) { return; }
+    var hit = fibHandleAt(box, event.clientX, event.clientY);
+    if (!hit) { return; }
+    var origin = dataAt(box, event.clientX, event.clientY, true);
+    if (!origin) { return; }
+    var fib = state.fibs[hit.index];
+    fibDrag = {
+      index: hit.index, part: hit.part, origin: origin,
+      base: { from: fib.from, to: fib.to, zero: fib.zero, hundred: fib.hundred }
+    };
+    if (event.preventDefault) { event.preventDefault(); }
+    if (event.stopPropagation) { event.stopPropagation(); }
+  }
+
+  function moveFibDrag(event) {
+    if (simDrag || rectDrag || lineDrag || !fibDrag) { return; }
+    var box = chartBox();
+    var point = box && dataAt(box, event.clientX, event.clientY, true);
+    if (!point) { return; }
+    applyFibDrag(point);
+    if (event.preventDefault) { event.preventDefault(); }
+  }
+
+  function applyFibDrag(point) {
+    var fib = state.fibs[fibDrag.index], base = fibDrag.base, part = fibDrag.part;
+    if (part === "zero") {
+      fib.from = point.minute;
+      fib.zero = round_(point.price);
+    } else if (part === "hundred") {
+      fib.to = point.minute;
+      fib.hundred = round_(point.price);
+    } else {
+      // Por dentro se mueve el conjunto ENTERO: el retroceso medido es lo que se
+      // acaba de decidir y recolocarlo no puede cambiarlo por su cuenta.
+      var dy = point.price - fibDrag.origin.price;
+      var dx = point.minute - fibDrag.origin.minute;
+      fib.from = base.from + dx;
+      fib.to = base.to + dx;
+      fib.zero = round_(base.zero + dy);
+      fib.hundred = round_(base.hundred + dy);
+    }
+    normalizeFib(fib);
+    redrawFibs();
+  }
+
+  /* Igual que las líneas: durante el arrastre se mueven sólo las formas del
+   * Fibonacci, no la figura entera. */
+  function redrawFibs() {
+    var chart = document.getElementById("chart");
+    if (fibIndex === null || !chart || typeof Plotly === "undefined" || !Plotly.relayout) {
+      draw();
+      return;
+    }
+    var update = {};
+    fibShapes().forEach(function (shape, position) {
+      var key = "shapes[" + (fibIndex + position) + "]";
+      update[key + ".x0"] = shape.x0;
+      update[key + ".x1"] = shape.x1;
+      update[key + ".y0"] = shape.y0;
+      update[key + ".y1"] = shape.y1;
+      update[key + ".label.text"] = shape.label.text;
+    });
+    Plotly.relayout(chart, update);
+  }
+
+  function endFibDrag() {
+    if (!fibDrag) { return; }
+    fibDrag = null;
+    draw();
+  }
+
+  /* Qué Fibonacci hay trazados. Cinco rayas con porcentajes se leen como una
+   * medida que ha hecho alguien: el estado tiene que decir que la ha puesto una
+   * mano y que detrás no hay ninguna regla. */
+  function fibCaption() {
+    if (state.fibDraft) {
+      return "FIBONACCI a medias: el 0 está en " + price(state.fibDraft.price) +
+        " · pulsa sobre el gráfico dónde va el 100, o Escape para dejarlo";
+    }
+    if (armedFib()) {
+      return "FIBONACCI ARMADO: el primer clic clava el 0 y el segundo el 100, " +
+        "o Escape para dejarlo";
+    }
+    if (!state.fibs.length) { return null; }
+    return "Fibonacci trazados a mano: " + state.fibs.length +
+      " (niveles " + fibLevels().map(fibLabel).join(", ") + ", contados del 0 al 100" +
+      (fibGold() !== null ? "; el " + fibLabel(fibGold()) + " es la GOLD ZONE, en amarillo" : "") +
+      ")" +
+      " · los mide el propietario para explicar un retroceso: NO los ha " +
+      "calculado el motor, no hay ninguna regla detrás y no salen de la pantalla";
+  }
+
+  function buildFibButtons() {
+    var container = document.getElementById("fib-buttons");
+    if (!container) { return; }
+    var button = document.createElement("button");
+    button.type = "button";
+    button.textContent = "Fibonacci";
+    button.dataset.kind = FIB_ARM;
+    button.title = "Arma el Fibonacci: el primer clic sobre el gráfico clava el 0\n" +
+      "y el segundo el 100, así que la dirección la eliges tú. Se dibujan los\n" +
+      "niveles " + fibLevels().join(", ") + " %, contados del 0 al 100. Escape\n" +
+      "desarma. Lo mides tú: el motor no lo ve.";
+    button.addEventListener("click", armFib);
+    container.appendChild(button);
+  }
+
+  function bindFibs() {
+    var chart = document.getElementById("chart");
+    document.getElementById("fib-undo").addEventListener("click", undoFib);
+    document.getElementById("fib-clear").addEventListener("click", clearFibs);
+    if (!chart || !chart.addEventListener || !document.addEventListener) { return; }
+    chart.addEventListener("mousedown", startFibDrag, true);
+    document.addEventListener("mousemove", moveFibDrag);
+    document.addEventListener("mouseup", endFibDrag);
   }
 
   /* --- Cuenta simulada (I.2) -------------------------------------------------
@@ -3349,6 +2936,24 @@
     return shapes.concat(boxes);
   }
 
+  /* Y por encima de los recuadros, las líneas a mano (I.4): son lo último que
+   * se planta y lo que se está señalando. Se apunta dónde empiezan por lo mismo
+   * que los recuadros: para arrastrar una sin rehacer la figura entera. */
+  function lineShapes_(shapes) {
+    var strokes = lineShapes();
+    lineIndex = strokes.length ? shapes.length : null;
+    return shapes.concat(strokes);
+  }
+
+  /* Y encima de las líneas, el Fibonacci a mano (I.5): es la regla con la que
+   * se está midiendo, así que no puede quedar debajo de lo que mide. Se apunta
+   * dónde empieza por lo mismo que las líneas. */
+  function fibShapes_(shapes) {
+    var rules = fibShapes();
+    fibIndex = rules.length ? shapes.length : null;
+    return shapes.concat(rules);
+  }
+
   function layout(range) {
     var x = xRange(range);
     var figure = {
@@ -3366,29 +2971,24 @@
       dragmode: "pan",
       showlegend: true,
       legend: { orientation: "h", y: 1.04, x: 0, font: { size: 11 } },
-      shapes: rectShapes_(simShapes_(limboShapes(range))),
+      shapes: fibShapes_(lineShapes_(rectShapes_(simShapes_(limboShapes(range))))),
       xaxis: {
         type: "date", gridcolor: COLORS.grid, rangeslider: { visible: false },
         // El rango va siempre con su `autorange`: si se diera uno sin apagar el
         // otro, Plotly reescalaría el eje y el encuadre no aguantaría el paso.
         range: x, autorange: x ? false : true,
-        // Las fechas van al pie de la figura, que con el RSI puesto es el suelo
-        // de SU panel: los dos comparten el mismo eje de tiempo.
-        anchor: rsiOn() ? "y2" : "y",
+        anchor: "y",
         title: { text: "UTC", font: { size: 11, color: COLORS.muted } }
       },
       yaxis: {
         gridcolor: COLORS.grid, tickformat: "." + DECIMALS + "f", fixedrange: false,
-        // El precio deja abajo la franja del RSI. `plotBox` lee este mismo
-        // reparto: es lo que mantiene los tiradores donde se ve la línea.
-        domain: priceDomain(),
+        domain: [0, 1],
         // Sin esto el eje de precios se rehace en cada paso y el gráfico "salta"
         // en vertical: con encuadre manual manda lo que fijó el propietario.
         range: state.zoom.y || undefined,
         autorange: state.zoom.y ? false : true
       }
     };
-    if (rsiOn()) { figure.yaxis2 = rsiAxis(); }
     return figure;
   }
 
@@ -3398,28 +2998,14 @@
     if (state.replay && state.zoom.x) { state.zoom.x = followX(state.zoom.x, now_()); }
     var range = bounds();
     var cut = slice(range);
-    // El marco va justo detrás de las velas: es el contorno del ID entero y
-    // encima de sus líneas competiría con lo que se está auditando.
     var traces = priceTraces(cut)
-      // Las zonas van las primeras: son cajas con relleno y encima de cualquier
-      // línea taparían justo lo que se audita.
-      .concat(zoneTraces(range))
-      // La acumulación y la caja del retroceso son rellenos: van con las zonas,
-      // detrás de todo lo que es línea o marca.
+      // La acumulación es un relleno: va detrás de todo lo que es línea o marca.
       .concat(accumulationTraces(range))
-      .concat(pullbackTraces(range))
-      .concat(frameTraces(range))
       .concat(impulseTraces(range))
-      .concat(stepTraces(range))
       .concat(midTraces(range))
       .concat(markerTraces(range))
-      .concat(avoidedTraces(range))
-      .concat(signalTraces(range))
       .concat(contactTraces(range))
-      .concat(wrongExtremeTraces(range))
-      // Y en su propio panel, abajo del todo: el RSI no comparte eje con nada
-      // de lo de arriba, así que da igual dónde se apile.
-      .concat(rsiTraces(cut));
+      .concat(wrongExtremeTraces(range));
 
     Plotly.react("chart", traces, layout(range), {
       responsive: true, scrollZoom: true, displaylogo: false,
@@ -3436,22 +3022,16 @@
   }
 
   /* Las capas que el nivel de ruido puede apagar, con el nombre que llevan en el
-   * control. Sólo se nombran las que la corrida podría dibujar: decir «escalera
-   * apagada» en un explorador sin extensiones haría buscar una capa que no
-   * existe. */
+   * control. Sólo se nombran las que la corrida podría dibujar: decir
+   * «acumulación apagada» en un explorador sin acumulaciones haría buscar una
+   * capa que no existe. */
   var NOISE_NAMES = [
     ["limbo", "limbo", function () { return true; }],
     ["marks", "constituciones y roturas", function () { return true; }],
     ["contacts", "contactos", function () { return true; }],
     ["mid", "nivel 50 %", function () { return true; }],
     ["wrong", "extremo de color contrario", function () { return true; }],
-    ["frame", "marco del ID", function () { return true; }],
-    ["zones", "zonas del ID (UL, PUL y APUL)", hasZones],
-    ["pullback", "caja 50 % del retroceso", hasPullbacks],
-    ["accumulation", "acumulación", hasAccumulations],
-    ["signals", "señales de zona", hasSignals],
-    ["avoided", "roturas evitadas", hasAvoided],
-    ["steps", "escalera del extremo", hasSteps]
+    ["accumulation", "acumulación", hasAccumulations]
   ];
 
   /* Qué nivel de ruido está puesto y qué se está dejando fuera por él. Un
@@ -3484,6 +3064,11 @@
     // propietario y en la ciega marcar dónde se ve una zona es justo el gesto
     // de la prueba.
     var recuadros = rectCaption();
+    // Y las líneas, por lo mismo que los recuadros.
+    var lineas = lineCaption();
+    // Y el Fibonacci, por lo mismo: es una medida, y una medida sin dueño se lee
+    // como que la ha hecho el motor.
+    var fibonacci = fibCaption();
     if (blindfolded()) {
       return "AUDITORÍA CIEGA · semilla " + state.seed + " · " + label(state.chart) + " · " +
         range.from + " → " + range.to + " · " + visible.toLocaleString("es-ES") +
@@ -3491,6 +3076,8 @@
         state.scope.from + " → " + state.scope.to + "." +
         (simulada ? " · " + simulada : "") +
         (recuadros ? " · " + recuadros : "") +
+        (lineas ? " · " + lineas : "") +
+        (fibonacci ? " · " + fibonacci : "") +
         (cuenta ? " · " + cuenta : "");
     }
     var dibujados = overlays().filter(isVisible).map(function (timeframe) {
@@ -3532,117 +3119,6 @@
         (state.visible === "current" ? "ID actual" : "ID actual + anterior") +
         "»: los demás siguen en los datos y en los informes";
     }
-    if (state.frame) {
-      // De quién son los marcos que se están viendo. En este gráfico hay hasta
-      // dos temporalidades y sin decirlo, un marco ausente se lee como que ahí
-      // no había ID.
-      var marcos = overlays().filter(isVisible).map(function (timeframe) {
-        var allowed = visibleIds(timeframe, edges);
-        var cuantos = impulsesOf(timeframe).list.filter(function (impulse) {
-          return impulse.x1 >= edges.lo && impulse.x0 <= knownUntil(timeframe, edges) &&
-            keeps(allowed, impulse.id);
-        }).length;
-        return cuantos.toLocaleString("es-ES") + " de " + label(timeframe);
-      });
-      text += " · marcos de ID dibujados: " +
-        (marcos.length ? marcos.join(", ") : "ninguno") +
-        " · cada temporalidad con su color: el recuadro va de la vela que " +
-        "constituye el ID a la que lo mata, y de su ancla a su extremo · con el " +
-        "ID vivo llega al presente y se remarca cada vez que el extremo se estira";
-    }
-    if (hasZones() && !zonesAvailable()) {
-      text += " · las zonas de la fase 2.0 se calcularon sobre " +
-        DATA.meta.legStartMode + " y las capas que cuelgan de ellas —las señales— " +
-        "no se dibujan en otro modo: serían de impulsos que en este " +
-        "modo no existen";
-    }
-    if (zonesAvailable() && state.zones) {
-      // Cuántas cajas hay, DE QUÉ ID son y CUÁLES. Sin lo segundo, un histórico
-      // entero con dos recuadros se lee como que a los demás ID les faltan las
-      // zonas, cuando lo que pasa es que aquí sólo se dibujan las del ID que se
-      // mira; sin lo tercero no se ve de un vistazo qué se está mirando.
-      var cajas = overlays().filter(isVisible).map(function (timeframe) {
-        var allowed = zoneIds(timeframe, edges);
-        var dibujadas = zonesOf(timeframe).filter(function (zone) {
-          return zone.x1 >= edges.lo && zone.xd <= edges.hi &&
-            !pending(zone.x0, timeframe, edges) && keeps(allowed, zone.id);
-        });
-        var tipos = [];
-        dibujadas.forEach(function (zone) {
-          if (tipos.indexOf(zone.k) < 0) { tipos.push(zone.k); }
-        });
-        return dibujadas.length.toLocaleString("es-ES") + " de " + label(timeframe) +
-          (tipos.length ? " (" + tipos.join(" + ") + ")" : "");
-      });
-      text += " · zonas dibujadas: " + (cajas.length ? cajas.join(", ") : "ninguna") +
-        " · SÓLO LAS DEL ID " +
-        (state.visible === "pair" ? "ACTUAL Y SU ANTERIOR" : "ACTUAL") +
-        (state.visible === "all"
-          ? " (con «Todos» las zonas se quedan en el ID actual: las de ocho años " +
-            "de historia taparían el precio; los demás ID siguen con su marco)"
-          : ", los demás ID siguen con su marco") +
-        " · el tramo atenuado va de la vela que define la zona a la constitución " +
-        "del ID: ahí todavía no existía" +
-        " · el UL es el extremo de ESTE ID y el PUL el del ID ANTERIOR: su " +
-        "cuerpo si aquel ID iba al revés, su MECHA —el UL viejo tal cual— si iba " +
-        "en el mismo sentido" +
-        " · cuando ese extremo no sirve el ID no lleva PUL sino APUL, punteado, " +
-        "en sus tres casos: la zona HEREDADA del ID anterior que iba al revés, el " +
-        "UL de ese mismo ID cuando su EXTREMO quedó por detrás del ancla, o el " +
-        "extremo del último ID interior del RETROCESO anterior. El globo de la " +
-        "zona dice cuál" +
-        (DATA.meta.breakByZone
-          ? " (fase 2.1: su borde exterior es el nivel de rotura en contra)"
-          : "");
-    } else if (zonesAvailable()) {
-      // Apagada a mano: quien viene de la fase 2.0 leería la ausencia de las
-      // cajas como un fallo del motor.
-      text += " · las zonas UL, PUL y APUL no se están dibujando (capa apagada): " +
-        "siguen en los datos, en los informes y bajo las señales";
-    }
-    if (hasSignals() && state.signals && zonesAvailable()) {
-      var senales = visibleSignals(edges);
-      var porTipo = SIGNAL_KINDS.map(function (kind) {
-        return senales.filter(function (item) { return item.k === kind; }).length +
-          " " + kind;
-      }).join(", ");
-      // Una capa de señales que no dice cuántas hay se lee como que ahí no pasó
-      // nada; y una que no dice que es sólo dibujo se lee como una entrada.
-      text += " · señales de zona a la vista: " + senales.length.toLocaleString("es-ES") +
-        " (" + porTipo + ") de " + label(primary()) +
-        " · SON DIBUJO: no abren ni cierran nada, no hay entradas en el proyecto";
-    }
-    if (hasAvoided() && state.avoided && isVisible(primary())) {
-      var allowedAvoided = visibleIds(primary(), edges);
-      var evitadas = avoidedOf(primary()).filter(function (item) {
-        return item.x >= edges.lo && item.x <= edges.hi && keeps(allowedAvoided, item.id);
-      }).length;
-      text += " · roturas evitadas a la vista: " + evitadas.toLocaleString("es-ES") +
-        " (velas que con la regla antigua habrían matado el ID)";
-    }
-    if (hasPullbacks() && zonesAvailable() && state.pullback) {
-      var cajas50 = [];
-      overlays().filter(isVisible).forEach(function (timeframe) {
-        var allowed50 = zoneIds(timeframe, edges);
-        var until50 = knownUntil(timeframe, edges);
-        pullbacksOf(timeframe).forEach(function (box) {
-          if (box.x1 < edges.lo || box.x0 > edges.hi) { return; }
-          if (pending(box.x0, timeframe, edges) || !keeps(allowed50, box.id)) { return; }
-          cajas50.push("ID " + timeframe + " nº " + box.id + ": 50 % en " + price(box.m) +
-            " (" + price(box.lo) + " → " + price(box.hi) + "), " +
-            (box.pace ? "tendencia " + box.pace + " → esperar " +
-              (box.pace === "rapida" ? "el PUL" : "el 50 %") : "sin paso") +
-            (box.xp !== null && box.xp <= until50 ? ", llegó al PUL" : "") +
-            (box.xm !== null && box.xm <= until50 ? ", llegó al 50 %" : "") +
-            (box.c ? ", CONFLUYE con el 50 % del ID " + box.c.tf + " nº " + box.c.id : ""));
-        });
-      });
-      text += " · caja 50 % del retroceso (del ancla al PUL, la del mentor; NO es " +
-        "el nivel 50 % del ID): " + (cajas50.length ? cajas50.join("; ") : "ninguna a la vista") +
-        " · sólo la llevan los ID con PUL y sólo se dibuja la del ID que se mira";
-    } else if (hasPullbacks() && zonesAvailable()) {
-      text += " · la caja 50 % del retroceso no se está dibujando (capa apagada)";
-    }
     if (hasAccumulations() && state.accumulation) {
       var acumulando = [];
       overlays().filter(isVisible).forEach(function (timeframe) {
@@ -3659,28 +3135,6 @@
         " · el sombreado empieza en el toque que completa la firma, no en la constitución";
     } else if (hasAccumulations()) {
       text += " · la acumulación no se está dibujando (capa apagada)";
-    }
-    var indice = rsiNote(cut);
-    if (indice) { text += " · " + indice; }
-    if (hasSteps()) {
-      var escalones = 0;
-      var estirados = 0;
-      overlays().filter(isVisible).forEach(function (timeframe) {
-        var allowedSteps = visibleIds(timeframe, edges);
-        impulsesOf(timeframe).list.forEach(function (impulse) {
-          if (!impulse.st) { return; }
-          if (impulse.x1 < edges.lo || drawnFrom(impulse) > edges.hi) { return; }
-          if (pending(impulse.x0, timeframe, edges)) { return; }
-          if (!keeps(allowedSteps, impulse.id)) { return; }
-          estirados += 1;
-          escalones += extremeSteps(impulse, timeframe, edges).length - 1;
-        });
-      });
-      text += " · extremo estirado (§3.2): " + estirados.toLocaleString("es-ES") +
-        " ID a la vista con " + escalones.toLocaleString("es-ES") + " saltos. " +
-        "La línea del extremo va EN ESCALERA: cada tramo es el nivel que estaba " +
-        "puesto en ese momento, no el del final" +
-        (state.steps ? "" : " (capa de saltos APAGADA: los escalones se dibujan igual)");
     }
     var info = modeInfo(state.mode);
     if (info) {
@@ -3708,6 +3162,8 @@
     }
     if (simulada) { text += " · " + simulada; }
     if (recuadros) { text += " · " + recuadros; }
+    if (lineas) { text += " · " + lineas; }
+    if (fibonacci) { text += " · " + fibonacci; }
     if (cuenta) { text += " · " + cuenta; }
     return text;
   }
@@ -3941,58 +3397,6 @@
     });
   }
 
-  /* Lo que la corrida NO trae no se puede encender, lo pida quien lo pida: ni el
-   * estado de salida ni un nivel de ruido. Se aplica en un solo sitio y después
-   * de cada preset, porque el preset no sabe qué llevaba el payload. */
-  function enforceAvailability() {
-    if (!hasZones()) { state.zones = false; }
-    if (!hasPullbacks()) { state.pullback = false; }
-    if (!hasAccumulations()) { state.accumulation = false; }
-    if (!hasSignals()) { state.signals = false; }
-    if (!hasSteps()) { state.steps = false; }
-    if (!hasAvoided()) { state.avoided = false; }
-  }
-
-  /* Sin zonas en la corrida no hay ni un recuadro que pintar, y una casilla que
-   * no puede dibujar nada sólo hace dudar de si está fallando. */
-  function buildZoneLayers() {
-    if (hasZones()) { return; }
-    hide("zone-layers");
-  }
-
-  /* La caja del retroceso cuelga de las zonas —sin PUL no hay caja— y la
-   * acumulación de los contactos: cada una se esconde por su cuenta cuando la
-   * corrida no trae ni una. */
-  function buildAnalysisLayers() {
-    if (!hasPullbacks()) { hide("pullback-layer"); }
-    if (!hasAccumulations()) { hide("accumulation-layer"); }
-    if (hasPullbacks() || hasAccumulations()) { return; }
-    hide("analysis-layers");
-  }
-
-  /* Mismo criterio para las señales: sin zonas no hay ni una, y una casilla que
-   * no puede dibujar nada sólo hace dudar de si está fallando. */
-  function buildSignalLayers() {
-    if (hasSignals()) { return; }
-    hide("signal-layers");
-  }
-
-  /* Fase 2.1, mismo criterio: con `break_by_zone: false` no hay ni una rotura
-   * evitada, y una casilla que no puede dibujar nada sólo hace dudar. */
-  function buildBreakLayers() {
-    // Las dos casillas se apagan por separado: puede haber roturas evitadas en
-    // contra —que no mueven el extremo— sin una sola extensión, y al revés.
-    if (!hasSteps()) { hide("steps-layer"); }
-    if (!hasAvoided()) { hide("avoided-layer"); }
-    if (hasAvoided() || hasSteps()) { return; }
-    hide("break-layers");
-  }
-
-  function hide(id) {
-    var element = document.getElementById(id);
-    if (element && element.style) { element.style.display = "none"; }
-  }
-
   /* H.1 — un botón por nivel de ruido. Sólo mueve casillas que ya existían: lo
    * que el nivel decide es cuántas cosas se dibujan a la vez, nunca qué se
    * calcula. */
@@ -4002,6 +3406,27 @@
     Object.keys(preset).forEach(function (key) { state[key] = preset[key]; });
     state.noise = id;
     enforceAvailability();
+  }
+
+  /* Lo que la corrida NO trae no se puede encender, lo pida quien lo pida: ni el
+   * estado de salida ni un nivel de ruido. Se aplica en un solo sitio y después
+   * de cada preset, porque el preset no sabe qué llevaba el payload. */
+  function enforceAvailability() {
+    if (!hasAccumulations()) { state.accumulation = false; }
+  }
+
+  /* La acumulación está aparcada: sin ninguna en la corrida no hay nada que
+   * pintar, y una casilla que no puede dibujar nada sólo hace dudar de si está
+   * fallando. */
+  function buildAnalysisLayers() {
+    if (hasAccumulations()) { return; }
+    hide("accumulation-layer");
+    hide("analysis-layers");
+  }
+
+  function hide(id) {
+    var element = document.getElementById(id);
+    if (element && element.style) { element.style.display = "none"; }
   }
 
   /* Cualquier casilla tocada a mano deja el nivel sin dueño: a partir de ahí lo
@@ -4061,9 +3486,8 @@
     });
   }
 
-  /* Las casillas de impulso cambian con el gráfico: en H1 son H1 y
-   * H4, y en H4 sólo H4 —el Diario se dibuja únicamente en su gráfico—. Se
-   * reconstruyen en cada cambio de temporalidad. */
+  /* Las casillas de impulso cambian con el gráfico —una por temporalidad que se
+   * dibuja en él— y se reconstruyen en cada cambio de temporalidad. */
   function buildImpulseLayers() {
     var container = document.getElementById("impulse-layers");
     container.innerHTML = "";
@@ -4178,31 +3602,34 @@
     document.getElementById("rect-undo").disabled = !state.rects.length;
     document.getElementById("rect-clear").disabled = !state.rects.length;
 
-    document.getElementById("layer-frame").checked = state.frame;
-    if (hasZones()) {
-      // Se calcularon sobre los impulsos del modo activo: en otro modo no hay
-      // ninguna zona de estos ID que enseñar.
-      document.getElementById("layer-zones").disabled = !zonesAvailable();
-      document.getElementById("layer-zones").checked = state.zones;
-    }
-    if (hasSignals()) {
-      // Se calcularon sobre las zonas del modo activo: en otro modo no hay nada
-      // que encender, igual que con las zonas.
-      document.getElementById("layer-signals").disabled = !zonesAvailable();
-      document.getElementById("layer-signals").checked = state.signals;
-    }
-    if (hasPullbacks()) {
-      document.getElementById("layer-pullback").disabled = !zonesAvailable();
-      document.getElementById("layer-pullback").checked = state.pullback;
-    }
+    // I.4 — las líneas a mano: lo mismo, cada botón con el color de su línea.
+    document.querySelectorAll("#line-buttons button").forEach(function (button) {
+      var kind = button.dataset.kind;
+      var pressed = armedLine() === kind;
+      button.setAttribute("aria-pressed", String(pressed));
+      button.style.color = pressed ? COLORS.surface : lineColor(kind);
+      button.style.background = pressed ? lineColor(kind) : "";
+      button.style.borderColor = pressed ? lineColor(kind) : "";
+    });
+    document.getElementById("line-undo").disabled = !state.lines.length;
+    document.getElementById("line-clear").disabled = !state.lines.length;
+
+    // I.5 — el Fibonacci: un solo botón, y «Quitar último» sirve también para
+    // soltar el 0 que está esperando su segundo clic.
+    document.querySelectorAll("#fib-buttons button").forEach(function (button) {
+      var pressed = armedFib();
+      button.setAttribute("aria-pressed", String(pressed));
+      button.style.color = pressed ? COLORS.surface : fibColor();
+      button.style.background = pressed ? fibColor() : "";
+      button.style.borderColor = pressed ? fibColor() : "";
+    });
+    document.getElementById("fib-undo").disabled =
+      !state.fibs.length && !state.fibDraft;
+    document.getElementById("fib-clear").disabled =
+      !state.fibs.length && !state.fibDraft;
+
     if (hasAccumulations()) {
       document.getElementById("layer-accumulation").checked = state.accumulation;
-    }
-    if (hasAvoided()) {
-      document.getElementById("layer-avoided").checked = state.avoided;
-    }
-    if (hasSteps()) {
-      document.getElementById("layer-steps").checked = state.steps;
     }
     syncAccount();
     seedInput().value = state.seed === null ? "" : String(state.seed);
@@ -4264,13 +3691,7 @@
       ["layer-contacts", "contacts"],
       ["layer-mid", "mid"],
       ["layer-wrong", "wrong"],
-      ["layer-frame", "frame"],
-      ["layer-zones", "zones"],
-      ["layer-signals", "signals"],
-      ["layer-pullback", "pullback"],
-      ["layer-accumulation", "accumulation"],
-      ["layer-avoided", "avoided"],
-      ["layer-steps", "steps"]
+      ["layer-accumulation", "accumulation"]
     ].forEach(function (pair) {
       document.getElementById(pair[0]).addEventListener("change", function (event) {
         state[pair[1]] = event.target.checked;
@@ -4358,7 +3779,13 @@
       // La barra espaciadora sobre un botón lo pulsa: ahí no se roba.
       if (space && (tag === "BUTTON" || !state.replay)) { return; }
       if (escape) {
-        if (state.arming) { state.arming = null; draw(); }
+        // Y el 0 del Fibonacci que espera su segundo clic: a medias no mide nada
+        // y tiene que poder soltarse sin plantar el 100 en cualquier sitio.
+        if (state.arming || state.fibDraft) {
+          state.arming = null;
+          state.fibDraft = null;
+          draw();
+        }
         return;
       }
       if (event.preventDefault) { event.preventDefault(); }
@@ -4371,10 +3798,7 @@
 
   buildChartButtons();
   buildModeButtons();
-  buildZoneLayers();
-  buildSignalLayers();
   buildAnalysisLayers();
-  buildBreakLayers();
   buildNoiseButtons();
   // El nivel de salida se aplica aquí, con el payload ya leído: así lo que no
   // trae la corrida se queda apagado aunque el preset lo encienda.
@@ -4384,6 +3808,8 @@
   buildImpulseLayers();
   buildSimButtons();
   buildRectButtons();
+  buildLineButtons();
+  buildFibButtons();
   buildRatioButtons();
   buildAccountButtons();
   buildRiskModes();
@@ -4391,6 +3817,8 @@
   bindAxisScaling();
   bindSim();
   bindRects();
+  bindLines();
+  bindFibs();
   bindAccount();
   draw();
 })();

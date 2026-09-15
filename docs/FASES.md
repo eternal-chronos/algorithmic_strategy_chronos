@@ -48,26 +48,33 @@ implementada, testeada y con un backtest reproducible.
 | Fase | Nombre | Descripción | Estado | Informe |
 |---|---|---|---|---|
 | 0 | `ema_cross` | Baseline de referencia para validar el motor | Hecha | — |
-| 1 | Impulso dominante | Detección del ID: rotura → limbo → constitución. **Hoy en el Diario, en H4 y en H1**; M15 y M5 se dibujan con los de H1 y H4 detrás | Implementada y corrida sobre 2018–2025 de Dukascopy; **pendiente de auditoría visual del propietario** | `chronos structure detect` |
-| 2.0 | Zonas UL, PUL y APUL | Detección y dibujo de las dos zonas de cada ID —en contra, el PUL si el ID anterior iba igual, y si no el APUL: la zona heredada de aquél, su UL cuando su extremo quedó por detrás del ancla, o la del retroceso tras una constitución abortada—; la rotura sigue siendo por línea | Implementada sobre 2018–2025; **pendiente de auditoría visual del propietario** | `chronos structure zonas` |
-| 2.1 | Rotura por zona | La zona sustituye a la línea como nivel de rotura del ID: el UL a favor, el PUL —o el APUL— en contra | Implementada sobre 2018–2025; **pendiente de auditoría visual del propietario** | `chronos structure rotura-por-zona` |
+| 1 | Impulso dominante | Detección del ID: rotura → limbo → constitución. **Hoy en H4 y en M15**; H1 se dibuja con el de H4 detrás | Implementada y corrida sobre 2018–2025 de Dukascopy; **pendiente de auditoría visual del propietario** | `chronos structure detect` |
+| 2.0 | Zonas UL, PUL y APUL | Detección y dibujo de las dos zonas de cada ID | **Retirada** (borrada del árbol el 2026-09-14) | — |
+| 2.1 | Rotura por zona | La zona sustituye a la línea como nivel de rotura del ID | **Retirada** (borrada del árbol el 2026-09-14) | — |
 | 2.2 | — | *(aparcada: FVG)* | — | — |
 | 3.0 | Señales de entrada | La cascada H4 → H1 con el Diario de veto | **Retirada** (setup 1, borrado del árbol) | — |
 | 3.1 | Entradas | Las operaciones con límite, stop y objetivo | **Retirada** (setup 1, borrado del árbol) | — |
 
-### Estado actual: la estructura sola, con el ID en H1 y M5 dentro
+### Estado actual (2026-09-14): el ID solo, en H4 y en M15
 
-El setup 1 —la cascada H4 → H1, las operaciones y su estadística— se ha
-**borrado del árbol**, no apagado. Lo que corre `chronos structure detect` con el
-fichero del proyecto es la ESTRUCTURA y nada más: el ID del Diario, de H4 y de
-H1 con sus tres zonas —el UL a favor y el PUL o el APUL en contra— y la regla del
-propietario —el UL manda a favor y el ancla en contra—. H1 lleva además el ID de
-H4 detrás como contexto, y M15 y M5 los dos. M5 no lleva nada suyo: está para
-afinar la entrada y el stop a mano. Sin señales de entrada, sin entradas, sin
-stops, sin targets y sin medición de rentabilidad.
+Las zonas —el UL, el PUL y el APUL, la rotura por zona, la caja del 50 % del
+retroceso, la tendencia rápida o lenta y la confluencia— se han **borrado del
+árbol**, igual que el setup 1 antes; y con ellas el RSI 21. Lo que corre
+`chronos structure detect` con el fichero del proyecto es la ESTRUCTURA y nada
+más: el ID de H4 y el de M15, con la rotura por línea de la fase 1 —cierre más
+allá del extremo a favor, del ancla en contra—. M15 lleva además el ID de H4
+detrás como contexto y H1 sólo ése: no tiene detector. El Diario y M5 no se
+dibujan. Sin señales de entrada, sin entradas, sin stops, sin targets y sin
+medición de rentabilidad.
 
-El fichero del proyecto ya no reproduce la línea base de la fase 1 —H1 entra en
-el hash—; la línea base se reconstruye desde él con `phase1_config`.
+Encima del dibujo el propietario marca a mano lo nuevo, que se irá dictando
+sobre el HTML: la caja simulada con la cuenta, tres recuadros (A, B y C), tres
+líneas (H4, H1 y M15) y un Fibonacci de dos clics con los niveles 0, 50, 70,5,
+72, 79 y 100, con el **70,5 en amarillo como gold zone**. La acumulación sigue
+aparcada.
+
+El fichero del proyecto ya no reproduce la línea base de la fase 1 —H4 y M15
+entran en el hash—; la línea base se reconstruye desde él con `phase1_config`.
 
 Lo que sigue es el registro de cómo se llegó hasta aquí.
 

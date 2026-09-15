@@ -69,7 +69,7 @@ footer code { background: var(--surface); border: 1px solid var(--grid); border-
 
   <div class="controls">
     <div class="group">
-      <span title="Atajos de teclado: d = Diario, 4 = H4, 1 = H1, m = M15, 5 = M5.
+      <span title="Atajos de teclado: 4 = H4, 1 = H1, m = M15.
 Se ignoran mientras el foco está en un campo de texto.">Temporalidad</span>
       <div class="buttons" id="tf-buttons"></div>
     </div>
@@ -115,10 +115,9 @@ encuadre automático. También con doble clic sobre el gráfico.">Ajustar</butto
       </div>
     </div>
     <div class="group">
-      <span title="Preset de capas. Limpio deja el ID actual y su marco en esta
-temporalidad, y nada más: fuera quedan limbo, contactos, 50 %, extremo contrario,
-roturas evitadas y escalera. Normal es lo que el explorador enseñaba hasta
-ahora. Todo lo enciende entero.
+      <span title="Preset de capas. Limpio deja el ID actual en esta temporalidad,
+y nada más: fuera quedan limbo, contactos, 50 % y extremo contrario.
+Normal es lo que el explorador enseñaba hasta ahora. Todo lo enciende entero.
 No cambia la detección ni los informes: sólo cuántas cosas se dibujan a la vez.">
         Ruido
       </span>
@@ -129,95 +128,13 @@ No cambia la detección ni los informes: sólo cuántas cosas se dibujan a la ve
       <div style="display:flex; gap:16px; flex-wrap:wrap;">
         <span id="impulse-layers" style="display:flex; gap:16px; flex-wrap:wrap;"></span>
         <label class="toggle"><input type="checkbox" id="layer-limbo"> Limbo</label>
-        <label class="toggle" title="Rombos de constitución, marcadores de rotura y el reloj
-de arena de las constituciones abortadas: la vela contraria que habría dado a luz un ID ya
-roto y que en su lugar rompe y gira la pierna."><input type="checkbox" id="layer-marks"
-          checked> Constituciones y roturas</label>
+        <label class="toggle" title="Rombos de constitución y marcadores de rotura.">
+          <input type="checkbox" id="layer-marks" checked> Constituciones y roturas</label>
         <label class="toggle"><input type="checkbox" id="layer-contacts"> Contactos</label>
         <label class="toggle"><input type="checkbox" id="layer-mid"> Nivel 50 %</label>
-        <label class="toggle" title="El MARCO de cada ID: un recuadro con la vela que lo
-CONSTITUYE y la que lo MATA en las dos verticales, y su ANCLA y su EXTREMO en las dos
-horizontales. Lo lleva CADA ID dibujado; las cajas de las zonas, sólo el que se está
-mirando.
-El globo dice además QUÉ lleva el ID en su lado EN CONTRA: su PUL —el extremo del ID
-inmediatamente anterior, que iba en su mismo sentido—, su APUL en los tres casos en que
-ese extremo no le sirve, o la línea del ancla, que es lo único que tienen los primeros ID
-de cada temporalidad.
-El COLOR lo pone la TEMPORALIDAD —violeta el Diario, naranja H4, azul H1—, no la
-dirección: en el mismo gráfico hay marcos de dos (el de H4 sobre H1, los de H1 y H4 sobre
-M15 y M5) y lo primero es saber de quién es cada uno. La dirección sigue en la línea del ID.
-SE REMARCA mientras el ID vive: el lado derecho llega al presente y el del extremo sube
-o baja cada vez que el extremo se estira (§3.2), así que el recuadro de un ID vigente
-crece con él.
-Obedece el selector de ID visibles.">
-          <input type="checkbox" id="layer-frame" checked> Marco del ID</label>
-        <span id="zone-layers" style="display:flex; gap:16px; flex-wrap:wrap;">
-          <label class="toggle" title="Las ZONAS del ID, dibujadas como recuadros: el UL a favor
-y, en contra, el PUL o el APUL —nunca las dos—.
-  UL  el extremo de ESTE ID: el tramo de mecha de la vela que lo fijó, del borde del
-      cuerpo a la punta. Borde continuo;
-  PUL el lado en contra: la vela que fijó el extremo del ID INMEDIATAMENTE ANTERIOR,
-      por el tramo que MIRA a este ID. Borde a rayas. Si aquel ID iba AL REVÉS es el
-      CUERPO de la vela; si iba en el MISMO SENTIDO —murió por rotura a favor y éste
-      nació más allá— es su MECHA, o sea el UL viejo tal cual. El globo dice cuál;
- APUL el lado en contra de un ID que no tiene PUL, y son TRES casos. HEREDADO: el ID
-      anterior iba AL REVÉS y su extremo es el ANCLA de éste, así que se hereda la zona
-      en contra que llevaba aquél. EXTREMO CONTRARIO: el ID anterior iba al revés pero
-      su extremo quedó POR DETRÁS del ancla —murió por rotura a favor y el giro lo trajo
-      después una constitución abortada—, así que el nivel es el UL de aquel ID. DEL
-      RETROCESO: el ID anterior va en el mismo sentido pero en medio había un ID
-      contrario que iba a nacer y una vela lo mató antes; el nivel se va a buscar donde
-      estaba, corriendo la máquina DENTRO del retroceso de aquel ID. Borde PUNTEADO, y
-      el globo dice cuál de los tres es.
-Con break_by_zone el borde EXTERIOR de la zona en contra es el nivel de rotura en contra
-del ID.
-SÓLO SE DIBUJAN LAS DEL ID QUE SE ESTÁ MIRANDO: el actual, y su anterior con el selector
-de ID visibles en «actual + anterior». Con «Todos» se quedan en el actual —una caja por ID
-en ocho años de historia tapa el precio, que es por lo que dejaron de pintarse—; los demás
-ID siguen enseñando su marco.
-El COLOR lo pone la TEMPORALIDAD, igual que el marco: violeta el Diario, naranja H4, azul
-H1. El tramo ATENUADO va de la vela que define la zona a la constitución del ID: ahí la
-zona todavía no existía.">
-            <input type="checkbox" id="layer-zones" checked> Zonas del ID (UL / PUL / APUL)</label>
-        </span>
-        <span id="signal-layers" style="display:flex; gap:16px; flex-wrap:wrap;">
-          <label class="toggle" title="Las tres señales sobre las zonas de los ID, en Diario y H4:
-pentágono = el precio TOCA la ZONA EN CONTRA (el PUL o el APUL) DESDE FUERA; hexagrama =
-LLEGA al UL DESDE FUERA y lo
-RECHAZA (no pasa de su borde exterior); rombo-estrella = ROMPE el UL (cierra más allá del
-borde exterior).
-Venir de fuera es parte de la señal: mientras el precio no haya salido de la zona —la vela
-que crea el UL cierra dentro de él, y una vela que abre dentro de la zona en contra ya
-estaba ahí—
-tocarla no cuenta y no se marca.
-El toque de la zona en contra NO espera al cierre de la vela grande: la vela del ID dice
-si el precio
-venía de fuera —una señal por visita— y la marca se planta en la vela fina (la más corta
-de la corrida, M5) en que
-entró, así que cae DENTRO de la vela de H4 o del Diario, en el minuto en que tocó.
-Son DIBUJO: se calculan sobre las zonas ya detectadas y no abren ni cierran ninguna
-operación. El proyecto sigue sin entradas, stops ni targets.
-Obedecen el selector de ID visibles: con «ID actual» se ven las del ID vigente y su zona.">
-            <input type="checkbox" id="layer-signals" checked> Señales de zona</label>
-        </span>
+        <label class="toggle"><input type="checkbox" id="layer-wrong">
+          Extremo de color contrario (R-36)</label>
         <span id="analysis-layers" style="display:flex; gap:16px; flex-wrap:wrap;">
-          <span id="pullback-layer">
-            <label class="toggle" title="La CAJA DEL 50 % DEL RETROCESO, la del mentor. NO es el
-nivel 50 % del ID (ése es el punto medio entre ancla y extremo, con su propia casilla): cuando
-un ID se rompe a favor y nace el siguiente en el mismo sentido, el rectángulo va del ANCLA del
-ID nuevo al UL del ID anterior —que es el PUL del nuevo— y su LÍNEA MEDIA es el 50 % que él
-mira. Sólo la llevan los ID con PUL.
-Con ella viaja el PASO de la tendencia, leído de los ID anteriores de la cadena: RÁPIDA si
-ninguno llegó a su 50 % (el retroceso se frena en el PUL y se espera ahí), LENTA si alguno sí
-(se espera el 50 %). Sin ID anteriores con caja no hay paso.
-Los marcadores dicen cuándo la mecha LLEGÓ al PUL (triángulo) y al 50 % (rombo) en la vida
-del ID; en replay se esconden hasta que el reloj los alcanza.
-La franja rayada es la CONFLUENCIA: el 50 % de esta temporalidad cae dentro de la caja del ID
-de la temporalidad de encima (H4 para H1, el Diario para H4), que es lo que el mentor hace a
-mano al «encajar» el 50 % de H1 en el de H4. Los dos 50 % se leen en el globo.
-Sólo se dibuja la del ID que se está mirando, como las zonas. ES DIBUJO: no decide nada.">
-              <input type="checkbox" id="layer-pullback" checked> Caja 50 % del retroceso</label>
-          </span>
           <span id="accumulation-layer">
             <label class="toggle" title="APARCADA: la acumulación está desactivada de momento y
 no se dibuja; la casilla sólo se enseña si el motor la vuelve a traer.
@@ -233,24 +150,6 @@ ES DIBUJO: no decide nada.">
               <input type="checkbox" id="layer-accumulation" disabled> Acumulación (desactivada)</label>
           </span>
         </span>
-        <span id="break-layers" style="display:flex; gap:16px; flex-wrap:wrap;">
-          <span id="avoided-layer">
-            <label class="toggle" title="Fase 2.1: velas que bajo la regla antigua habrían roto el ID
-y con la nueva no. El segmento va del cierre a la línea que cruzó; el círculo con aspa
-marca el cierre. Un ID que se salva por el lado a favor extiende ahí su extremo.">
-              <input type="checkbox" id="layer-avoided"> Roturas evitadas</label>
-          </span>
-          <span id="steps-layer">
-            <label class="toggle" title="Fase 2.1 (§3.2): cuando un ID vigente se salva por el lado
-a favor, su extremo SE ESTIRA hasta el cuerpo de esa vela. La línea del extremo por eso va en
-ESCALERA: cada tramo es el nivel que estaba puesto en ese momento, no el del final. Esta capa
-marca el salto —el tramo vertical punteado sobre la vela que lo estira— y pone un triángulo en
-el nivel nuevo. Apagarla deja la escalera, quita las marcas.">
-              <input type="checkbox" id="layer-steps"> Extremo estirado (escalera)</label>
-          </span>
-        </span>
-        <label class="toggle"><input type="checkbox" id="layer-wrong">
-          Extremo de color contrario (R-36)</label>
       </div>
     </div>
     <div class="group" id="replay-group">
@@ -315,17 +214,18 @@ y el estado lo dice."></div>
       </div>
     </div>
     <div class="group" id="rect-group">
-      <span title="Tres RECUADROS que dibujas TÚ para marcar dónde ves un PUL, un UL o un
-APUL. Cada botón ARMA el suyo y el clic siguiente sobre el gráfico lo PLANTA ahí; después se
-arrastra: los bordes de arriba y abajo mueven el techo y el suelo, los de los lados alargan
-el tramo y por dentro se desplaza entero. Escape desarma sin plantar nada.
-Se pueden marcar VARIOS de cada nombre —el de H4 y el de H1 en el mismo gráfico— y se
+      <span title="Tres RECUADROS —A, B y C— que dibujas TÚ para marcar lo que ves y todavía
+no tiene regla. Cada botón ARMA el suyo y el clic siguiente sobre el gráfico lo PLANTA ahí;
+después se arrastra: los bordes de arriba y abajo mueven el techo y el suelo, los de los
+lados alargan el tramo y por dentro se desplaza entero. Escape desarma sin plantar nada.
+Se pueden marcar VARIOS de cada nombre —el de H4 y el de M15 en el mismo gráfico— y se
 numeran por nombre en el orden en que se plantan.
 Cada nombre lleva SU COLOR y todos van punteados a propósito: ninguna capa del motor usa
-esos colores, así que lo que se vea así lo has puesto tú.
-NO SON ZONAS DEL MOTOR: no las ha detectado nadie, no hay regla de PUL, UL ni APUL en el
-proyecto, no salen de la pantalla y el motor no se entera de que existen. Sirven para mandar
-una captura señalando lo que aún no se detecta.">
+esos colores, así que lo que se vea así lo has puesto tú. Los nombres son letras porque lo
+que significan lo irás dictando tú sobre el dibujo.
+NO SON ZONAS DEL MOTOR: no las ha detectado nadie, no hay regla detrás, no salen de la
+pantalla y el motor no se entera de que existen. Sirven para mandar una captura señalando lo
+que aún no se detecta.">
         Rectángulo
       </span>
       <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
@@ -334,6 +234,61 @@ una captura señalando lo que aún no se detecta.">
           <button type="button" id="rect-undo" title="Quita el último recuadro plantado">
             Quitar último</button>
           <button type="button" id="rect-clear" title="Quita todos los recuadros">
+            Quitar todos</button>
+        </div>
+      </div>
+    </div>
+    <div class="group" id="line-group">
+      <span title="Tres LÍNEAS que trazas TÚ para marcar cosas sobre el gráfico —un nivel, un
+tramo, de dónde a dónde miras— y poder explicarlas. Una por TEMPORALIDAD —H4, H1 y M15—:
+el nombre dice de dónde es el nivel que estás marcando. Cada botón ARMA la suya y el clic
+siguiente sobre el gráfico la PLANTA ahí, HORIZONTAL al precio pulsado; después se arrastra:
+los extremos la mueven y la inclinan, y por dentro se desplaza entera. Escape desarma sin
+plantar nada.
+Se trazan VARIAS de cada temporalidad y se numeran por temporalidad en el orden en que se
+plantan.
+Llevan los mismos tres tonos de la mano que los recuadros —para que una línea no se
+confunda con nada que haya calculado el motor— y van CONTINUAS: punteado es recuadro,
+continuo es línea.
+NO SON CAPA DEL MOTOR: no las ha calculado nadie, no salen de la pantalla y el motor no se
+entera de que existen. Sirven para mandar una captura señalando lo que se quiere explicar.">
+        Línea
+      </span>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <div class="buttons" id="line-buttons"></div>
+        <div class="buttons">
+          <button type="button" id="line-undo" title="Quita la última línea trazada">
+            Quitar última</button>
+          <button type="button" id="line-clear" title="Quita todas las líneas">
+            Quitar todas</button>
+        </div>
+      </div>
+    </div>
+    <div class="group" id="fib-group">
+      <span title="Un FIBONACCI que trazas TÚ para medir un retroceso y poder explicarlo.
+Se traza con DOS CLICS: el botón ARMA, el primer clic sobre el gráfico clava el 0 y el
+segundo el 100, así que la DIRECCIÓN la eliges tú —el 0 arriba si el retroceso es bajista,
+abajo si es alcista— y no hay que darle la vuelta a nada después. Escape suelta el botón, y
+también el 0 que esté esperando su segundo clic.
+Se dibujan sólo los niveles 0, 50, 70,5, 72, 79 y 100, contados SIEMPRE desde el 0 hacia el
+100: por eso el 79 cae pegado al 100. Los dos extremos van con línea entera y los retrocesos
+punteados. El 70,5 es la GOLD ZONE: va en AMARILLO y con su nombre escrito, para verla de un
+vistazo. El tramo se estira un poco más allá del 100: un retroceso se mira hacia adelante.
+Después se arrastra: cada ancla se mueve sola y por dentro se desplaza el conjunto entero.
+Se trazan VARIOS y se numeran en el orden en que se plantan.
+Va en GRIS y no en un color porque no marca nada: es una REGLA con la que medir, y lo que la
+identifica son sus porcentajes escritos al lado.
+NO ES CAPA DEL MOTOR: nadie ha medido ese retroceso, no hay ninguna regla detrás, no sale de
+la pantalla y el motor no se entera de que existe.">
+        Fibonacci
+      </span>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <div class="buttons" id="fib-buttons"></div>
+        <div class="buttons">
+          <button type="button" id="fib-undo" title="Quita el último Fibonacci trazado, o
+suelta el 0 que esté esperando su segundo clic">
+            Quitar último</button>
+          <button type="button" id="fib-clear" title="Quita todos los Fibonacci">
             Quitar todos</button>
         </div>
       </div>
@@ -399,6 +354,15 @@ configuración, el historial y las estadísticas, en texto">Copiar</button>
   <div id="chart"></div>
 
   <div class="legend">
+    <span><i style="background:#52514e"></i><i style="background:#eda100"></i><b>FIBONACCI</b>
+      marcado A MANO («Fibonacci»): la regla con la que el propietario mide un
+      retroceso. Dos clics —el primero clava el 0 y el segundo el 100—, y se dibujan
+      los niveles <b>0, 50, 70,5, 72, 79 y 100</b> contados del 0 al 100: los extremos
+      con línea entera y los retrocesos punteados. El <b>70,5</b> es la <b>GOLD
+      ZONE</b>: va en AMARILLO y con su nombre al lado. El tramo se estira un poco más
+      allá del 100. Los demás van en gris porque no marcan nada: es una REGLA, no un
+      nivel. NO ES CAPA DEL MOTOR: nadie ha medido ese retroceso y no hay ninguna
+      regla detrás</span>
     <span><i style="background:#1baf7a"></i>ID alcista (ancla y extremo)</span>
     <span><i style="background:#d03b3b"></i>ID bajista (ancla y extremo)</span>
     <span>línea continua = impulso de esta temporalidad · punteada = temporalidad superior</span>
@@ -406,73 +370,24 @@ configuración, el historial y las estadísticas, en texto">Copiar</button>
       arranca en la vela que lo define y termina en la constitución</span>
     <span><i class="box" style="background:#898781"></i>Barras en LIMBO (sin sesgo)</span>
     <span>◆ vela contraria que constituye</span>
-    <span>⧗ (reloj de arena) vela contraria que NO constituye: el ID habría nacido
-      ya roto —su cierre estaba más allá del nivel de rotura en contra del ID que
-      iba a crear—, así que rompe y gira la pierna. No cuelga de ningún ID, así
-      que es la única marca que el selector de ID visibles no filtra</span>
     <span>▲ ROTURA_A_FAVOR</span>
     <span>✕ ROTURA_EN_CONTRA</span>
     <span>○ TOQUE_MECHA</span>
     <span>□ ROTURA_FALLIDA</span>
-    <span>línea punteada fina = nivel del 50 % del ID (punto medio entre ancla y extremo)</span>
-    <span><i class="box" style="background:#eda100; opacity:.35"></i><b>CAJA 50 % DEL
-      RETROCESO</b> (ámbar, borde raya-punto): la del mentor, NO el nivel 50 % del ID. Va del
-      ANCLA del ID al PUL —el UL del ID anterior— y la línea ámbar entera es su 50 %. Sólo la
-      llevan los ID con PUL y sólo se dibuja la del ID que se mira. El globo dice el PASO de la
-      tendencia leído de los ID anteriores —<b>rápida</b>: se espera el PUL; <b>lenta</b>: se
-      espera el 50 %—, cuándo la mecha llegó al PUL (▼) y al 50 % (◆), y la pierna frente al
-      retroceso. La franja ámbar RAYADA es la <b>confluencia</b>: este 50 % cae dentro de la
-      caja de la temporalidad de encima (H4 para H1, Diario para H4)</span>
+    <span>línea punteada fina = nivel del 50 % del ID</span>
+    <span>cada gráfico lleva su ID y el de la temporalidad que le toca: <b>H4</b> el suyo,
+      <b>M15</b> el suyo con el de H4 detrás, y <b>H1</b> sólo el de H4, porque H1 no
+      lleva ID propio</span>
     <span><i class="box" style="background:#6f4bd8; opacity:.3"></i><b>ACUMULACIÓN</b> (violeta
       con trama, borde a rayas largas) — <b>DESACTIVADA de momento</b>, no se dibuja hasta que
       se revise cómo se cuentan los toques. Cuando vuelva: desde la vela en que el ID cumple la firma del
       propietario —dos toques arriba y dos abajo sin romper— hasta que muere, el rango del ancla
       al extremo. Dentro vale el rango de extremo a extremo, no la estructura de dentro. Empieza
       en el toque que completa la firma, no en la constitución</span>
-    <span><i style="background:#1baf7a"></i><i style="background:#0b0b0b"></i><i
-      style="background:#d03b3b"></i><b>RSI 21</b> en el panel de abajo, en el Diario, H4 y H1
-      (en M15 y M5 no va: ahí rompe en falso). Leído por ZONAS, como lo lee el propietario:
-      <b>verde</b> por encima de 55 = liquidez alcista; <b>rojo</b> por debajo de 45 = liquidez
-      bajista; <b>tinta</b> dentro de la banda sombreada 45–55, donde el 50 (raya) hace de
-      SOPORTE si el índice bajó desde arriba y de RESISTENCIA si subió desde abajo. El globo y
-      el estado lo dicen vela a vela. Lo calcula y lo lee el motor sobre velas cerradas; las
-      primeras velas no tienen lectura y ahí la línea va cortada (HUECO, no cero). ES DIBUJO:
-      no decide nada. En la auditoría ciega no se enseña</span>
-    <span><i style="background:#6f4bd8"></i>
-      <i style="background:#eb6834"></i>
-      <i style="background:#2a78d6"></i>MARCO del ID: el recuadro que va de la vela que
-      lo constituye a la que lo mata, y de su ancla a su extremo. El COLOR es el de la
-      TEMPORALIDAD —violeta el Diario, naranja H4, azul H1—, no el de la dirección: la
-      dirección se lee en la línea del ID y en el globo. Continuo el del gráfico,
-      punteado el de la temporalidad de encima</span>
-    <span>cada gráfico lleva su marco y el de la temporalidad que le toca: el de
-      <b>H4</b> sobre H1, y los de <b>H1</b> y <b>H4</b> sobre M15 y M5, que no llevan ID
-      propio. El <b>Diario</b> se dibuja SÓLO en su gráfico: en H4 no se ve nada suyo</span>
-    <span><b>M5</b> es la temporalidad más fina del explorador y no lleva nada suyo: ni ID,
-      ni marco, ni zonas. Está para afinar la ENTRADA y el STOP a mano —la caja simulada y
-      los recuadros— con los ID de H1 y H4 detrás como contexto; el motor no calcula nada
-      sobre M5</span>
-    <span>el marco SE REMARCA mientras el ID vive: el lado derecho llega al presente y el
-      del extremo sube o baja cada vez que el extremo se estira (§3.2)</span>
-    <span><i class="box" style="background:#eb6834; opacity:.5"></i>ZONAS del ID, con el
-      color de su TEMPORALIDAD y el trazo de su tipo: <b>UL</b> continuo (el extremo de
-      ESTE ID, tramo de mecha de la vela que lo fijó), <b>PUL</b> a rayas (el lado en
-      contra: la vela del extremo del ID ANTERIOR, por el tramo que mira a este ID —su
-      cuerpo si aquél iba al revés, su MECHA si iba en el mismo sentido—) y <b>APUL</b>
-      punteado (el lado en contra de un ID sin PUL, en sus tres casos: la zona HEREDADA
-      del ID anterior que iba al revés, el UL de ese mismo ID cuando su EXTREMO quedó
-      por detrás del ancla, o la mecha del extremo del último ID interior del RETROCESO
-      anterior). El PUL y el APUL nunca están los dos</span>
-    <span>sólo se dibujan las zonas DEL ID QUE SE ESTÁ MIRANDO —el actual, y su anterior
-      con el selector en «actual + anterior»—: una caja por ID tapaba el precio. Con
-      «Todos» se quedan en el ID actual y los demás siguen enseñando su marco</span>
-    <span>el recuadro ATENUADO de una zona va de la vela que la define a la constitución
-      del ID: durante ese tramo el nivel ya estaba en el precio pero la zona todavía no
-      existía</span>
     <span>✕ grueso = extremo fijado por una vela del color contrario al impulso (R-36),
       sobre la vela que lo fijó</span>
     <span>«Ruido» es un preset de las casillas de Capas: <b>Limpio</b> —el de salida—
-      deja el ID actual y sus zonas en esta temporalidad, y nada más; <b>Normal</b> es lo
+      deja el ID actual en esta temporalidad, y nada más; <b>Normal</b> es lo
       de siempre; <b>Todo</b> lo enciende entero. Tocar una casilla a mano deja el nivel
       «a mano» y ningún botón pulsado. El estado dice qué capas quedan apagadas</span>
     <span>vela hueca a la derecha = vela en formación durante el replay: el motor
@@ -483,8 +398,8 @@ configuración, el historial y las estadísticas, en texto">Copiar</button>
     <span>el zoom hecho a mano (rueda o arrastre) se conserva paso a paso durante el
       replay: la ventana sólo se desplaza para seguir a la última vela. «Ajustar»
       o doble clic devuelven el encuadre automático</span>
-    <span>teclas <b>d</b> (Diario), <b>4</b> (H4), <b>1</b> (H1), <b>m</b> (M15) y <b>5</b>
-      (M5) cambian la temporalidad; se ignoran con el foco en un campo de texto</span>
+    <span>teclas <b>4</b> (H4), <b>1</b> (H1) y <b>m</b> (M15) cambian la temporalidad;
+      se ignoran con el foco en un campo de texto</span>
     <span><i class="box" style="background:#1baf7a; opacity:.22"></i>
       <i class="box" style="background:#d03b3b; opacity:.22"></i>Entrada SIMULADA a mano
       («Simular entrada»): la caja verde es el objetivo y la roja el riesgo, colgando de la
@@ -498,16 +413,27 @@ configuración, el historial y las estadísticas, en texto">Copiar</button>
       del precio. NO ES UNA OPERACIÓN: no hay orden, ni ejecución, ni resultado, y nadie
       comprueba si el precio llegó al objetivo o al stop. Es lo único del gráfico que
       dibuja el propietario y no el motor</span>
-    <span><i class="box" style="background:#c0359a; opacity:.5"></i><b>PUL</b>
-      <i class="box" style="background:#0b8fa8; opacity:.5"></i><b>UL</b>
-      <i class="box" style="background:#7c8b12; opacity:.5"></i><b>APUL</b>: RECUADROS
+    <span><i class="box" style="background:#c0359a; opacity:.5"></i><b>A</b>
+      <i class="box" style="background:#0b8fa8; opacity:.5"></i><b>B</b>
+      <i class="box" style="background:#7c8b12; opacity:.5"></i><b>C</b>: RECUADROS
       marcados A MANO («Rectángulo»): cada nombre con su color, punteados y numerados por
       nombre en el orden en que se plantan. El botón arma, el clic lo planta y después se
       arrastra: bordes de arriba y abajo = techo y suelo, bordes de los lados = el tramo,
       por dentro = moverlo entero. Escape desarma. NO SON ZONAS DEL MOTOR: no las ha
-      detectado nada, no hay regla de PUL, UL ni APUL en el proyecto y no salen de la
-      pantalla. Son, con la caja simulada, lo único del gráfico que dibuja el
-      propietario</span>
+      detectado nada, no hay regla detrás y no salen de la pantalla. Los nombres son letras
+      porque lo que significan lo dicta el propietario sobre el dibujo. Son, con la caja
+      simulada, lo único del gráfico que dibuja el propietario</span>
+    <span><i style="background:#c0359a"></i><b>H4</b>
+      <i style="background:#0b8fa8"></i><b>H1</b>
+      <i style="background:#7c8b12"></i><b>M15</b>: LÍNEAS marcadas A MANO («Línea»): un
+      trazo por temporalidad que planta el propietario para señalar el nivel que quiere
+      explicar; el nombre dice de dónde es y el color sólo sirve para distinguirlas. El
+      botón arma, el clic la planta HORIZONTAL al precio pulsado y después se arrastra: los
+      extremos la mueven y la inclinan, por dentro se desplaza entera. Escape desarma. Van
+      CONTINUAS —los recuadros a mano van punteados— y se numeran por temporalidad. Llevan
+      tonos de la mano y no los del motor. NO SON
+      CAPA DEL MOTOR: no las ha calculado nada, no hay ninguna regla detrás y no salen de
+      la pantalla</span>
     <span>con «Cuenta simulada» cada caja lleva además <b>el dinero que se juega</b>: la
       verde, lo que suma si llega el objetivo; la roja, lo que resta si toca el stop, con el
       capital y el riesgo puestos en la barra. Los botones <b>Ganada · Perdida · BE</b>

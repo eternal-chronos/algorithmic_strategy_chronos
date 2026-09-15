@@ -86,23 +86,3 @@ def test_el_detector_no_sabe_nada_de_la_medicion_de_contactos() -> None:
 
     assert not any("contacts" in name for name in importados)
     assert not any("lateralization" in name for name in importados)
-
-
-def test_nadie_del_motor_lee_las_senales_de_zona() -> None:
-    """Las señales de zona son dibujo: ningún módulo que decida puede importarlas.
-
-    Se comprueba sobre `domain/` y `application/` enteros y no sólo sobre el
-    detector: la promesa hecha al propietario es que encenderlas no mueve un
-    impulso, ni una zona, ni una rotura.
-    """
-    permitido = {
-        SRC / "domain" / "structure" / "zone_signals.py",
-        SRC / "application" / "structure" / "zone_signals.py",
-    }
-    for layer in ("domain", "application"):
-        for path in _modules(layer):
-            if path in permitido:
-                continue
-            assert not any("zone_signals" in name for name in _imports(path)), (
-                f"{path.relative_to(SRC)} importa las señales de zona"
-            )

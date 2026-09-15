@@ -46,33 +46,23 @@ chronos data dukascopy -g m1 --from 2018-01-01 --to 2025-12-31
 # Verificar la zona horaria del histórico. Obligatorio antes de calcular nada.
 chronos structure verify-tz --config config/impulse.yaml
 
-# La ESTRUCTURA: el ID del Diario, de H4 y de H1 con sus zonas UL, PUL y APUL,
-# con la regla del propietario (el UL manda a favor y el ancla en contra). M15 y
-# M5 se dibujan con los ID de H1 y H4 detrás. Es lo que hay en `now/`.
+# La ESTRUCTURA: el ID —rotura por línea— en H4 y en M15; H1 se dibuja con el
+# ID de H4 detrás. Es lo que hay en `now/`.
 # El explorador embebe los tres LEG_START_MODE de R-36 para poder alternarlos
 # sobre las mismas velas; `--sin-modos-r36` se ahorra las dos corridas extra.
 chronos structure detect --config config/impulse.yaml
 
 # Evidencia de las comprobaciones: esperado y obtenido, lado a lado.
 chronos structure evidencia --config config/impulse.yaml
-
-# Zonas UL y OB de cada impulso (fase 2.0). Sólo detección y dibujo.
-chronos structure zonas --config config/impulse.yaml
-
-# Fase 2.1: la zona decide la rotura del ID en vez de la línea. Ejecuta el módulo
-# entero con las dos reglas sobre las mismas velas y las compara. Antes de nada
-# verifica que con `break_by_zone: false` sale la línea base exacta; si no sale,
-# para y avisa.
-chronos structure rotura-por-zona --config config/impulse.yaml
 ```
 
-El módulo de estructura detecta **el impulso dominante del Diario, de H4 y de
-H1** con sus tres zonas —el UL a favor y el PUL o el APUL en contra— y **no
-emite señales de entrada**: sin entradas, sin stops, sin targets y sin medición
-de rentabilidad. M15 y M5 no llevan detector —no se les marca ID— y sobre ellas
-se dibujan los de H1 y H4 como contexto. Ver
-[`docs/MODULO_1_IMPULSO_DOMINANTE.md`](docs/MODULO_1_IMPULSO_DOMINANTE.md) y
-[`docs/MODULO_2_ZONAS.md`](docs/MODULO_2_ZONAS.md).
+El módulo de estructura detecta **el impulso dominante de H4 y de M15** —rotura
+por línea: ancla y extremo— y **no emite señales de entrada**: sin zonas, sin
+RSI, sin entradas, sin stops, sin targets y sin medición de rentabilidad. H1 no
+lleva detector —no se le marca ID— y sobre ella se dibuja el de H4 como
+contexto. Encima, el propietario marca a mano lo que va dictando: recuadros,
+líneas y un Fibonacci con los niveles 0 / 50 / 70,5 (gold zone) / 72 / 79 / 100.
+Ver [`docs/MODULO_1_IMPULSO_DOMINANTE.md`](docs/MODULO_1_IMPULSO_DOMINANTE.md).
 
 Cada corrida de estructura deja una carpeta en `reports/` con `reporte.txt`,
 `explorador.html`, los CSV de impulsos, roturas, contactos y estado, y
